@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Test Client</title>
+    <script type="text/javascript" src="https://www.unpkg.com/mithril@2.2.2/mithril.min.js"></script>
+</head>
+
+<body>
+    <div class="main"></div>
+    <div id="nostr-bridge"></div>
+    <script>
+    /*{
+         sk: 'ad32d0ee487cce8598d65fd7e256ad8039be2ac516d76fc49640c06eb629df82', 
+         pk: '4029bd101bb4a8e0ac37c620ce67bb6b9bffad15b2cd05b6953c741af8f06c78', 
+         nsec: 'nsec145edpmjg0n8gtxxktlt7y44dsqumu2k9zmtkl3ykgrqxad3fm7pqskvzya', 
+         npub: 'npub1gq5m6yqmkj5wptphccsvueamdwdlltg4ktxstd54836p478sd3uq7v3kdn'
+    }*/
+    let nostrpass = {
+        "app-npub": "npub1gq5m6yqmkj5wptphccsvueamdwdlltg4ktxstd54836p478sd3uq7v3kdn",
+        "app-key": "1234"
+    };
+    (() => {
+        let bridgeUrl = `http://localhost:5002/bridge/?app=${nostrpass["app-npub"]}&key=${nostrpass["app-key"]}&redirect=${window.location.href}`;
+        window.ifrm = document.createElement("iframe");
+        ifrm.setAttribute("src", bridgeUrl);
+        ifrm.name = "nostr-bridge"
+        ifrm.style.width = "0px";
+        ifrm.style.height = "0px";
+        document.getElementById('nostr-bridge').appendChild(ifrm);
+        window.button = document.createElement("button");
+        button.innerText = "Connect with Nostrpass";
+        button.onclick = p => {
+            ifrm.contentWindow.postMessage({ method: 'check-login', nostrpass: nostrpass }, "*");
+        };
+        ifrm.contentWindow.postMessage({ method: 'check-login', nostrpass: nostrpass }, "*")
+
+
+        document.getElementById('nostr-bridge').appendChild(button);
+    })()
+    </script>
+    <script defer type="text/javascript" src="http://localhost:5002/test-client/test.js"></script>
+     <script defer type="text/javascript" src="http://localhost:5002/test-client/nostrpass-client.js"></script>
+</body>
+
+</html>

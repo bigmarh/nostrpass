@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Nostrpass</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <!-- update the version number as needed -->
+    <script defer src="/__/firebase/9.18.0/firebase-app-compat.js"></script>
+    <!-- include only the Firebase features as you need -->
+    <script defer src="/__/firebase/9.18.0/firebase-auth-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-database-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-firestore-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-functions-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-messaging-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-storage-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-analytics-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-remote-config-compat.js"></script>
+    <script defer src="/__/firebase/9.18.0/firebase-performance-compat.js"></script>
+    <!-- 
+      initialize the SDK after all desired features are loaded, set useEmulator to false
+      to avoid connecting the SDK to running emulators.
+    -->
+    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
+    <script type="text/javascript" src="https://www.unpkg.com/mithril@2.2.2/mithril.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="/style/bundle.css">
+    <style type="text/css">button {
+    border-radius:10px;
+    margin:20px;
+    padding:7px 15px;
+    border:none;
+    font-size:20px;
+}
+</style>
+</head>
+
+<body>
+    <div class="main-content"></div>
+</body>
+<script defer type="text/javascript">
+document.addEventListener('DOMContentLoaded', function() {
+    var firebaseConfig = {
+        apiKey: "AIzaSyAzRLcJL_ZFUqyOO8w_IkemJYrcsejuMHE",
+        authDomain: "nostrpass.firebaseapp.com",
+        projectId: "nostrpass",
+        storageBucket: "nostrpass.appspot.com",
+        messagingSenderId: "1017564555670",
+        appId: "1:1017564555670:web:1639cb0063521242ead5b7",
+        measurementId: "G-ELQLLECE95"
+    };
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    delete localStorage['auth-token'];
+    delete localStorage['currentUser'];
+    delete localStorage['_userData'];
+
+    var Auth = {
+        email: "",
+        password: "",
+        errors: [],
+        valid: true,
+        setemail: function(value) {
+            Auth.email = value
+        },
+        setPassword: function(value) {
+            Auth.password = value
+        },
+        canSubmit: function() {
+            return Auth.email !== "" && Auth.password !== ""
+        },
+        login: function(e) {
+            e.preventDefault();
+            if (!validateEmail(Auth.email)) { Auth.valid = false; return; }
+            Auth.valid = true;
+            var urlParams = new URLSearchParams(window.location.search);
+            var actionCodeSettings = {
+                url: 'http://' + window.location.hostname + (location.port ? ":" + location.port : "") + '/dash',
+                handleCodeInApp: true
+            }
+            firebase.auth().sendSignInLinkToEmail(Auth.email, actionCodeSettings)
+                .then(function() {
+                    // The link was successfully sent. Inform the user.
+                    // Save the email locally so you don't need to ask the user for it again
+                    // if they open the link on the same device.
+                    window.localStorage.setItem('emailForSignIn', Auth.email);
+                    Auth.sentLink = true;
+                    m.redraw();
+
+                })
+                .catch(function(error) {
+                    // Some error occurred, you can inspect the code: error.code
+                    console.log(error);
+                });
+        },
+        request: function(reqObj) {
+            reqObj.url = config.apiUrl + reqObj.endpoint;
+            return m.request(reqObj);
+        },
+    }
+
+
+
+    var validateEmail = function(email) {
+        var re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+        return re.test(String(email).toLowerCase());
+    }
+    firebase.auth().onAuthStateChanged(function(user) {
+        if (user)
+            window.location = "/dash";
+        else
+            m.mount(document.body, Login);
+    })
+
+    var Login = {
+        oninit: function() {
+            console.log(window.location.search);
+            var urlParams = new URLSearchParams(window.location.search);
+            Login.PN = urlParams.get('pn');
+
+        },
+        view: function() {
+            /*    if (!Login.PN)
+                    return m("h5.text-center", 'Text the word "account" to (619) 268-5268')*/
+            return m('.container', { style: { "max-width": "400px", marginTop: "90px" } }, [
+
+                Auth.sentLink ? m('.flex-container.flex-v-center.flex-fill', {
+                    oncreate: function() {
+
+                    }
+                }, m('.text-center', [
+                    m('h3', 'Magic Link Sent!'),
+                    m('p', "The Magic Link has been sent to your email."), m("p", "Please go there and click it to login."),
+                    //m('img.animated.zoomIn.faster', { src: "", style: { width: "120px", margin: "auto" } }),
+
+                ])) :
+                m("form.row", { onsubmit: Auth.login }, [
+
+                    /*   m("img[src='/img/DistroLogo.svg'][width='150']", { style: { textAlign: "center", margin: " 10px auto" } })*/
+                    ,
+                    m(".col-12",
+                        m('.errors', Auth.errors.map(err => m('.error#formErrors.text-red', err))),
+                        m('p.text-center', "Enter email to get your magic link"),
+                        m(".form-label-group", [
+                            m("input.form-control[autofocus=''][id='email'][name='email'][placeholder='email'][type='text']", { oninput: function(e) { Auth.email = e.target.value }, value: Auth.email }),
+
+                           /* m(".er", { class: Auth.valid ? "invalid-feedback" : "error" },
+                                "Valid email is required."
+
+                            )*/
+                        ])
+                    ),
+
+                    m(".col",
+                        m("button.text-center.btn.btn-block.btn-success", { onclick: Auth.login }, "Get Magic Link")
+                    )
+                ])
+
+            ])
+        }
+    }
+})
+</script>
+
+</html>

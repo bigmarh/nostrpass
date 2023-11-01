@@ -1,0 +1,32 @@
+<!-- Firebase App is always required and must be first -->
+<script src="https://www.gstatic.com/firebasejs/5.5.0/firebase-app.js"></script>
+<!-- Add additional services that you want to use -->
+<script src="https://www.gstatic.com/firebasejs/5.5.0/firebase-auth.js"></script>
+<script src="https://unpkg.com/mithril/mithril.js"></script>
+<script type="text/javascript">
+var firebaseConfig = {
+    apiKey: "AIzaSyCXCudiP2khvpirnwysAYvDWPDgyAYuoW0",
+    authDomain: "sunjoined-distributor.firebaseapp.com",
+    databaseURL: "https://sunjoined-distributor.firebaseio.com",
+    projectId: "sunjoined-distributor",
+    storageBucket: "sunjoined-distributor.appspot.com",
+    messagingSenderId: "604104750405",
+    appId: "1:604104750405:web:2ef5402df992e7cb"
+};
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+</script>
+<script>
+delete localStorage['auth-token'];
+delete localStorage['currentUser'];
+delete localStorage['_userData'];
+console.log("Peace")
+firebase.auth().signOut().then(function() {
+
+
+    // Sign-out successful.
+    window.location = "/dash/login.html";
+}).catch(function(error) {
+    // An error happened.
+});
+</script>

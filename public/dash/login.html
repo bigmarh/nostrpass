@@ -1,0 +1,186 @@
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Sunjoined Distro Dash</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.1/css/bootstrap.min.css" integrity="sha384-WskhaSGFgHYWDcbwN70/dfYBj47jz9qbsMId/iRN3ewGhXQFZCSftd1LZCfmhktB" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,700" rel="stylesheet">
+        <link rel="icon" type="image/png" href="https://member.sunjoined.com/img/DistroLogo.png" />
+
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" type="text/css" href="/css/style.css">
+    <style type="text/css">
+    .form-control {
+
+        display: block;
+        width: 100%;
+        padding: .375rem .75rem;
+        font-size: 1.4rem;
+        line-height: 1.5;
+        color: #495057;
+        background-color: #fff;
+        background-clip: padding-box;
+        border: 1px solid #ced4da;
+        border-radius: .25rem;
+        transition: border-color .15s ease-in-out, box-shadow .15s ease-in-out;
+        height: 72px;
+    }
+    </style>
+    <meta property="fb:app_id" content="216076798476059" />
+    <meta property="og:site_name" content="Sunjoined on Wefunder">
+    </meta>
+    <meta property="og:title" content="Join over 400 CBD and hemp distributors in the fastest growing Hemp Network in the world.">
+    </meta>
+    </meta>
+    <meta property="og:url" content="https://member.sunjoined.com">
+    </meta>
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://d2qbf73089ujv4.cloudfront.net/uploads/company/cover_photo_version4/40639/standard_cropped_53313392_391446534737141_210685355802755072_o.jpg">
+    </meta>
+    <meta property="og:image:width" content="1225" />
+    <meta property="og:image:height" content="450" />
+    <meta property="og:description" content=" Sunjoined is a network of trusted hemp farmers. We plant, grow, harvest, process, sell, and&amp;nbsp;distribute&amp;nbsp;hemp materials and products. ">
+    </meta>
+    <meta property="description" content=" Sunjoined is a network of trusted hemp farmers. We plant, grow, harvest, process, sell, and&amp;nbsp;distribute&amp;nbsp;hemp materials and products. ">
+    </meta>
+    <!-- TWITTER -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@wefunder">
+    <meta name="twitter:creator" content="@wefunder">
+    <meta name="twitter:title" content="Invest in Sunjoined on Wefunder">
+    <meta name="twitter:description" content="Nationwide network for the vertical hemp industry in 7 states and growing">
+    <meta name="twitter:image" content="https://d2qbf73089ujv4.cloudfront.net/uploads/company/cover_photo_version4/40639/standard_cropped_53313392_391446534737141_210685355802755072_o.jpg">
+</head>
+
+<body>
+    <!-- Firebase App is always required and must be first -->
+    <script src="https://www.gstatic.com/firebasejs/5.5.0/firebase-app.js"></script>
+    <!-- Add additional services that you want to use -->
+    <script src="https://www.gstatic.com/firebasejs/5.5.0/firebase-auth.js"></script>
+    <script src="https://unpkg.com/mithril/mithril.js"></script>
+    <script type="text/javascript">
+    var firebaseConfig = {
+        apiKey: "AIzaSyCXCudiP2khvpirnwysAYvDWPDgyAYuoW0",
+        authDomain: "sunjoined-distributor.firebaseapp.com",
+        databaseURL: "https://sunjoined-distributor.firebaseio.com",
+        projectId: "sunjoined-distributor",
+        storageBucket: "sunjoined-distributor.appspot.com",
+        messagingSenderId: "604104750405",
+        appId: "1:604104750405:web:2ef5402df992e7cb"
+    };
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    delete localStorage['auth-token'];
+    delete localStorage['currentUser'];
+    delete localStorage['_userData'];
+
+    var Auth = {
+        email: "",
+        password: "",
+        errors: [],
+        valid: true,
+        setemail: function(value) {
+            Auth.email = value
+        },
+        setPassword: function(value) {
+            Auth.password = value
+        },
+        canSubmit: function() {
+            return Auth.email !== "" && Auth.password !== ""
+        },
+        login: function(e) {
+            e.preventDefault();
+            if (!validateEmail(Auth.email)) { Auth.valid = false; return; }
+            Auth.valid = true;
+            var urlParams = new URLSearchParams(window.location.search);
+            let PN = urlParams.get('pn');
+            var actionCodeSettings = {
+                url: 'http://' + window.location.hostname + (location.port ? ":" + location.port : "") + '/dash?pn=' + PN,
+                handleCodeInApp: true
+            }
+            firebase.auth().sendSignInLinkToEmail(Auth.email, actionCodeSettings)
+                .then(function() {
+                    // The link was successfully sent. Inform the user.
+                    // Save the email locally so you don't need to ask the user for it again
+                    // if they open the link on the same device.
+                    window.localStorage.setItem('emailForSignIn', Auth.email);
+                    Auth.sentLink = true;
+                    m.redraw();
+
+                })
+                .catch(function(error) {
+                    // Some error occurred, you can inspect the code: error.code
+                    console.log(error);
+                });
+        },
+        request: function(reqObj) {
+            reqObj.url = config.apiUrl + reqObj.endpoint;
+            return m.request(reqObj);
+        },
+    }
+
+
+
+    var validateEmail = function(email) {
+        var re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+        return re.test(String(email).toLowerCase());
+    }
+    firebase.auth().onAuthStateChanged(function(user) {
+        if (user)
+            window.location = "/dash";
+        else
+            m.mount(document.body, Login);
+    })
+
+    var Login = {
+        oninit: function() {
+            console.log(window.location.search);
+            var urlParams = new URLSearchParams(window.location.search);
+            Login.PN = urlParams.get('pn');
+
+        },
+        view: function() {
+            /*    if (!Login.PN)
+                    return m("h5.text-center", 'Text the word "account" to (619) 268-5268')*/
+            return m('.container', { style: { "max-width": "400px", marginTop: "90px" } }, [
+
+                Auth.sentLink ? m('.flex-container.flex-v-center.flex-fill', {
+                    oncreate: function() {
+
+                    }
+                }, m('.text-center', [
+                    m('h3', 'Magic Link Sent!'),
+                    m('p', "The Magic Link has been sent to your email."), m("p", "Please go there and click it to login."),
+                    m('img.animated.zoomIn.faster', { src: "../img/DistroLogo.svg", style: { width: "120px", margin: "auto" } }),
+
+                ])) :
+                m("form.row", { onsubmit: Auth.login }, [
+
+                    m("img[src='/img/DistroLogo.svg'][width='150']", { style: { textAlign: "center", margin: " 10px auto" } }),
+                    m(".col-12",
+                        m('.errors', Auth.errors.map(err => m('.error#formErrors.text-red', err))),
+                        m('p.text-center', "Enter email to get your magic link"),
+                        m(".form-label-group", [
+                            m("input.form-control[autofocus=''][id='email'][name='email'][placeholder='email'][type='text']", { oninput: function(e) { Auth.email = e.target.value }, value: Auth.email }),
+
+                            m(".er", { class: Auth.valid ? "invalid-feedback" : "error" },
+                                "Valid email is required."
+
+                            )
+                        ])
+                    ),
+
+                    m(".col",
+                        m("button.text-center.btn.btn-block.btn-success", { onclick: Auth.login }, "Get Magic Link")
+                    )
+                ])
+
+            ])
+        }
+    }
+    </script>
+    <script src="https://js.stripe.com/v3/"></script>
+</body>
+
+</html>

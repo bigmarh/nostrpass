@@ -1,0 +1,280 @@
+@use 'sass:math';
+$stop-sign-width:125px;
+$checked-color: #34b93d;
+$unchecked-color: #000;
+$checkbox-height: 100px;
+$background-color:#667788;
+$font-color:#efefef;
+$duration: .4s;
+
+.stop-sign,
+.stop-sign * {
+    box-sizing: border-box;
+    -moz-box-sizing: border-box;
+    -webkit-box-sizing: border-box;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-kerning: auto;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    -o-user-select: none;
+    user-select: none;
+    cursor: default;
+    text-align: center;
+    width: 125px;
+    margin: auto;
+
+}
+
+.stop-sign div {
+    position: relative;
+    overflow: hidden;
+    margin: 0 auto;
+    width: $stop-sign-width;
+    height: $stop-sign-width;
+    text-align: center;
+    color: white;
+    font-weight: 900;
+    font-family: 'Roboto', 'Open Sans Condensed', 'Open Sans', 'Source Sans Pro', Roboto, 'HelveticaNeue-Light', 'Helvetica Neue Light', 'Helvetica Neue', 'Myriad Pro', 'Segoe UI', Myriad, Helvetica, 'Lucida Grande', 'DejaVu Sans Condensed', 'Liberation Sans', 'Nimbus Sans L', Tahoma, Geneva, Arial, sans-serif;
+}
+
+/* Background */
+.stop-sign div,
+.stop-sign div>div>div,
+.stop-sign div>div>div>div>div {
+    background: transparent;
+}
+
+.stop-sign div>div,
+.stop-sign div>div>div>div>div>div {
+    background: red;
+}
+
+.stop-sign div>div>div>div {
+    background: white;
+}
+
+/* Rotation and Sizing */
+.stop-sign div>div,
+.stop-sign div>div>div>div,
+.stop-sign div>div>div>div>div>div {
+    -webkit-transform: rotate(45deg);
+    -moz-transform: rotate(45deg);
+    transform: rotate(45deg);
+    top: 0;
+}
+
+.stop-sign div>div>div {
+    width: $stop-sign-width - 20px;
+    height: $stop-sign-width - 20px;
+    top: 10px;
+}
+
+.stop-sign div>div>div>div>div {
+    width: $stop-sign-width - 30px;
+    height: $stop-sign-width - 30px;
+    top: 5px;
+}
+
+.stop-sign>span {
+    position: absolute;
+    font-size: 19pt;
+    bottom: 37%;
+    left: 0px;
+}
+
+
+/*Checkbox*/
+
+.wallet-loader {
+    align-items: center;
+    justify-content: center;
+    display: flex;
+    width: 100%;
+    position: absolute;
+    top: 0px;
+    bottom: 0px;
+    background: white;
+    z-index: 5;
+    flex-direction: column;
+}
+
+/* Checkmark style starts */
+
+@-moz-keyframes dothabottomcheck {
+    0% {
+        height: 0;
+    }
+
+    100% {
+        height: math.div($checkbox-height,2);
+    }
+}
+
+@-webkit-keyframes dothabottomcheck {
+    0% {
+        height: 0;
+    }
+
+    100% {
+        height: math.div($checkbox-height,2);
+    }
+}
+
+@keyframes dothabottomcheck {
+    0% {
+        height: 0;
+    }
+
+    100% {
+        height: math.div($checkbox-height,2);
+    }
+}
+
+@keyframes dothatopcheck {
+    0% {
+        height: 0;
+    }
+
+    50% {
+        height: 0;
+    }
+
+    100% {
+        height: $checkbox-height * 1.2;
+    }
+}
+
+@-webkit-keyframes dothatopcheck {
+    0% {
+        height: 0;
+    }
+
+    50% {
+        height: 0;
+    }
+
+    100% {
+        height: $checkbox-height * 1.2;
+    }
+}
+
+@-moz-keyframes dothatopcheck {
+    0% {
+        height: 0;
+    }
+
+    50% {
+        height: 0;
+    }
+
+    100% {
+        height: $checkbox-height * 1.2;
+    }
+}
+
+@keyframes bounce {
+    from {
+        transform: translate3d(0, 0, 0);
+    }
+
+    to {
+        transform: translate3d(0, 10px, 0);
+    }
+}
+
+
+input[type=checkbox] {
+    display: none;
+}
+
+.check-box {
+    height: $checkbox-height;
+    width: $checkbox-height;
+    background-color: transparent;
+    border: $checkbox-height * .1 solid $unchecked-color;
+    border-radius: 5px;
+    position: relative;
+    display: inline-block;
+    -moz-box-sizing: border-box;
+    -webkit-box-sizing: border-box;
+    box-sizing: border-box;
+    -moz-transition: border-color ease math.div($duration,2);
+    -o-transition: border-color ease math.div($duration,2);
+    -webkit-transition: border-color ease math.div($duration,2);
+    transition: border-color ease math.div($duration,2);
+    cursor: pointer;
+    animation: bounce 0.5s;
+    animation-direction: alternate;
+    animation-iteration-count: infinite;
+
+
+
+    &::before,
+    &::after {
+        -moz-box-sizing: border-box;
+        -webkit-box-sizing: border-box;
+        box-sizing: border-box;
+        position: absolute;
+        height: 0;
+        width: $checkbox-height * .2;
+        background-color: $checked-color;
+        display: inline-block;
+        -moz-transform-origin: left top;
+        -ms-transform-origin: left top;
+        -o-transform-origin: left top;
+        -webkit-transform-origin: left top;
+        transform-origin: left top;
+        border-radius: 5px;
+        content: ' ';
+        -webkit-transition: opacity ease .5;
+        -moz-transition: opacity ease .5;
+        transition: opacity ease .5;
+    }
+
+    &::before {
+        top: $checkbox-height * .72;
+        left: $checkbox-height * .41;
+        -moz-transform: rotate(-135deg);
+        -ms-transform: rotate(-135deg);
+        -o-transform: rotate(-135deg);
+        -webkit-transform: rotate(-135deg);
+        transform: rotate(-135deg);
+    }
+
+    &::after {
+        top: $checkbox-height * .37;
+        left: $checkbox-height * .05;
+        -moz-transform: rotate(-45deg);
+        -ms-transform: rotate(-45deg);
+        -o-transform: rotate(-45deg);
+        -webkit-transform: rotate(-45deg);
+        transform: rotate(-45deg);
+    }
+}
+
+input[type=checkbox]:checked+.check-box,
+.check-box.checked {
+    border-color: $checked-color;
+    border-radius: 50%;
+    transform: none;
+    animation-play-state: paused;
+
+    &::after {
+        height: $checkbox-height * .5;
+        -moz-animation: dothabottomcheck math.div($duration,2) ease 0s forwards;
+        -o-animation: dothabottomcheck math.div($duration,2) ease 0s forwards;
+        -webkit-animation: dothabottomcheck math.div($duration,2) ease 0s forwards;
+        animation: dothabottomcheck math.div($duration,2) ease 0s forwards;
+    }
+
+    &::before {
+        height: $checkbox-height * 1.2;
+        -moz-animation: dothatopcheck $duration ease 0s forwards;
+        -o-animation: dothatopcheck $duration ease 0s forwards;
+        -webkit-animation: dothatopcheck $duration ease 0s forwards;
+        animation: dothatopcheck $duration ease 0s forwards;
+    }
+}

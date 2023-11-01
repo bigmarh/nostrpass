@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Sunjoined Distro</title>
+    <meta property="og:title" content="One Love Cooperative: Membership Pricing" />
+    <meta property="og:url" content="https://onelovecoop.com" />
+    <meta property="og:image" content="https://onelovecoop.com/og.jpg" />
+    <meta name="description" content="One Love is a cooperative organization that is focused on providing financial opportunities through collaborative economics.">
+    <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.1/css/bootstrap.min.css" integrity="sha384-WskhaSGFgHYWDcbwN70/dfYBj47jz9qbsMId/iRN3ewGhXQFZCSftd1LZCfmhktB" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,700" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- Custom styles for this template -->
+    <link rel="stylesheet" type="text/css" href="css/floating-form.css">
+    <link rel="stylesheet" type="text/css" href="css/three-dots.min.css">
+    <link rel="stylesheet" type="text/css" href="css/style.css">
+    <script src="https://unpkg.com/mithril/mithril.js"></script>
+    <link href="https://fonts.googleapis.com/css?family=Herr+Von+Muellerhoff" rel="stylesheet">
+</head>
+
+<body>
+    <div class="header">
+        <div class="container">
+            <div class="row">
+                <div class="col text-right">
+                    <a href="/" class="p-2"><i class="material-icons">close</i></a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="container">
+        <div class="pt-3 pb-5 text-center">
+            <h4><b>Membership Purchase Form</b></h4>
+            <p>
+                Thank you for your consideration to join the One Love Coop. Please select the <b>Tier</b> that best suits your needs. Each payment is an <u>annual</u> payment, meaning it occurs only once a year.
+            </p>
+        </div>
+        <div class="row">
+            <div class="col-md-5 order-md-2 mb-4">
+                <h3 class="text-center">Select your Tier</h3>
+                <ul class="list-group tier-list mb-3" id="tiers">
+                </ul>
+            </div>
+            <div class="col-md-7 order-md-1">
+                <form class="needs-validation" id="billingForm" action="javascript:void(0)" novalidate>
+                    <h4 class="mb-3">Member Info</h4>
+                   
+                    <hr class="d-block d-sm-none">
+                    <!--     <div class="mb-3">
+                        <div class="btn btn-google btn-block btn-lg mb-3">
+                            Sign up with Google
+                        </div>
+                    </div>
+                    <p class="text-center mb-2">OR</p> -->
+                    <div class="form-label-group">
+                        <input type="email" id="inputEmail" name="email" class="form-control" placeholder="Email address" required="" autofocus="">
+                        <label for="inputEmail">Email address</label>
+                        <div class="invalid-feedback">
+                            Please enter a valid email address for membership updates.
+                        </div>
+                      
+                    </div>
+                    <hr class="my-4">
+                    <h4 class="mb-3">Billing address</h4>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <div class="form-label-group">
+                                <input type="text" class="form-control" name="firstName" id="firstName" placeholder="First name" autofocus="" value="" required>
+                                <label for="firstName">First name</label>
+                                <div class="invalid-feedback">
+                                    Valid first name is required.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <div class="form-label-group">
+                                <input type="text" class="form-control" name="lastName" id="lastName" placeholder="Last name" value="" required>
+                                <label for="lastName">Last name</label>
+                                <div class="invalid-feedback">
+                                    Valid last name is required.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-label-group">
+                            <input type="text" class="form-control" name="address" id="address" placeholder="Address" required>
+                            <label for="address">Address</label>
+                            <div class="invalid-feedback">
+                                Please enter your billing address.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-5">
+                        <div class="form-label-group">
+                            <input type="text" class="form-control" name="address2" id="address2" placeholder="Apartment or suite">
+                            <label for="address2">Address 2 <span class="text-muted">(Optional)</span></label>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="country"><b>Country</b></label>
+                            <select class="custom-select d-block w-100" id="country" name="country" required></select>
+                            <div class="invalid-feedback">
+                                Please select a valid country.
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="state"><b>State</b></label>
+                            <select class="custom-select d-block w-100" name="state" id="state" required> </select>
+                            <div class="invalid-feedback">
+                                Please provide a valid state.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <div class="form-label-group">
+                                <input type="text" class="form-control" id="zip" name="zip" placeholder="Zip" required>
+                                <label for="zip">Zip</label>
+                                <div class="invalid-feedback">
+                                    Zip code required.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="mb-4">
+                    <h4 class="mb-3">Payment Info</h4>
+                    <div id="stripeElement"></div>
+                    <hr class="my-4">
+                    <p id="formErrors" role="alert"></p>
+                    <h4 class="pt-2">Membership Agreement</h4>
+                    <iframe src="membershipAgreement.html#(Your|Name Here)|Uifdj0a2313241iu43n24iu12n34fdifnu2390j09jdsa9ijf9jfw9q8jf9q9823nun14n9213u4hn9|14538384" width="100%"></iframe>
+                    <div class="form-group mb-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="true" name="membershipAgreement" id="invalidCheck" required>
+                            <label class="form-check-label" for="invalidCheck">
+                                I agree to the terms and conditions of the membership agreement.
+                                <br>
+                                <small>* Agreement is signed using a one-time generated private key</small>
+                            </label>
+                            <div class="invalid-feedback">
+                                You must agree before submitting.
+                            </div>
+                        </div>
+                    </div>
+                    <div id="submit-button"></div>
+                </form>
+            </div>
+        </div>
+        <footer class="my-5 pt-5 text-muted text-center text-small">
+            <ul class="list-inline">
+                <li class="list-inline-item"><a href="privacy.html">Privacy</a></li>
+                <li class="list-inline-item"><a href="terms.html">Terms</a></li>
+            </ul>
+        </footer>
+    </div>
+    <script src="/js/countries.js"></script>
+    <!-- Bootstrap core JavaScript
+    ================================================== -->
+    <!-- Placed at the end of the document so the pages load faster -->
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+    <script>
+    window.jQuery || document.write('<script src="../../assets/js/vendor/jquery-slim.min.js"><\/script>')
+    </script>
+    <script>
+    populateCountries("country", "state");
+    document.getElementById("country").selectedIndex = 239;
+    populateStates("country", "state");
+    // Example starter JavaScript for disabling form submissions if there are invalid fields
+
+
+    (function() {
+        'use strict';
+
+        window.addEventListener('load', function() {
+            // Fetch all the forms we want to apply custom Bootstrap validation styles to
+            var forms = document.getElementsByClassName('needs-validation');
+
+            // Loop over them and prevent submission
+            var validation = Array.prototype.filter.call(forms, function(form) {
+                form.addEventListener('submit', function(event) {
+                    if (form.checkValidity() === false) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }
+                    form.classList.add('was-validated');
+                }, false);
+            });
+        }, false);
+    })();
+    </script>
+    <script src="https://js.stripe.com/v3/"></script>
+    <script type="text/javascript" src="app.js"></script>
+</body>
+
+</html>
