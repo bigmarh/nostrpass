@@ -37,9 +37,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let state = {};
     let bridgeModule = {
         oninit: () => {
-
-
-
             window.addEventListener(
                 "message",
                 (event) => {
@@ -93,6 +90,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         },
         view: () => {
+
+            console.log(state.currentApp);
             return !state.currentApp ? " " : m('.app', [
 
                 m('.appName', [
@@ -132,7 +131,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
 
-
+    console.log(bridgeModule)
 
     m.mount(document.querySelector('.content'), bridgeModule);
 })
