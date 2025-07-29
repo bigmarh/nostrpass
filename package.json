@@ -1,0 +1,21 @@
+{
+  "name": "nostrpass",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\""
+  },
+  "devDependencies": {
+    "@turbo/gen": "^2.0.14",
+    "prettier": "^3.2.5",
+    "turbo": "^2.0.14",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@9.1.0",
+  "dependencies": {
+    "nostr-tools": "^2.15.2"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "globalEnv": [
+    "NODE_ENV"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "env": [
+        "APP_NAME",
+        "APP_URL",
+        "NOSTR_*",
+        "DATABASE_URL",
+        "API_SECRET_KEY",
+        "ENABLE_*",
+        "CORS_ORIGIN",
+        "SESSION_SECRET",
+        "NEXT_PUBLIC_*"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "env": [
+        "APP_NAME",
+        "APP_URL",
+        "NOSTR_*",
+        "DATABASE_URL",
+        "API_SECRET_KEY",
+        "ENABLE_*",
+        "CORS_ORIGIN",
+        "SESSION_SECRET",
+        "NEXT_PUBLIC_*"
+      ]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "type-check": {
+      "dependsOn": ["^type-check"]
+    }
+  }
+}
