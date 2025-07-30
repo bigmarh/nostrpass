@@ -92,20 +92,23 @@ export const Login: Component = () => {
         
         console.log('✅ Signup successful!');
     };
-    const changeBackground = () =>  {
-        // change the background image to on fot eh egg backgrounds based on the tiem of day, we have sunrise, noon, sunset and night with each background having a different index
+    // Reactive signal for background that updates based on time
+    const getTimeBasedBackground = () => {
         const timeOfDay = new Date().getHours();
-        console.log(timeOfDay);
+        console.log('Current hour:', timeOfDay);
         if (timeOfDay < 6 || timeOfDay > 21) {
-            return 3;
+            return 3; // Night
         } else if (timeOfDay < 15) {
-            return 1;
+            return 1; // Morning/Day
         } else if (timeOfDay < 18) {
-            return 2;
+            return 2; // Evening
         } else {
-            return 0;
+            return 0; // Default
         }
     };
+
+    const [backgroundIndex, setBackgroundIndex] = createSignal(getTimeBasedBackground());
+    const changeBackground = () => backgroundIndex();
 
     const handleLogin = async () => {
         // Validation
@@ -136,7 +139,7 @@ export const Login: Component = () => {
     return (
         <div class="flex justify-center md:h-screen items-center">
             <div class="flex w-auto min-w-[600px] max-w-2xl h-auto bg-white black-outline flex-col md:flex-row rounded-lg ">
-                <div class={`flex flex-col items-center bg-[url('/egg_background_3.png')]   rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center p-4 md:w-48 md:min-w-[12rem]`}>
+                <div style={`background-image: url('egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center  rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center p-4 md:w-48 md:min-w-[12rem]`}>
                     <div class="w-32 h-32 ">
                         <img class="w-full h-full " src="/logo.svg" alt="NostrPass Logo" />
                     </div>
