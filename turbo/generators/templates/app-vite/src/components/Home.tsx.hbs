@@ -1,0 +1,54 @@
+import { Component, createSignal } from 'solid-js';
+import { useParams } from '@solidjs/router';
+import { useMessenger } from '../providers';
+import type { JSX } from 'solid-js';
+
+export const Home: Component = () => {
+  const [count, setCount] = createSignal(0);
+  const params = useParams();
+  const { send } = useMessenger();
+
+  const handleAction = () => {
+    send('ACTION', { count: count() });
+    setCount(count() + 1);
+  };
+
+  return (
+    <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div class="max-w-md mx-auto bg-white rounded-xl shadow-lg p-6 mt-8">
+        <div class="text-center mb-8">
+          <h1 class="text-3xl font-bold text-gray-900">{{name}}</h1>
+          <p class="text-gray-600 mt-2">Built with SolidJS + Vite + Tailwind</p>
+        </div>
+        
+        {params.app && (
+          <div class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p class="text-sm text-blue-600 mb-1">Current App:</p>
+            <p class="font-mono text-blue-800">{params.app}</p>
+          </div>
+        )}
+        
+        <div class="space-y-4">
+          <div class="text-center">
+            <button 
+              onClick={handleAction}
+              class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-6 rounded-lg transition-colors"
+            >
+              Count: {count()}
+            </button>
+          </div>
+          
+          <div class="bg-gray-50 rounded-lg p-4">
+            <p class="text-sm text-gray-600">
+              Edit <code class="bg-gray-200 px-1 rounded">src/components/Home.tsx</code> to get started
+            </p>
+          </div>
+        </div>
+        
+        <p class="text-xs text-gray-400 text-center mt-6">
+          Powered by NostrPass
+        </p>
+      </div>
+    </div>
+  );
+}; 

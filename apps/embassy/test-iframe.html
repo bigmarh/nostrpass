@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embassy Iframe Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background: #7c3aed;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #6d28d9;
+        }
+        .log {
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+        .error { color: #dc2626; }
+        .success { color: #059669; }
+        .info { color: #2563eb; }
+    </style>
+</head>
+<body>
+    <h1>NostrPass Embassy - Iframe Test</h1>
+    
+    <div class="test-section" style="background: #fef3c7; border-left: 4px solid #f59e0b;">
+        <h3 style="margin-top: 0; color: #92400e;">🔍 Debug Mode</h3>
+        <p>Add <code>?embassy-debug</code> to the URL to see the iframe visually during development.</p>
+        <p>Example: <code>http://localhost:5173/test-iframe.html?embassy-debug</code></p>
+    </div>
+    
+    <div class="test-section">
+        <h2>Phase 2: Iframe Management Test</h2>
+        <p>Test the iframe creation, show/hide functionality</p>
+        
+        <div>
+            <button onclick="testCheckReady()">Check Ready Status</button>
+            <button onclick="testShowIframe()">Show Iframe</button>
+            <button onclick="testHideIframe()">Hide Iframe</button>
+            <button onclick="testToggleDebug()">Toggle Debug Mode</button>
+        </div>
+        
+        <div id="log" class="log"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Nostr Methods Test (Phase 3 Preview)</h2>
+        <p>These will fail until message passing is implemented</p>
+        
+        <div>
+            <button onclick="testGetPublicKey()">Test getPublicKey()</button>
+            <button onclick="testSignEvent()">Test signEvent()</button>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import the embassy
+        import { initNostrPass } from './src/embassy-minimal.js';
+        
+        let debugMode = true;
+        
+        // Initialize with debug mode
+        window.embassy = initNostrPass({
+            debug: debugMode,
+            appName: 'Embassy Test App',
+            appDomain: 'localhost',
+            theme: 'light'
+        });
+        
+        // Logging helper
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            
+            // Also log to console
+            console.log(`[Embassy Test] ${message}`);
+        }
+        
+        // Test functions
+        window.testCheckReady = async function() {
+            try {
+                log('Checking iframe ready status...', 'info');
+                
+                // Check if iframe exists in DOM
+                const iframe = document.getElementById('nostrpass-vault-iframe');
+                log(`Iframe in DOM: ${!!iframe}`, iframe ? 'success' : 'error');
+                
+                if (iframe) {
+                    log(`Iframe src: ${iframe.src}`, 'info');
+                    log(`Iframe classes: ${iframe.className}`, 'info');
+                    log(`Iframe position: top=${getComputedStyle(iframe).top}, left=${getComputedStyle(iframe).left}`, 'info');
+                    log(`Iframe visibility: ${getComputedStyle(iframe).visibility}`, 'info');
+                    log(`WASM/Crypto ready: Should work immediately (not throttled)`, 'success');
+                }
+                
+                // Note: isReady() is not exposed in the public API yet
+                log('Note: Embassy should create iframe immediately on load', 'info');
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+            }
+        };
+        
+        window.testShowIframe = function() {
+            log('Attempting to show iframe...', 'info');
+            // Trigger a method that shows the iframe
+            window.nostr.getPublicKey().catch(() => {});
+            log('Show command sent', 'success');
+        };
+        
+        window.testHideIframe = function() {
+            log('Hide functionality not exposed in public API yet', 'info');
+            // TODO: Add hide to public API if needed
+        };
+        
+        window.testToggleDebug = function() {
+            debugMode = !debugMode;
+            log(`Debug mode: ${debugMode}`, 'info');
+            
+            // Reinitialize with new debug setting
+            window.embassy = initNostrPass({
+                debug: debugMode,
+                appName: 'Embassy Test App',
+                appDomain: 'localhost',
+                theme: 'light'
+            });
+        };
+        
+        window.testGetPublicKey = async function() {
+            try {
+                log('Testing getPublicKey()...', 'info');
+                const pubkey = await window.nostr.getPublicKey();
+                log(`Public key: ${pubkey}`, 'success');
+            } catch (error) {
+                log(`Expected error: ${error.message}`, 'error');
+            }
+        };
+        
+        window.testSignEvent = async function() {
+            try {
+                log('Testing signEvent()...', 'info');
+                const event = {
+                    kind: 1,
+                    content: 'Test message',
+                    tags: [],
+                    created_at: Math.floor(Date.now() / 1000)
+                };
+                const signed = await window.nostr.signEvent(event);
+                log(`Signed event: ${JSON.stringify(signed)}`, 'success');
+            } catch (error) {
+                log(`Expected error: ${error.message}`, 'error');
+            }
+        };
+        
+        // Initial log
+        log('Embassy test page loaded', 'success');
+        log('window.nostr available: ' + (!!window.nostr), 'info');
+    </script>
+</body>
+</html>

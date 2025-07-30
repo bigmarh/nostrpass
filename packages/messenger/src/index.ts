@@ -159,9 +159,15 @@ export class SecureMessenger {
 
     try {
       const result = await handler(message.data);
-      await this.sendResponse(message, result);
+      // Only send response if this isn't already a response message
+      if (!message.type.endsWith('_RESPONSE')) {
+        await this.sendResponse(message, result);
+      }
     } catch (error) {
-      await this.sendResponse(message, null, error instanceof Error ? error.message : String(error));
+      // Only send error response if this isn't already a response message
+      if (!message.type.endsWith('_RESPONSE')) {
+        await this.sendResponse(message, null, error instanceof Error ? error.message : String(error));
+      }
     }
   }
 
@@ -288,9 +294,15 @@ export class SecureServerMessenger extends SecureMessenger {
         () => route.handler(message.data, context)
       );
 
-      await this.sendResponse(message, result);
+      // Only send response if this isn't already a response message
+      if (!message.type.endsWith('_RESPONSE')) {
+        await this.sendResponse(message, result);
+      }
     } catch (error) {
-      await this.sendResponse(message, null, error instanceof Error ? error.message : String(error));
+      // Only send error response if this isn't already a response message
+      if (!message.type.endsWith('_RESPONSE')) {
+        await this.sendResponse(message, null, error instanceof Error ? error.message : String(error));
+      }
     }
   }
 

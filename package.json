@@ -6,7 +6,8 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "build:wasm": "pnpm --filter @nostrpass/vault build:wasm"
   },
   "devDependencies": {
     "@turbo/gen": "^2.0.14",
@@ -14,7 +15,7 @@
     "turbo": "^2.0.14",
     "typescript": "^5.3.3"
   },
-  "packageManager": "pnpm@9.1.0",
+  "packageManager": "pnpm@10.13.1",
   "dependencies": {
     "nostr-tools": "^2.15.2"
   }

@@ -1,0 +1,12 @@
+import { ParentComponent } from 'solid-js';
+import { MessengerProvider } from './MessengerProvider';
+
+export const AppProviders: ParentComponent = (props) => {
+  return (
+    <MessengerProvider>
+      {props.children}
+    </MessengerProvider>
+  );
+};
+
+export { useMessenger } from './MessengerProvider'; 

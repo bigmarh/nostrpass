@@ -82,6 +82,69 @@ export default function generator(plop: PlopTypes.NodePlopAPI): void {
         });
       }
       
+      if (data?.framework === 'vite') {
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/package.json',
+          templateFile: 'templates/app-vite/package.json.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/tsconfig.json',
+          templateFile: 'templates/app-vite/tsconfig.json.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/tsconfig.node.json',
+          templateFile: 'templates/app-vite/tsconfig.node.json.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/vite.config.ts',
+          templateFile: 'templates/app-vite/vite.config.ts.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/index.html',
+          templateFile: 'templates/app-vite/index.html.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/.gitignore',
+          templateFile: 'templates/app-vite/.gitignore.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/src/main.tsx',
+          templateFile: 'templates/app-vite/src/main.tsx.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/src/App.tsx',
+          templateFile: 'templates/app-vite/src/App.tsx.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/src/App.css',
+          templateFile: 'templates/app-vite/src/App.css.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/src/index.css',
+          templateFile: 'templates/app-vite/src/index.css.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/src/vite-env.d.ts',
+          templateFile: 'templates/app-vite/src/vite-env.d.ts.hbs',
+        });
+        actions.push({
+          type: 'add',
+          path: 'apps/{{name}}/src/env.ts',
+          templateFile: 'templates/app-vite/src/env.ts.hbs',
+        });
+      }
+      
       return actions;
     },
   });

@@ -1,0 +1,24 @@
+import type { Component } from 'solid-js';
+import { Router, Route } from '@solidjs/router';
+import { AppProviders } from './providers';
+import { Home } from './components/Home';
+import './index.css';
+
+const AppContent: Component = () => {
+  return (
+    <Router>
+      <Route path="/:app" component={Home} />
+      <Route path="/" component={Home} />
+    </Router>   
+  );
+};
+
+const App: Component = () => {
+  return (
+    <AppProviders>
+      <AppContent />
+    </AppProviders>
+  );
+};
+
+export default App;

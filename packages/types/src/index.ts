@@ -4,4 +4,6 @@
  */
 
 export * from './nostrTypes';
+export * from './userTypes';
+export * from './identityTypes';
 
