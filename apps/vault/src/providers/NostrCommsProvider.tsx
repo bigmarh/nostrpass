@@ -22,7 +22,8 @@ interface NostrCommsContextType {
   // Username system
   usernameRegistry: () => UsernameRegistry | null;
   checkUsernameAvailable: (username: string) => Promise<boolean>;
-  registerUsername: (username: string, userPubkey: string, originatedBy?: string) => Promise<boolean>;
+  registerUsername: (username: string, userPubkey: string, originatedBy?: string, userRelays?: string[]) => Promise<boolean>;
+  getRegistrationInfo: (username: string) => Promise<any>;
   
   // General Nostr operations
   publishEvent: (event: NostrEvent) => Promise<string[]>;
@@ -115,12 +116,20 @@ export const NostrCommsProvider: ParentComponent = (props) => {
     return registry.isUsernameAvailable(username);
   };
 
-  const registerUsername = async (username: string, userPubkey: string, originatedBy?: string): Promise<boolean> => {
+  const registerUsername = async (username: string, userPubkey: string, originatedBy?: string, userRelays?: string[]): Promise<boolean> => {
     const registry = usernameRegistry();
     if (!registry) {
       throw new Error('Username registry not initialized');
     }
-    return registry.registerUsername(username, userPubkey, originatedBy || '');
+    return registry.registerUsername(username, userPubkey, originatedBy || '', userRelays);
+  };
+
+  const getRegistrationInfo = async (username: string): Promise<any> => {
+    const registry = usernameRegistry();
+    if (!registry) {
+      throw new Error('Username registry not initialized');
+    }
+    return registry.getRegistrationInfo(username);
   };
 
   const publishEvent = async (event: NostrEvent): Promise<string[]> => {
@@ -153,6 +162,7 @@ export const NostrCommsProvider: ParentComponent = (props) => {
     usernameRegistry,
     checkUsernameAvailable,
     registerUsername,
+    getRegistrationInfo,
     publishEvent,
     queryEvents,
     generateUserKeys
@@ -167,26 +177,13 @@ export const NostrCommsProvider: ParentComponent = (props) => {
 
 // Environment-aware username registry that adds environment tags
 class EnvironmentAwareUsernameRegistry extends UsernameRegistry {
-  private environment: string;
-
-  constructor(registrationKeys: KeyPair, relays: string[], environment: string) {
+  constructor(registrationKeys: KeyPair, relays: string[], _environment: string) {
     super(registrationKeys, relays);
-    this.environment = environment;
+    // Environment is already handled in the parent class via getEnvironment()
+    // The _environment parameter is kept for compatibility but not used
   }
 
-  // Override the parent methods to add environment filtering
-  async isUsernameAvailable(username: string): Promise<boolean> {
-    // We'll call the parent method but need to add environment filtering
-    // For now, let's add a simple prefix to isolate environments
-    const envUsername = `${this.environment}_${username}`;
-    return super.isUsernameAvailable(envUsername);
-  }
-
-  async registerUsername(username: string, userPubkey: string, originatedBy?: string): Promise<boolean> {
-    // Add environment prefix to isolate registrations
-    const envUsername = `${this.environment}_${username}`;
-    return super.registerUsername(envUsername, userPubkey, originatedBy || '');
-  }
+  // No need to override methods - the parent class already includes environment in the 'd' tag
 }
 
 export const useNostrComms = () => {

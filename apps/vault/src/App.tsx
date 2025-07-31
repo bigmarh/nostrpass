@@ -2,16 +2,16 @@ import type { Component } from 'solid-js';
 import { AppProviders } from './providers';
 import './index.css';
 import { Router, Route } from '@solidjs/router';
-import { Login } from './components/Login';
-import { Signup } from './components/Signup';
+import { Login, Dashboard, AuthGuard, LoginGuard, VaultGuard, PinUnlock } from './components';
 
 const AppContent: Component = () => {
   return (
     <Router>
-      <Route path="/" component={Signup} />
-      <Route path="/:app" component={Login} />
-      <Route path="/:app/settings" component={() => <div>Settings</div>} />
-      <Route path="/:app/keys" component={() => <div>Key Management</div>} /> 
+      <Route path="/:app" component={() => <LoginGuard><Login /></LoginGuard>} />
+      <Route path="/:app/unlock" component={() => <AuthGuard><PinUnlock /></AuthGuard>} />
+      <Route path="/:app/dashboard" component={() => <VaultGuard><Dashboard /></VaultGuard>} />
+      <Route path="/:app/settings" component={() => <VaultGuard><div>Settings</div></VaultGuard>} />
+      <Route path="/:app/keys" component={() => <VaultGuard><div>Key Management</div></VaultGuard>} /> 
     </Router>   
   );
 };

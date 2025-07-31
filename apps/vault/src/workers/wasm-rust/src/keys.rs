@@ -1,12 +1,10 @@
 use crate::error::CryptoError;
 use rand::rngs::OsRng;
 use k256::{
-    elliptic_curve::sec1::ToEncodedPoint,
     schnorr::SigningKey,
     SecretKey,
 };
 use zeroize::Zeroize;
-use sha2::Sha256;
 use bip39::Mnemonic;
 use bip32::{XPrv, DerivationPath, Prefix};
 use std::str::FromStr;
@@ -48,11 +46,13 @@ impl SecurePrivateKey {
 /// Generate a new Nostr keypair
 pub fn generate_keypair() -> Result<(String, String), CryptoError> {
     let secret_key = SecretKey::random(&mut OsRng);
-    let public_key = secret_key.public_key();
+    let signing_key = SigningKey::from(secret_key.clone());
+    let verifying_key = signing_key.verifying_key();
     
     let private_key = hex::encode(secret_key.to_bytes());
-    let public_key_point = public_key.to_encoded_point(true);
-    let public_key_hex = hex::encode(public_key_point.as_bytes());
+    // Get x-only public key (32 bytes) for Nostr
+    let public_key_bytes = verifying_key.to_bytes();
+    let public_key_hex = hex::encode(public_key_bytes);
     
     Ok((private_key, public_key_hex))
 }
@@ -69,10 +69,12 @@ pub fn get_public_key(private_key_hex: &str) -> Result<String, CryptoError> {
     let secret_key = SecretKey::from_bytes(&key_bytes.into())
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
     
-    let public_key = secret_key.public_key();
-    let public_key_point = public_key.to_encoded_point(true);
+    let signing_key = SigningKey::from(secret_key);
+    let verifying_key = signing_key.verifying_key();
     
-    Ok(hex::encode(public_key_point.as_bytes()))
+    // Get x-only public key (32 bytes) for Nostr
+    let public_key_bytes = verifying_key.to_bytes();
+    Ok(hex::encode(public_key_bytes))
 }
 
 /// Validate a private key
@@ -153,10 +155,15 @@ pub fn derive_keypair_from_xpriv(xpriv_str: &str, index: u32) -> Result<(String,
     let private_key_bytes = private_key.to_bytes();
     let private_key_hex = hex::encode(&private_key_bytes);
     
-    // Get the public key
-    let public_key = child.public_key();
-    let public_key_bytes = public_key.to_bytes();
-    let public_key_hex = hex::encode(&public_key_bytes);
+    // Convert to Nostr-compatible x-only public key
+    let secret_key = SecretKey::from_bytes(&private_key_bytes)
+        .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+    let signing_key = SigningKey::from(secret_key);
+    let verifying_key = signing_key.verifying_key();
+    
+    // Get x-only public key (32 bytes) for Nostr
+    let public_key_bytes = verifying_key.to_bytes();
+    let public_key_hex = hex::encode(public_key_bytes);
     
     Ok((private_key_hex, public_key_hex))
 }
@@ -174,7 +181,7 @@ mod tests {
     fn test_generate_keypair() {
         let (private_key, public_key) = generate_keypair().unwrap();
         assert_eq!(private_key.len(), 64); // 32 bytes hex
-        assert_eq!(public_key.len(), 66); // 33 bytes hex
+        assert_eq!(public_key.len(), 64); // 32 bytes hex (x-only for Nostr)
     }
     
     #[test]

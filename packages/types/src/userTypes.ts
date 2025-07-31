@@ -205,7 +205,7 @@ export interface User {
   publicKey: string;
   
   /** Private key (available only after unlock) */
-  privateKey?: string;
+  privateKey: string;
   
   /** User profile data */
   profile: UserProfile;
@@ -227,6 +227,9 @@ export interface User {
     /** Whether biometric was used */
     biometricUsed?: boolean;
   };
+  
+  /** Vault PIN hash for verification (only present if vault has PIN) */
+  vaultPinHash?: string;
 }
 
 /**

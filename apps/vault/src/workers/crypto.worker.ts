@@ -156,7 +156,17 @@ const handlers = {
 
   deriveKey: async (params: DeriveKeyParams): Promise<DeriveKeyResult> => {
     const crypto = await ensureWasmReady();
-    return crypto.deriveKeyFromPassword(params.password, params.salt);
+    const result = crypto.deriveKeyFromPassword(params.password, params.salt);
+    
+    // Handle if result is a Map (from serde_wasm_bindgen)
+    if (result instanceof Map) {
+      return {
+        key: result.get('key'),
+        salt: result.get('salt'),
+      };
+    }
+    
+    return result;
   },
 
   encryptData: async (params: EncryptDataParams): Promise<string> => {
@@ -176,7 +186,18 @@ const handlers = {
 
   deriveKeypairFromXpriv: async (params: DeriveKeypairFromXprivParams): Promise<DeriveKeypairFromXprivResult> => {
     const crypto = await ensureWasmReady();
-    return crypto.deriveKeypairFromXpriv(params.xpriv, params.index);
+    const result = crypto.deriveKeypairFromXpriv(params.xpriv, params.index);
+    
+    // Handle if result is a Map (from serde_wasm_bindgen)
+    if (result instanceof Map) {
+      return {
+        path: result.get('path'),
+        privateKey: result.get('privateKey'),
+        publicKey: result.get('publicKey'),
+      };
+    }
+    
+    return result;
   },
 };
 

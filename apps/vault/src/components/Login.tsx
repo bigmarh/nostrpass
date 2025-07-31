@@ -1,6 +1,7 @@
 import { Component, createSignal, Show } from 'solid-js';
-import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady } from '../providers';
-import { useParams } from '@solidjs/router';
+import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady, useEnvironment } from '../providers';
+import { useParams, useNavigate } from '@solidjs/router';
+import PinSetup from './PinSetup';
 
 function desanitizeDomain(domain: string) {
     return domain.replace(/_/g, '.');
@@ -13,12 +14,17 @@ export const Login: Component = () => {
     const [confirmPassword, setConfirmPassword] = createSignal('');
     const [isLoading, setIsLoading] = createSignal(false);
     const [error, setError] = createSignal('');
+    const [loadingStatus, setLoadingStatus] = createSignal('');
+    const [showPinSetup, setShowPinSetup] = createSignal(false);
+    const [tempAccountData, setTempAccountData] = createSignal<{username: string, password: string, publicKey: string} | null>(null);
 
     const params = useParams();
+    const navigate = useNavigate();
     const { send } = useMessenger();
-    const { login, createAccount } = useAuth();
-    const { checkUsernameAvailable, registerUsername, isConnected } = useNostrComms();
+    const { login, createAccount, isVaultUnlocked } = useAuth();
+    const { checkUsernameAvailable, registerUsername, isConnected, getRegistrationInfo } = useNostrComms();
     const cryptoReady = useCryptoWorkerReady();
+    const { getRelays } = useEnvironment();
 
     const handleHideVault = () => {
         send('HIDE_VAULT');
@@ -39,6 +45,7 @@ export const Login: Component = () => {
             setError(error instanceof Error ? error.message : 'An error occurred');
         } finally {
             setIsLoading(false);
+            setLoadingStatus('');
         }
     };
 
@@ -70,33 +77,36 @@ export const Login: Component = () => {
             throw new Error('Not connected to Nostr relays. Please try again.');
         }
 
+        // Normalize username
+        const normalizedUsername = username().trim();
+        
         // Check username availability
-        console.log('🔍 Checking username availability:', username());
-        const isAvailable = await checkUsernameAvailable(username());
+        setLoadingStatus('Checking username availability...');
+        console.log('🔍 Checking username availability:', normalizedUsername);
+        const isAvailable = await checkUsernameAvailable(normalizedUsername);
+        console.log('🔍 Username availability result:', isAvailable);
         
         if (!isAvailable) {
+            console.log('❌ Username is already taken!');
             throw new Error('Username is already taken');
         }
 
-        // Create account with password-based encryption
-        console.log('🔑 Creating account...');
-        await createAccount(username(), password());
+        // Store temporary account data for PIN setup
+        setTempAccountData({
+            username: normalizedUsername,
+            password: password(),
+            publicKey: '' // Will be filled after account creation
+        });
         
-        // Register username on Nostr
-        console.log('📝 Registering username on Nostr...');
-        const auth = useAuth();
-        const user = auth.user();
-        if (user) {
-            await registerUsername(username(), user.publicKey);
-        }
-        
-        console.log('✅ Signup successful!');
+        // Show PIN setup modal first
+        setShowPinSetup(true);
+        setIsLoading(false);
     };
     // Reactive signal for background that updates based on time
     const getTimeBasedBackground = () => {
         const timeOfDay = new Date().getHours();
         console.log('Current hour:', timeOfDay);
-        if (timeOfDay < 6 || timeOfDay > 21) {
+        if (timeOfDay < 6 || timeOfDay > 20) {
             return 3; // Night
         } else if (timeOfDay < 15) {
             return 1; // Morning/Day
@@ -107,7 +117,7 @@ export const Login: Component = () => {
         }
     };
 
-    const [backgroundIndex, setBackgroundIndex] = createSignal(getTimeBasedBackground());
+    const [backgroundIndex] = createSignal(getTimeBasedBackground());
     const changeBackground = () => backgroundIndex();
 
     const handleLogin = async () => {
@@ -120,12 +130,39 @@ export const Login: Component = () => {
         if (!cryptoReady()) {
             throw new Error('Crypto module is not ready. Please refresh and try again.');
         }
+
+        // Check if Nostr is connected
+        if (!isConnected()) {
+            throw new Error('Not connected to Nostr relays. Please try again.');
+        }
+        
+        // First check if username exists on Nostr
+        setLoadingStatus('Checking username...');
+        console.log('🔍 Checking if username exists on Nostr:', username());
+        
+        const registrationInfo = await getRegistrationInfo(username().trim());
+        console.log('📝 Registration info:', registrationInfo);
+        
+        if (!registrationInfo) {
+            throw new Error('Username not found. Please check your username or create a new account.');
+        }
         
         // Login with password
+        setLoadingStatus('Verifying credentials...');
         console.log('🔑 Login attempt:', { username: username() });
-        await login(password(), username());
+        await login(password(), username(), registrationInfo);
         
+        setLoadingStatus('Loading your vault...');
         console.log('✅ Login successful!');
+        
+        // Check if vault needs PIN unlock
+        if (!isVaultUnlocked()) {
+            // Navigate to PIN unlock
+            navigate(`/${params.app}/unlock`);
+        } else {
+            // Navigate to dashboard after successful login
+            navigate(`/${params.app}/dashboard`);
+        }
     };
 
     const toggleMode = () => {
@@ -134,6 +171,47 @@ export const Login: Component = () => {
         setPassword('');
         setConfirmPassword('');
         setError('');
+        setLoadingStatus('');
+    };
+
+    const handlePinSet = async (pin: string) => {
+        const accountData = tempAccountData();
+        if (!accountData) return;
+        
+        try {
+            setIsLoading(true);
+            setShowPinSetup(false);
+            setLoadingStatus('Securing your vault with PIN...');
+            
+            // Create account with PIN encryption
+            console.log('🔑 Creating account with PIN...');
+            const { publicKey } = await createAccount(accountData.username, accountData.password, pin);
+            
+            // Register username on Nostr with user's relay preferences
+            setLoadingStatus('Registering username on Nostr network...');
+            console.log('📝 Registering username on Nostr...');
+            console.log('Public key:', publicKey);
+            console.log('Username:', accountData.username);
+            
+            // Get the user's relays from environment config
+            const userRelays = getRelays();
+            console.log('User relays for registration:', userRelays);
+            
+            await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
+            
+            setLoadingStatus('Finalizing registration...');
+            
+            console.log('✅ Signup successful!');
+            
+            // Navigate to dashboard after successful signup
+            navigate(`/${params.app}/dashboard`);
+        } catch (error) {
+            setError(error instanceof Error ? error.message : 'An error occurred');
+            setShowPinSetup(false);
+        } finally {
+            setIsLoading(false);
+            setLoadingStatus('');
+        }
     };
 
     return (
@@ -157,39 +235,54 @@ export const Login: Component = () => {
                             )}
                         </div>
                         
-                        <form onSubmit={handleSubmit} class="flex w-full flex-col gap-3">
-                            <input 
-                                type="text" 
-                                placeholder="Username" 
-                                value={username()}
-                                onInput={(e) => setUsername(e.currentTarget.value)}
-                                class="w-full border-2 border-gray-300 p-2 rounded-md focus:border-blue-500 focus:outline-none" 
-                                autocomplete="username"
-                                required
-                                disabled={isLoading()}
-                            />
-                            <input 
-                                type="password" 
-                                placeholder="Password" 
-                                value={password()}
-                                onInput={(e) => setPassword(e.currentTarget.value)}
-                                class="w-full p-2 rounded-md border-2 border-gray-300 focus:border-blue-500 focus:outline-none" 
-                                autocomplete={isSignup() ? "new-password" : "current-password"}
-                                required
-                                disabled={isLoading()}
-                            />
-                            
-                            <Show when={isSignup()}>
+                        <form onSubmit={handleSubmit} class={`flex w-full flex-col gap-3 ${isSignup() ? 'signup-form' : 'login-form'}`} method="post">
+                            <div class="w-full">
+                                <label for="username" class="sr-only">Username</label>
                                 <input 
-                                    type="password" 
-                                    placeholder="Confirm Password" 
-                                    value={confirmPassword()}
-                                    onInput={(e) => setConfirmPassword(e.currentTarget.value)}
-                                    class="w-full p-2 rounded-md border-2 border-gray-300 focus:border-blue-500 focus:outline-none" 
-                                    autocomplete="new-password"
+                                    type="text" 
+                                    name="username"
+                                    id="username"
+                                    placeholder="Username" 
+                                    value={username()}
+                                    onInput={(e) => setUsername(e.currentTarget.value)}
+                                    class="w-full border-2 border-gray-300 p-2 rounded-md focus:border-blue-500 focus:outline-none" 
+                                    autocomplete="username"
                                     required
                                     disabled={isLoading()}
                                 />
+                            </div>
+                            <div class="w-full">
+                                <label for="password" class="sr-only">Password</label>
+                                <input 
+                                    type="password" 
+                                    name={isSignup() ? "new-password" : "current-password"}
+                                    id={isSignup() ? "new-password" : "current-password"}
+                                    placeholder="Password" 
+                                    value={password()}
+                                    onInput={(e) => setPassword(e.currentTarget.value)}
+                                    class="w-full p-2 rounded-md border-2 border-gray-300 focus:border-blue-500 focus:outline-none" 
+                                    autocomplete={isSignup() ? "new-password" : "current-password"}
+                                    required
+                                    disabled={isLoading()}
+                                />
+                            </div>
+                            
+                            <Show when={isSignup()}>
+                                <div class="w-full">
+                                    <label for="confirm-password" class="sr-only">Confirm Password</label>
+                                    <input 
+                                        type="password" 
+                                        name="confirm-password"
+                                        id="confirm-password"
+                                        placeholder="Confirm Password" 
+                                        value={confirmPassword()}
+                                        onInput={(e) => setConfirmPassword(e.currentTarget.value)}
+                                        class="w-full p-2 rounded-md border-2 border-gray-300 focus:border-blue-500 focus:outline-none" 
+                                        autocomplete="new-password"
+                                        required
+                                        disabled={isLoading()}
+                                    />
+                                </div>
                             </Show>
                             
                             <Show when={error()}>
@@ -204,18 +297,34 @@ export const Login: Component = () => {
                                 </div>
                             </Show>
                             
-                            <Show when={!isConnected() && isSignup()}>
+                            <Show when={!isConnected()}>
                                 <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 px-3 py-2 rounded-md text-sm">
                                     Connecting to Nostr relays...
                                 </div>
                             </Show>
                             
+                            <Show when={isLoading() && loadingStatus()}>
+                                <div class="bg-blue-50 border border-blue-200 text-blue-700 px-3 py-2 rounded-md text-sm flex items-center gap-2">
+                                    <svg class="animate-spin h-4 w-4 text-blue-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    {loadingStatus()}
+                                </div>
+                            </Show>
+                            
                             <button 
                                 type="submit" 
-                                class="w-full p-2 rounded-md bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors font-medium"
-                                disabled={isLoading() || !cryptoReady() || (!isConnected() && isSignup())}
+                                class="w-full p-2 rounded-md bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors font-medium flex items-center justify-center gap-2"
+                                disabled={isLoading() || !cryptoReady() || !isConnected()}
                             >
-                                {isLoading() ? 'Processing...' : (isSignup() ? 'Create Account' : 'Sign In')}
+                                <Show when={isLoading()}>
+                                    <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                </Show>
+                                {isLoading() ? (isSignup() ? 'Creating Account...' : 'Signing In...') : (isSignup() ? 'Create Account' : 'Sign In')}
                             </button>
                         </form>
                         
@@ -241,6 +350,22 @@ export const Login: Component = () => {
                     </div>
                 </div>
             </div>
+            
+            {/* PIN Setup Modal */}
+            <Show when={showPinSetup()}>
+                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div class="bg-white rounded-lg shadow-xl">
+                        <PinSetup
+                            onPinSet={handlePinSet}
+                            onCancel={() => {
+                                setShowPinSetup(false);
+                                setTempAccountData(null);
+                                setError('PIN setup cancelled. Please try again.');
+                            }}
+                        />
+                    </div>
+                </div>
+            </Show>
         </div>
     );
 };
