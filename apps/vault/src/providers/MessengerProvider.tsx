@@ -1,5 +1,6 @@
 import { createContext, useContext, ParentComponent, createSignal, onMount, onCleanup } from 'solid-js';
 import { IframeMessenger } from '@nostrpass/messenger';
+import { setupMessageHandlers } from '../messageHandlers';
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
@@ -12,70 +13,77 @@ const MessengerContext = createContext<MessengerContextType>();
 
 export const MessengerProvider: ParentComponent = (props) => {
   const [isReady, setIsReady] = createSignal(false);
-  let messenger: IframeMessenger | null = null;
+  const [messenger, setMessenger] = createSignal<IframeMessenger | null>(null);
 
   onMount(() => {
     // Initialize messenger
-    messenger = new IframeMessenger(window);
+    const messengerInstance = new IframeMessenger(window);
     
     // Allow common development origins
     // TODO: Make this dynamic based on the 
-    messenger.init([
+    messengerInstance.init([
       'http://localhost:3000'   
     ]);
 
     // Set up ready signal handler
-    messenger.on('VAULT_READY', () => {
+    messengerInstance.on('VAULT_READY', () => {
       setIsReady(true);
       return { acknowledged: true };
     });
 
     // Handle show/hide vault commands
-    messenger.route('SHOW_VAULT_RESPONSE', {
+    messengerInstance.route('SHOW_VAULT_RESPONSE', {
       handler: (data: any) => {
         console.log('Show vault response handled:', data);
       }
     });
 
-    messenger.route('HIDE_VAULT_RESPONSE', {
+    messengerInstance.route('HIDE_VAULT_RESPONSE', {
       handler: (data: any) => {
         console.log('Hide vault response handled:', data);
       }
     });
 
+    // Set up all message handlers
+    setupMessageHandlers(messengerInstance);
+
     // Send ready signal to parent
-    messenger.send('VAULT_READY', {
+    messengerInstance.send('VAULT_READY', {
       timestamp: Date.now(),
       version: '1.0.0'
     });
 
+    setMessenger(messengerInstance);
     console.log('✅ Messenger initialized');
   });
 
   onCleanup(() => {
-    if (messenger) {
-      messenger.destroy();
-      messenger = null;
+    const m = messenger();
+    if (m) {
+      m.destroy();
+      setMessenger(null);
     }
   });
 
   const send = (type: string, data?: any) => {
-    if (messenger) {
-      messenger.send(type, data);
+    const m = messenger();
+    if (m) {
+      m.send(type, data);
     } else {
       console.warn('Messenger not ready');
     }
   };
 
   const request = async (type: string, data?: any, timeout?: number) => {
-    if (!messenger) {
+    const m = messenger();
+    if (!m) {
       throw new Error('Messenger not ready');
     }
-    return messenger.request(type, data, timeout);
+    return m.request(type, data, timeout);
   };
 
   const value: MessengerContextType = {
-    messenger,
+    get messenger() { return messenger(); },
     isReady,
     send,
     request

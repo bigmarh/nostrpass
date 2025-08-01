@@ -32,7 +32,7 @@ const ENVIRONMENT_CONFIGS: Record<string, EnvironmentConfig> = {
     relays: [
       'wss://relay.damus.io',
       'wss://nos.lol',
-      'wss://relay.nostr.band',
+      // 'wss://relay.nostr.band', // Temporarily disabled - might be requiring PoW
       'ws://localhost:8080' // Local relay for testing
     ],
     debug: true
@@ -58,9 +58,7 @@ const ENVIRONMENT_CONFIGS: Record<string, EnvironmentConfig> = {
     relays: [
       'wss://relay.damus.io',
       'wss://nos.lol',
-      'wss://relay.nostr.band',
-      'wss://relay.snort.social',
-      'wss://relay.current.fyi'
+      'wss://relay.nostr.band'
     ],
     apiBaseUrl: 'https://api.nostrpass.com',
     debug: false

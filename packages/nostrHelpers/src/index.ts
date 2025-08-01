@@ -15,6 +15,9 @@ import { npubEncode } from 'nostr-tools/nip19';
 // Export user data helpers
 export * from './userDataHelpers';
 
+// Export vault helpers
+export * from './vaultHelpers';
+
 export function hello() {
   return 'Hello from @nostrpass/nostr';
 }
@@ -107,7 +110,30 @@ export async function getRecordFromNostr(identifier:string, relays: string[], ke
  */
 export async function getEvent(relays: string[], filter: Filter): Promise<NostrEvent | null> {
   const pool = new SimplePool();
-  const events = await pool.querySync(relays, filter);
+  let events: NostrEvent[] = [];
+  
+  try {
+    events = await pool.querySync(relays, filter);
+  } catch (error: any) {
+    console.warn('Error during event query:', error);
+    // Try each relay individually to identify issues
+    for (const relay of relays) {
+      try {
+        const relayEvents = await pool.querySync([relay], filter);
+        events = [...events, ...relayEvents];
+        console.log(`✅ Queried ${relay} successfully`);
+      } catch (relayError: any) {
+        if (relayError.message?.includes('pow:')) {
+          const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
+          const bits = powMatch ? powMatch[1] : 'unknown';
+          console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for queries`);
+        } else {
+          console.error(`❌ Failed to query ${relay}:`, relayError.message);
+        }
+      }
+    }
+  }
+  
   if (events.length == 0) return null;
   const latestEvent = events.sort((a, b) => b.created_at - a.created_at)[0];
   return latestEvent;
@@ -121,8 +147,32 @@ export async function getEvent(relays: string[], filter: Filter): Promise<NostrE
  */
 export async function publishEvent(signedEvent: NostrEvent, relays: string[]): Promise<string[]> {
   const pool = new SimplePool();
-  const event = await Promise.all(pool.publish(relays, signedEvent));
-  return event;
+  const successfulPublishes: string[] = [];
+  
+  // Try each relay individually to identify which ones require PoW
+  for (const relay of relays) {
+    try {
+      const result = await pool.publish([relay], signedEvent);
+      console.log(`✅ Published to ${relay}`);
+      successfulPublishes.push(result[0]);
+    } catch (error: any) {
+      if (error.message?.includes('pow:')) {
+        const powMatch = error.message.match(/pow:\s*(\d+)\s*bits/);
+        const bits = powMatch ? powMatch[1] : 'unknown';
+        console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits):`, error.message);
+      } else {
+        console.error(`❌ Failed to publish to ${relay}:`, error.message);
+      }
+      // Continue to next relay
+    }
+  }
+  
+  if (successfulPublishes.length === 0) {
+    throw new Error('Failed to publish to any relay');
+  }
+  
+  console.log(`✅ Event published to ${successfulPublishes.length}/${relays.length} relays`);
+  return successfulPublishes;
 }
 
 /**
@@ -165,9 +215,14 @@ export class UsernameRegistry {
   private pool: SimplePool;
   private registrationKeys: KeyPair;
   private relays: string[];
+  private static sharedPool: SimplePool | null = null;
 
   constructor(registrationKeys: KeyPair, relays: string[]) {
-    this.pool = new SimplePool();
+    // Use a shared pool instance to avoid connection churn
+    if (!UsernameRegistry.sharedPool) {
+      UsernameRegistry.sharedPool = new SimplePool();
+    }
+    this.pool = UsernameRegistry.sharedPool;
     this.registrationKeys = registrationKeys;
     this.relays = relays;
     console.log('UsernameRegistry initialized with relays:', relays);
@@ -199,13 +254,58 @@ export class UsernameRegistry {
       const filter: Filter = {
         kinds: [30078], // NIP-78 arbitrary custom app data (replaceable)
         '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`], // Use 'd' tag for indexing
-        limit: 1
+        // Remove limit to get ALL events with this d-tag
       };
       
       console.log('Query filter:', JSON.stringify(filter, null, 2));
       console.log('Querying relays:', this.relays);
+      console.log('Environment:', getEnvironment());
+      console.log('Registration service pubkey:', this.registrationKeys.publicKey);
 
-      const events = await this.pool.querySync(this.relays, filter);
+      let events: NostrEvent[] = [];
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      // Retry logic to handle relay timing issues
+      while (retryCount <= maxRetries) {
+        try {
+          events = await this.pool.querySync(this.relays, filter);
+          console.log(`Attempt ${retryCount + 1}: Found ${events.length} events for username "${username}"`);
+          if (events.length > 0) {
+            console.log('Event authors:', events.map(e => e.pubkey));
+            console.log('Event d-tags:', events.map(e => e.tags.find(t => t[0] === 'd')?.[1]));
+            break; // Found events, no need to retry
+          }
+          
+          // If no events found and not on last retry, wait a bit
+          if (retryCount < maxRetries && events.length === 0) {
+            console.log(`No events found, retrying in 500ms...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            retryCount++;
+          } else {
+            break; // Last attempt or found events
+          }
+        } catch (error: any) {
+          console.warn('Error during username availability check:', error);
+          // Try querying each relay individually to identify PoW requirements
+          for (const relay of this.relays) {
+            try {
+              const relayEvents = await this.pool.querySync([relay], filter);
+              events = [...events, ...relayEvents];
+              console.log(`✅ Queried ${relay} successfully`);
+            } catch (relayError: any) {
+              if (relayError.message?.includes('pow:')) {
+                const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
+                const bits = powMatch ? powMatch[1] : 'unknown';
+                console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for queries`);
+              } else {
+                console.error(`❌ Failed to query ${relay}:`, relayError.message);
+              }
+            }
+          }
+          break; // Exit retry loop after individual relay attempts
+        }
+      }
       console.log('Found events:', events.length);
       
       // Debug: Let's see all events to understand what's happening
@@ -239,6 +339,8 @@ export class UsernameRegistry {
   // Get registration info for a username (returns the FIRST/OLDEST registration)
   async getRegistrationInfo(username: string): Promise<UsernameRegistration | null> {
     const hash = this.hashUsername(username);
+    console.log('Getting registration info for username:', username);
+    console.log('Username hash:', hash);
     
     try {
       const filter: Filter = {
@@ -246,9 +348,55 @@ export class UsernameRegistry {
         '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`]
       };
       
-      const events = await this.pool.querySync(this.relays, filter);
+      console.log('Query filter:', JSON.stringify(filter, null, 2));
+      
+      let events: NostrEvent[] = [];
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      // Retry logic to handle relay timing issues
+      while (retryCount <= maxRetries) {
+        try {
+          events = await this.pool.querySync(this.relays, filter);
+          console.log(`Attempt ${retryCount + 1}: Found ${events.length} events for username "${username}"`);
+          
+          // If we found events, no need to retry
+          if (events.length > 0) {
+            break;
+          }
+          
+          // If no events found and not on last retry, wait a bit
+          if (retryCount < maxRetries && events.length === 0) {
+            console.log(`No registration found, retrying in 500ms...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            retryCount++;
+          } else {
+            break; // Last attempt or found events
+          }
+        } catch (error: any) {
+          console.warn('Error during registration info query:', error);
+          // Try querying each relay individually
+          for (const relay of this.relays) {
+            try {
+              const relayEvents = await this.pool.querySync([relay], filter);
+              events = [...events, ...relayEvents];
+              console.log(`✅ Queried ${relay} successfully`);
+            } catch (relayError: any) {
+              if (relayError.message?.includes('pow:')) {
+                const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
+                const bits = powMatch ? powMatch[1] : 'unknown';
+                console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for queries`);
+              } else {
+                console.error(`❌ Failed to query ${relay}:`, relayError.message);
+              }
+            }
+          }
+          break; // Exit retry loop after individual relay attempts
+        }
+      }
       
       if (events.length === 0) {
+        console.log('No registration found after retries');
         return null;
       }
       
@@ -347,24 +495,56 @@ export class UsernameRegistry {
       
       // Publish to all relays
       console.log('Publishing to relays:', this.relays);
-      const publishResults = await publishEvent(signedEvent, this.relays);
-      console.log('Publish results:', publishResults);
+      try {
+        const publishResults = await publishEvent(signedEvent, this.relays);
+        console.log('Publish results:', publishResults);
+        console.log(`Successfully published to ${publishResults.length} relays`);
 
-      // Give relays more time to process and propagate
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Verify the event was stored
-      const verifyFilter = {
-        kinds: [30078],
-        '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`],
-        limit: 1
-      };
-      const verifyEvents = await this.pool.querySync(this.relays, verifyFilter);
-      console.log('Verification query found:', verifyEvents.length, 'events');
-      
-      if (verifyEvents.length === 0) {
-        console.warn('⚠️ Registration event not found after publishing. Relays may be slow.');
-        // Still return true as the event was published successfully
+        // Give relays more time to process and propagate
+        console.log('⏳ Waiting for relay propagation...');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds
+        
+        // Verify the event was stored
+        const verifyFilter = {
+          kinds: [30078],
+          '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`],
+          limit: 1
+        };
+        let verifyEvents: NostrEvent[] = [];
+        try {
+          verifyEvents = await this.pool.querySync(this.relays, verifyFilter);
+        } catch (error: any) {
+          console.warn('Error during verification query:', error);
+          // Try each relay individually
+          for (const relay of this.relays) {
+            try {
+              const relayEvents = await this.pool.querySync([relay], verifyFilter);
+              verifyEvents = [...verifyEvents, ...relayEvents];
+              console.log(`✅ Verified on ${relay}`);
+            } catch (relayError: any) {
+              if (relayError.message?.includes('pow:')) {
+                const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
+                const bits = powMatch ? powMatch[1] : 'unknown';
+                console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for verification`);
+              } else {
+                console.error(`❌ Failed to verify on ${relay}:`, relayError.message);
+              }
+            }
+          }
+        }
+        console.log('Verification query found:', verifyEvents.length, 'events');
+        
+        if (verifyEvents.length === 0) {
+          console.warn('⚠️ Registration event not found after publishing. Relays may be slow.');
+          // Still return true as the event was published successfully
+        }
+      } catch (error: any) {
+        console.error('Error during username registration publish:', error);
+        // Check if all relays require PoW
+        if (error.message === 'Failed to publish to any relay') {
+          throw new Error('Unable to register username: All relays are rejecting the registration. Some may require Proof of Work. Check the console for details.');
+        }
+        throw error;
       }
 
       return true;
@@ -420,7 +600,6 @@ export class UsernameRegistry {
     try {
       const filter: Filter = {
         kinds: [30078],
-        authors: [this.registrationKeys.publicKey],
         '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`], // Use indexed 'd' tag
       };
 
@@ -433,6 +612,7 @@ export class UsernameRegistry {
 
   // Cleanup
   close() {
-    this.pool.close(this.relays);
+    // Don't close the shared pool - let it be reused
+    // this.pool.close(this.relays);
   }
 }

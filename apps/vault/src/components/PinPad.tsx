@@ -35,8 +35,12 @@ const PinPad: Component<PinPadProps> = (props) => {
     if (props.onPinChange) props.onPinChange(newPin);
     
     // Call onComplete when PIN is exactly 6 digits
-    if (newPin.length === 6 && props.onComplete) {
-      props.onComplete(newPin);
+    if (newPin.length === 6) {
+      setTimeout(() => {
+        if (props.onComplete) {
+          props.onComplete(newPin);
+        }
+      }, 500);
     }
   };
 

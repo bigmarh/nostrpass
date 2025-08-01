@@ -17,23 +17,6 @@ export const AuthGuard: Component<{ children: any }> = (props) => {
   return <>{props.children}</>;
 };
 
-// Vault guard component - requires vault to be unlocked
-export const VaultGuard: Component<{ children: any }> = (props) => {
-  const { isAuthenticated, isVaultUnlocked } = useAuth();
-  const navigate = useNavigate();
-  const params = useParams();
-
-  createEffect(() => {
-    if (!isAuthenticated()) {
-      navigate(`/${params.app}`);
-    } else if (!isVaultUnlocked()) {
-      navigate(`/${params.app}/unlock`);
-    }
-  });
-
-  return <>{props.children}</>;
-};
-
 // Login guard component - redirect if already authenticated
 export const LoginGuard: Component<{ children: any }> = (props) => {
   const { isAuthenticated } = useAuth();

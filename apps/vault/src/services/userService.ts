@@ -1,10 +1,8 @@
-import { createWorkerClient } from '@nostrpass/worker-messenger';
 import type { Identity, UserMasterKey } from '@nostrpass/types';
+import { getCryptoWorker } from './cryptoWorkerSingleton';
 
-// Create worker client
-const cryptoWorker = createWorkerClient(
-  new Worker(new URL('../workers/crypto.worker.ts', import.meta.url), { type: 'module' })
-) as any;
+// Get shared worker client
+const cryptoWorker = getCryptoWorker() as any;
 
 /**
  * Create a new user with master key and initial "Personal" identity
@@ -25,9 +23,35 @@ export async function createUser(): Promise<UserMasterKey> {
 }
 
 /**
+ * Get the storage identity keypair for vault storage
+ * Uses a dedicated derivation path that won't conflict with user identities
+ * Path: m/44'/1237'/1'/0/0 (account 1 for storage)
+ */
+export async function getStorageKeypair(xpriv: string): Promise<{ privateKey: string; publicKey: string }> {
+  // Use a special index (2^31 - 1) which is the maximum for non-hardened derivation
+  // This ensures it won't conflict with user identities which start from 0
+  const STORAGE_INDEX = 2147483647; // Max value for BIP32 non-hardened index
+  
+  const derived = await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index: STORAGE_INDEX });
+  
+  // Handle if result is a Map
+  if (derived instanceof Map) {
+    return {
+      privateKey: derived.get('privateKey'),
+      publicKey: derived.get('publicKey')
+    };
+  }
+  
+  return {
+    privateKey: derived.privateKey,
+    publicKey: derived.publicKey
+  };
+}
+
+/**
  * Create a new identity from the master key
  */
-export async function createIdentity(xpriv: string, nickname: string, index: number): Promise<Identity> {
+export async function createIdentity(xpriv: string, nickname: string, index: number): Promise<any> {
   // Derive the keypair for this identity
   const derived = await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index });
   
@@ -35,15 +59,23 @@ export async function createIdentity(xpriv: string, nickname: string, index: num
   
   // Handle if result is a Map (in case it wasn't converted in worker)
   let path: string;
+  let publicKey: string;
   if (derived instanceof Map) {
     path = derived.get('path') || `m/44'/1237'/0'/0/${index}`;
+    publicKey = derived.get('publicKey');
   } else {
     path = derived.path || `m/44'/1237'/0'/0/${index}`;
+    publicKey = derived.publicKey;
   }
   
-  const identity: Identity = {
+  // Return identity with public key for vault storage
+  const identity = {
     nickname,
     path,
+    publicKey,
+    index,
+    name: nickname, // alias for compatibility
+    createdAt: Date.now()
   };
   
   return identity;
@@ -69,17 +101,22 @@ export async function addIdentity(userMasterKey: UserMasterKey, nickname: string
 /**
  * Get the keypair for a specific identity
  */
-export async function getIdentityKeypair(xpriv: string, identity: Identity): Promise<{ privateKey: string; publicKey: string }> {
-  if (!identity.path) {
-    throw new Error('Identity path is missing');
-  }
+export async function getIdentityKeypair(xpriv: string, identity: any): Promise<{ privateKey: string; publicKey: string }> {
+  // Use index if available, otherwise extract from path
+  let index: number;
   
-  // Extract the index from the path (m/44'/1237'/0'/0/{index})
-  const pathParts = identity.path.split('/');
-  const index = parseInt(pathParts[pathParts.length - 1], 10);
-  
-  if (isNaN(index)) {
-    throw new Error(`Invalid identity path: ${identity.path}`);
+  if (identity.index !== undefined) {
+    index = identity.index;
+  } else if (identity.path) {
+    // Extract the index from the path (m/44'/1237'/0'/0/{index})
+    const pathParts = identity.path.split('/');
+    index = parseInt(pathParts[pathParts.length - 1], 10);
+    
+    if (isNaN(index)) {
+      throw new Error(`Invalid identity path: ${identity.path}`);
+    }
+  } else {
+    throw new Error('Identity must have either index or path');
   }
   
   const derived = await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index });

@@ -11,7 +11,9 @@ export interface PinPadProps {
 
 export interface PinSetupProps {
   onPinSet: (pin: string) => void;
+  onPinSetWithRecovery?: (pin: string, questions: string[], answers: string[]) => void;
   onCancel?: () => void;
+  skipRecovery?: boolean; // Skip recovery setup (e.g., during PIN reset)
 }
 
 export interface PinVerificationProps {

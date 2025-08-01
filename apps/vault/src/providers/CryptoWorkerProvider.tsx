@@ -1,5 +1,5 @@
-import { createContext, useContext, ParentComponent, onCleanup, createResource, createMemo } from 'solid-js';
-import { createWorkerClient } from '@nostrpass/worker-messenger';
+import { createContext, useContext, ParentComponent, onCleanup, createMemo } from 'solid-js';
+import { getCryptoWorker } from '../services/cryptoWorkerSingleton';
 
 
 type CryptoWorkerClient = any;
@@ -12,35 +12,20 @@ interface CryptoWorkerContextValue {
 const CryptoWorkerContext = createContext<CryptoWorkerContextValue>();
 
 export const CryptoWorkerProvider: ParentComponent = (props) => {
-  const [workerResource] = createResource(async () => {
-    const CryptoWorker = await import('../workers/crypto.worker?worker');
-    const worker = new CryptoWorker.default();
-    
-    const client = createWorkerClient(worker as any, {
-      timeout: 10000,
-      onError: (error) => {
-        console.error('CryptoWorker error:', error);
-      },
-    });
-
-    return { worker, client };
-  });
+  // Get the shared worker instance
+  const client = getCryptoWorker();
 
   onCleanup(() => {
-    const resource = workerResource();
-    if (resource) {
-      resource.worker.terminate();
-    }
+    // Don't terminate the shared worker instance
+    // It should persist across the application lifecycle
   });
 
   const value = {
     get client() {
-      const resource = workerResource();
-      return resource?.client!;
+      return client;
     },
     get ready() {
-      const resource = workerResource();
-      return !!resource;
+      return true; // Always ready since it's created synchronously
     }
   };
 
@@ -51,13 +36,18 @@ export const CryptoWorkerProvider: ParentComponent = (props) => {
   );
 };
 
-export const useCryptoWorker = () => {
+/**
+ * Get the crypto worker client.
+ * @returns The crypto worker client or null if not ready yet
+ */
+export const useCryptoWorker = (): CryptoWorkerClient | null => {
   const context = useContext(CryptoWorkerContext);
   if (!context) {
     throw new Error('useCryptoWorker must be used within CryptoWorkerProvider');
   }
+  // Return null if not ready instead of throwing
   if (!context.ready) {
-    throw new Error('CryptoWorker is not ready yet');
+    return null;
   }
   return context.client;
 };

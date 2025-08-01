@@ -23,3 +23,7 @@ html, body {
 .shake-animation {
   animation: shake 0.5s ease-in-out;
 }
+
+button{
+cursor: pointer;
+}

@@ -1,5 +1,5 @@
 import { Component, createSignal, Show } from 'solid-js';
-import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady, useEnvironment } from '../providers';
+import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady, useCryptoWorker, useEnvironment } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
 import PinSetup from './PinSetup';
 
@@ -21,9 +21,11 @@ export const Login: Component = () => {
     const params = useParams();
     const navigate = useNavigate();
     const { send } = useMessenger();
-    const { login, createAccount, isVaultUnlocked } = useAuth();
+    const { login, createAccount, hasPinVault } = useAuth();
     const { checkUsernameAvailable, registerUsername, isConnected, getRegistrationInfo } = useNostrComms();
+    
     const cryptoReady = useCryptoWorkerReady();
+    const cryptoWorker = useCryptoWorker();
     const { getRelays } = useEnvironment();
 
     const handleHideVault = () => {
@@ -116,6 +118,7 @@ export const Login: Component = () => {
             return 0; // Default
         }
     };
+    
 
     const [backgroundIndex] = createSignal(getTimeBasedBackground());
     const changeBackground = () => backgroundIndex();
@@ -144,7 +147,7 @@ export const Login: Component = () => {
         console.log('📝 Registration info:', registrationInfo);
         
         if (!registrationInfo) {
-            throw new Error('Username not found. Please check your username or create a new account.');
+            throw new Error('Invalid username or password');
         }
         
         // Login with password
@@ -155,12 +158,10 @@ export const Login: Component = () => {
         setLoadingStatus('Loading your vault...');
         console.log('✅ Login successful!');
         
-        // Check if vault needs PIN unlock
-        if (!isVaultUnlocked()) {
-            // Navigate to PIN unlock
+        // Check if PIN unlock is needed
+        if (hasPinVault()) {
             navigate(`/${params.app}/unlock`);
         } else {
-            // Navigate to dashboard after successful login
             navigate(`/${params.app}/dashboard`);
         }
     };
@@ -199,6 +200,23 @@ export const Login: Component = () => {
             
             await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
             
+            setLoadingStatus('Saving vault to Nostr...');
+            
+            // Save vault to Nostr using the worker's signed event
+            if (cryptoWorker) {
+                try {
+                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ username: accountData.username });
+                    
+                    // Publish the signed event to relays
+                    const { publishEvent } = await import('@nostrpass/nostrHelpers');
+                    await publishEvent(vaultEvent.event, userRelays);
+                    console.log('✅ Vault saved to Nostr');
+                } catch (error) {
+                    console.error('Failed to save vault to Nostr:', error);
+                    // Don't fail signup if Nostr save fails
+                }
+            }
+            
             setLoadingStatus('Finalizing registration...');
             
             console.log('✅ Signup successful!');
@@ -214,10 +232,83 @@ export const Login: Component = () => {
         }
     };
 
+    const handlePinSetWithRecovery = async (pin: string, questions: string[], answers: string[]) => {
+        const accountData = tempAccountData();
+        if (!accountData) return;
+        
+        try {
+            setIsLoading(true);
+            setShowPinSetup(false);
+            setLoadingStatus('Securing your vault with PIN and recovery questions...');
+            
+            // Create account with PIN encryption and recovery data
+            console.log('🔑 Creating account with PIN and recovery...');
+            console.log('PIN being set:', pin);
+            console.log('Recovery questions:', questions);
+            console.log('Recovery answers (raw):', answers);
+            console.log('Recovery answer values:', answers.map((a, i) => `[${i}]: "${a}" (length: ${a.length})`));
+            console.log('Type of answers:', typeof answers, Array.isArray(answers));
+            // Log each answer individually to avoid array formatting
+            answers.forEach((answer, index) => {
+                console.log(`Answer ${index} raw value:`, answer);
+                console.log(`Answer ${index} JSON stringified:`, JSON.stringify(answer));
+            });
+            
+            const { publicKey } = await createAccount(
+                accountData.username, 
+                accountData.password, 
+                pin,
+                { questions, answers }
+            );
+            
+            // Register username on Nostr with user's relay preferences
+            setLoadingStatus('Registering username on Nostr network...');
+            console.log('📝 Registering username on Nostr...');
+            console.log('Public key:', publicKey);
+            console.log('Username:', accountData.username);
+            
+            // Get the user's relays from environment config
+            const userRelays = getRelays();
+            console.log('User relays for registration:', userRelays);
+            
+            await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
+            
+            setLoadingStatus('Saving vault to Nostr...');
+            
+            // Save vault to Nostr using the worker's signed event
+            if (cryptoWorker) {
+                try {
+                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ username: accountData.username });
+                    
+                    // Publish the signed event to relays
+                    const { publishEvent } = await import('@nostrpass/nostrHelpers');
+                    await publishEvent(vaultEvent.event, userRelays);
+                    console.log('✅ Vault saved to Nostr');
+                } catch (error) {
+                    console.error('Failed to save vault to Nostr:', error);
+                    // Don't fail signup if Nostr save fails
+                }
+            }
+            
+            setLoadingStatus('Finalizing registration...');
+            
+            console.log('✅ Signup successful with recovery!');
+            
+            // Navigate to dashboard after successful signup
+            navigate(`/${params.app}/dashboard`);
+        } catch (error) {
+            setError(error instanceof Error ? error.message : 'An error occurred');
+            setShowPinSetup(false);
+        } finally {
+            setIsLoading(false);
+            setLoadingStatus('');
+        }
+    };
+
     return (
         <div class="flex justify-center md:h-screen items-center">
-            <div class="flex w-auto min-w-[600px] max-w-2xl h-auto bg-white black-outline flex-col md:flex-row rounded-lg ">
-                <div style={`background-image: url('egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center  rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center p-4 md:w-48 md:min-w-[12rem]`}>
+            <div class="flex min-w-[400px] w-full max-w-2xl h-auto bg-white black-outline flex-col md:flex-row rounded-lg ">
+                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center  md:rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center p-4 md:w-48 md:min-w-[12rem]`}>
                     <div class="w-32 h-32 ">
                         <img class="w-full h-full " src="/logo.svg" alt="NostrPass Logo" />
                     </div>
@@ -353,10 +444,11 @@ export const Login: Component = () => {
             
             {/* PIN Setup Modal */}
             <Show when={showPinSetup()}>
-                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div class="bg-white rounded-lg shadow-xl">
+                <div class="fixed inset-0 bg-black/50 flex items-start md:items-center justify-center z-50 overflow-y-auto">
+                    <div class="bg-white w-full md:w-auto md:rounded-lg md:shadow-xl md:border-2 md:border-black min-h-screen md:min-h-0">
                         <PinSetup
                             onPinSet={handlePinSet}
+                            onPinSetWithRecovery={handlePinSetWithRecovery}
                             onCancel={() => {
                                 setShowPinSetup(false);
                                 setTempAccountData(null);
