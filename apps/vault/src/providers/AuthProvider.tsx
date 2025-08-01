@@ -3,7 +3,7 @@ import { useMessenger } from './MessengerProvider';
 import { useEnvironment } from './EnvironmentProvider';
 import type { User, UserProfile } from '@nostrpass/types';
 import { createUser, getIdentityKeypair } from '../services/userService';
-import { getCryptoWorker } from '../services/cryptoWorkerSingleton';
+import { getCryptoWorker, getCryptoWorkerInstance } from '../services/cryptoWorkerSingleton';
 
 interface AuthContextType {
   user: () => User | null;
@@ -26,34 +26,78 @@ export const AuthProvider: ParentComponent = (props) => {
   const [isLoading, setIsLoading] = createSignal(false);
   const [tempVaultData, setTempVaultData] = createSignal<any>(null);
   const [hasPinVault, setHasPinVault] = createSignal(false);
-  const [vaultLocked, setVaultLocked] = createSignal(true);
   const [isVaultLocked, setIsVaultLocked] = createSignal(true);
-  const [uiVaultLocked, setUiVaultLocked] = createSignal(true);
   const messenger = useMessenger();
   const { getRelays } = useEnvironment();
   const cryptoWorker = getCryptoWorker();
 
-  // Update isVaultLocked based on UI state and conditions
+  // Update isVaultLocked based on conditions
   createEffect(() => {
     const currentUser = user();
     
     if (!currentUser || !cryptoWorker) {
       setIsVaultLocked(true);
-      setUiVaultLocked(true);
       return;
     }
 
-    // Check if we're in a PIN vault state (requires PIN to unlock)
+    // Vault is locked if it has PIN protection and hasn't been unlocked
+    // hasPinVault indicates PIN is required but not yet entered
     if (hasPinVault()) {
       setIsVaultLocked(true);
-      setUiVaultLocked(true);
-      return;
     }
-
-    // Use UI vault lock state for instant feedback
-    setIsVaultLocked(uiVaultLocked());
   });
 
+  // Handle session expired notifications from worker
+  createEffect(() => {
+    try {
+      const workerInstance = getCryptoWorkerInstance();
+      if (!workerInstance) return;
+      
+      // Listen for session messages from worker
+      const handleWorkerMessage = (event: MessageEvent) => {
+        const currentUser = user();
+        if (!currentUser) return;
+        
+        if (event.data?.type === 'SESSION_EXPIRED' || event.data?.type === 'SESSION_LOCKED') {
+          const { username, reason } = event.data.data;
+          
+          if (currentUser.profile.username === username) {
+            console.log(`🔒 Vault lock notification received for: ${username}, reason: ${reason || event.data.type}`);
+            
+            // This should already be locked, but ensure UI is in sync
+            setIsVaultLocked(true);
+            setHasPinVault(true);
+            
+            // Clear local session
+            localStorage.removeItem('vault-session');
+            
+            // Notify parent of auth status change
+            if (messenger.isReady()) {
+              messenger.send('AUTH_STATUS', {
+                isAuthenticated: false,
+                publicKey: null,
+                reason: reason || 'session_expired'
+              });
+            }
+            
+            // Show notification to user (optional)
+            console.log('🔒 Vault locked due to:', reason || 'session expiry');
+          }
+        }
+      };
+      
+      // Add listener to worker
+      workerInstance.addEventListener('message', handleWorkerMessage);
+      
+      // Cleanup
+      return () => {
+        workerInstance.removeEventListener('message', handleWorkerMessage);
+      };
+    } catch (error) {
+      console.error('Failed to set up worker message listener:', error);
+    }
+  });
+  
   // Load user session from localStorage on mount
   onMount(async () => {
     const savedSession = localStorage.getItem('vault-session');
@@ -273,9 +317,20 @@ export const AuthProvider: ParentComponent = (props) => {
       const { publicKey: personalPublicKey } = await getIdentityKeypair(userMasterKey.xpriv, personalIdentity);
       
       // Derive encryption key from password
-      const { key: passwordKey, salt: passwordSalt } = await cryptoWorker.deriveKey({
+      const passwordDeriveResult = await cryptoWorker.deriveKey({
         password,
       });
+      
+      // Handle both Map and object results from WASM
+      let passwordKey: string;
+      let passwordSalt: string;
+      if (passwordDeriveResult instanceof Map) {
+        passwordKey = passwordDeriveResult.get('key');
+        passwordSalt = passwordDeriveResult.get('salt');
+      } else {
+        passwordKey = passwordDeriveResult.key;
+        passwordSalt = passwordDeriveResult.salt;
+      }
 
       let encryptedXpriv;
       let pinSalt;
@@ -283,12 +338,19 @@ export const AuthProvider: ParentComponent = (props) => {
       
       if (pin) {
         // If PIN is provided, encrypt xpriv with PIN only
-        console.log('🔐 Encrypting xpriv with PIN:', pin);
-        const { key: pinKey, salt: derivedPinSalt } = await cryptoWorker.deriveKey({
-          password: pin,
+        console.log('🔐 Creating vault with PIN:', {
+          pin: pin,
+          pinLength: pin.length
         });
-        pinSalt = derivedPinSalt;
-        console.log('PIN salt:', pinSalt);
+        // Generate a random salt for the PIN
+        const saltBytes = new Uint8Array(16);
+        crypto.getRandomValues(saltBytes);
+        pinSalt = btoa(String.fromCharCode(...saltBytes));
+        
+        console.log('📌 PIN salt generated:', {
+          salt: pinSalt,
+          saltLength: pinSalt.length
+        });
         
         // Hash the PIN for verification later
         const encoder = new TextEncoder();
@@ -298,10 +360,23 @@ export const AuthProvider: ParentComponent = (props) => {
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
         
-        // Encrypt xpriv with PIN only
+        // For now, use PIN directly with salt as part of the password
+        // This is a temporary fix until we update the WASM module
+        const saltedPin = `${pin}:${pinSalt}`;
+        
+        console.log('🔐 Encrypting xpriv with salted PIN:', {
+          xprivLength: userMasterKey.xpriv?.length,
+          saltedPinLength: saltedPin.length
+        });
+        
         encryptedXpriv = await cryptoWorker.encryptData({
           data: userMasterKey.xpriv,
-          password: pinKey
+          password: saltedPin  // Use salted PIN
+        });
+        
+        console.log('✅ xpriv encrypted:', {
+          encryptedLength: encryptedXpriv?.length,
+          encryptedPreview: encryptedXpriv?.substring(0, 20) + '...'
         });
       } else {
         // No PIN - this shouldn't happen in the new flow
@@ -411,12 +486,12 @@ export const AuthProvider: ParentComponent = (props) => {
       });
       
       // Create session in worker with vault data
-      // Pass xpriv so worker can derive any key needed
+      // xpriv is all we need - it contains all keys
       const sessionInfo = await cryptoWorker.createSession({
         username,
         publicKey: storagePublicKey, // Use storage key for session
         privateKey: '', // Not needed when we have xpriv
-        xpriv: userMasterKey.xpriv, // Pass xpriv for key derivation
+        xpriv: userMasterKey.xpriv, // Pass xpriv for full key derivation
         vaultData,
         sessionTimeout: 60 // 60 minutes
       });
@@ -431,6 +506,10 @@ export const AuthProvider: ParentComponent = (props) => {
       localStorage.setItem('vault-session', JSON.stringify(session));
 
       setUser(newUser);
+      
+      // Set vault as unlocked since user just created it
+      setIsVaultLocked(false);
+      setHasPinVault(false); // No PIN required - vault is fully accessible
       
       // Vault is created locally and will be saved to Nostr after registration
       // when we have access to the signed event
@@ -559,10 +638,18 @@ export const AuthProvider: ParentComponent = (props) => {
       }
 
       // Derive key from password
-      const { key: encryptionKey } = await cryptoWorker.deriveKey({
+      const encryptDeriveResult = await cryptoWorker.deriveKey({
         password,
         salt: vaultData.salt
       });
+      
+      // Handle both Map and object results from WASM
+      let encryptionKey: string;
+      if (encryptDeriveResult instanceof Map) {
+        encryptionKey = encryptDeriveResult.get('key');
+      } else {
+        encryptionKey = encryptDeriveResult.key;
+      }
 
       // Decrypt the master key (xpriv)
       let xpriv: string;
@@ -682,7 +769,6 @@ export const AuthProvider: ParentComponent = (props) => {
       // Update user state
       setUser(userToStore);
       setIsVaultLocked(false); // Vault is unlocked for non-PIN vaults
-      setUiVaultLocked(false); // Update UI state
       
       // Save session
       const session = {
@@ -768,11 +854,10 @@ export const AuthProvider: ParentComponent = (props) => {
       return;
     }
     
-    // INSTANT UI UPDATE - no worker dependency
-    setUiVaultLocked(true);
-    setVaultLocked(true);
+    // INSTANT UI UPDATE
     setIsVaultLocked(true);
-    console.log('🔒 Vault locked instantly (UI state)');
+    setHasPinVault(true); // Indicate PIN is needed to unlock
+    console.log('🔒 Vault locked instantly');
     
     // Background worker cleanup (non-blocking)
     if (cryptoWorker) {
@@ -785,13 +870,19 @@ export const AuthProvider: ParentComponent = (props) => {
   };
 
   const unlockVault = async (pin: string): Promise<boolean> => {
-    if (!cryptoWorker) throw new Error('Crypto worker not ready');
+    if (!cryptoWorker) {
+      console.error('❌ Crypto worker not ready');
+      return false;
+    }
     
     // Get the current user to find username
     const currentUser = user();
     if (!currentUser) {
-      throw new Error('No user logged in');
+      console.error('❌ No user logged in');
+      return false;
     }
+    
+    console.log('🔐 Starting vault unlock for:', currentUser.profile.username);
     
     try {
       // Get fresh vault data from worker (in case it was just updated by PIN reset)
@@ -800,7 +891,25 @@ export const AuthProvider: ParentComponent = (props) => {
       if (!freshVaultData) {
         throw new Error('No vault data found');
       }
-      console.log('✅ Got vault data:', { hasPinHash: !!freshVaultData.pinHash });
+      
+      // Validate vault data
+      if (!freshVaultData.pinHash || !freshVaultData.pinSalt || !freshVaultData.encryptedXpriv) {
+        console.error('❌ Vault data missing required fields:', {
+          hasPinHash: !!freshVaultData.pinHash,
+          hasPinSalt: !!freshVaultData.pinSalt,
+          hasEncryptedXpriv: !!freshVaultData.encryptedXpriv
+        });
+        throw new Error('Vault data is incomplete');
+      }
+      
+      console.log('✅ Got vault data:', { 
+        hasPinHash: !!freshVaultData.pinHash,
+        hasPinSalt: !!freshVaultData.pinSalt,
+        hasEncryptedXpriv: !!freshVaultData.encryptedXpriv,
+        pinSalt: freshVaultData.pinSalt,
+        pinHashPreview: freshVaultData.pinHash?.substring(0, 10) + '...',
+        encryptedXprivLength: freshVaultData.encryptedXpriv?.length
+      });
       
       // Hash the provided PIN
       const encoder = new TextEncoder();
@@ -816,19 +925,23 @@ export const AuthProvider: ParentComponent = (props) => {
         return false;
       }
       
-      // Derive PIN key
-      console.log('🔑 Deriving PIN key...');
-      const { key: pinKey } = await cryptoWorker.deriveKey({
-        password: pin,
-        salt: freshVaultData.pinSalt
-      });
-      console.log('✅ PIN key derived');
       
-      // Decrypt xpriv with PIN key (it's only encrypted with PIN now)
-      console.log('🔓 Decrypting xpriv...');
+      // For now, use PIN directly with salt as part of the password
+      // This matches how we encrypted during account creation
+      const saltedPin = `${pin}:${freshVaultData.pinSalt}`;
+      
+      console.log('🔓 Decrypting xpriv with salted PIN:', {
+        encryptedDataType: typeof freshVaultData.encryptedXpriv,
+        encryptedDataLength: freshVaultData.encryptedXpriv?.length,
+        encryptedDataPreview: freshVaultData.encryptedXpriv?.substring(0, 20) + '...',
+        saltedPinLength: saltedPin.length,
+        encryptedDataFirstChars: freshVaultData.encryptedXpriv?.substring(0, 10),
+        encryptedDataLastChars: freshVaultData.encryptedXpriv?.substring(freshVaultData.encryptedXpriv.length - 10)
+      });
+      
       const xpriv = await cryptoWorker.decryptData({
         encryptedData: freshVaultData.encryptedXpriv,
-        password: pinKey
+        password: saltedPin  // Use salted PIN
       });
       console.log('✅ xpriv decrypted');
       
@@ -854,13 +967,18 @@ export const AuthProvider: ParentComponent = (props) => {
       // Update user (without storing private key in main thread)
       const updatedUser = {
         ...currentUser,
-        privateKey: '' // Private key stays in worker
+        privateKey: '', // Private key stays in worker
+        isAuthenticated: true // Ensure authenticated flag is set
       };
+      
+      // Update all state atomically
+      console.log('🔄 Updating vault state to unlocked...');
       setUser(updatedUser);
       setHasPinVault(false); // Clear PIN flag after successful unlock
-      setVaultLocked(false); // Mark vault as unlocked
-      setUiVaultLocked(false); // Update UI state
-      setIsVaultLocked(false); // Update the lock status signal
+      setIsVaultLocked(false); // Vault is now unlocked
+      
+      // Small delay to ensure state propagates
+      await new Promise(resolve => setTimeout(resolve, 50));
       
       // Update session reference
       const session = {
@@ -898,9 +1016,24 @@ export const AuthProvider: ParentComponent = (props) => {
       // Clear temp vault data
       setTempVaultData(null);
       
+      console.log('✅ Vault unlock completed successfully');
       return true;
     } catch (error) {
-      console.error('Failed to unlock vault:', error);
+      console.error('❌ Failed to unlock vault:', error);
+      
+      // Reset state to consistent locked state on error
+      setHasPinVault(true);
+      setIsVaultLocked(true);
+      
+      // Log detailed error information
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+      }
+      
       return false;
     }
   };

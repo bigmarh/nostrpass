@@ -6,6 +6,9 @@ import { useParams, useNavigate } from '@solidjs/router';
 import { nip19 } from 'nostr-tools';
 import { VaultTestConsole } from './VaultTestConsole';
 import PinPad from './PinPad';
+import PINRecovery from './PINRecovery';
+import PinSetup from './PinSetup';
+import { useCryptoWorker } from '../providers';
 
 export const Dashboard: Component = () => {
     const { user, logout, isVaultLocked, lockVault, unlockVault } = useAuth();
@@ -18,6 +21,14 @@ export const Dashboard: Component = () => {
     const [showPinUnlock, setShowPinUnlock] = createSignal(false);
     const [pinUnlockError, setPinUnlockError] = createSignal('');
     const [isUnlocking, setIsUnlocking] = createSignal(false);
+    const [showRecovery, setShowRecovery] = createSignal(false);
+    const [showPinReset, setShowPinReset] = createSignal(false);
+    const [recoverySessionToken, setRecoverySessionToken] = createSignal<string | null>(null);
+    const [vaultData, setVaultData] = createSignal<any>(null);
+    const [tempNewPin, setTempNewPin] = createSignal<string>('');
+    const [showPasswordPrompt, setShowPasswordPrompt] = createSignal(false);
+    const [passwordForReset, setPasswordForReset] = createSignal('');
+    const cryptoWorker = useCryptoWorker();
     // For now, we'll create a single identity from the user's data
     // In the future, this can be expanded to support multiple identities
     const identities = createMemo(() => {
@@ -72,6 +83,20 @@ export const Dashboard: Component = () => {
         if (isVaultLocked()) {
             // If locked, show PIN unlock modal
             console.log('🔓 Vault is locked, showing unlock modal');
+            
+            // Load vault data for recovery
+            const currentUser = user();
+            if (currentUser?.profile?.username && cryptoWorker) {
+                try {
+                    const data = await cryptoWorker.getVaultData({ 
+                        username: currentUser.profile.username 
+                    });
+                    setVaultData(data);
+                } catch (err) {
+                    console.error('Failed to load vault data:', err);
+                }
+            }
+            
             setShowPinUnlock(true);
             setPinUnlockError('');
         } else {
@@ -103,6 +128,44 @@ export const Dashboard: Component = () => {
             setPinUnlockError('Failed to unlock vault. Please try again.');
         } finally {
             setIsUnlocking(false);
+        }
+    };
+
+    const handlePasswordVerification = async () => {
+        if (!cryptoWorker || !recoverySessionToken() || !tempNewPin() || !passwordForReset()) {
+            console.error('Missing required data for password verification');
+            return;
+        }
+        
+        setIsUnlocking(true);
+        setPinUnlockError('');
+        
+        try {
+            // Complete PIN reset in worker
+            const result = await cryptoWorker.completePinReset({
+                sessionToken: recoverySessionToken()!,
+                newPin: tempNewPin(),
+                password: passwordForReset()
+            });
+            
+            if (result.success) {
+                // Success! Unlock with new PIN
+                await handlePinUnlock(tempNewPin());
+                
+                // Reset the recovery flow state
+                setShowRecovery(false);
+                setShowPinReset(false);
+                setRecoverySessionToken(null);
+                setPasswordForReset('');
+                setShowPasswordPrompt(false);
+            } else {
+                throw new Error('Failed to reset PIN');
+            }
+        } catch (err) {
+            setPinUnlockError(err instanceof Error ? err.message : 'Failed to reset PIN');
+        } finally {
+            setIsUnlocking(false);
+            setPasswordForReset('');
         }
     };
 
@@ -319,38 +382,114 @@ export const Dashboard: Component = () => {
             <Show when={showPinUnlock()}>
                 <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                     <div class="bg-white rounded-lg shadow-xl border-2 border-gray-300 p-8 text-center relative max-w-md w-full mx-4">
-                        {/* Header */}
-                        <div class="text-center mb-6">
-                            <h2 class="text-xl font-semibold mb-2">Unlock Vault</h2>
-                            <p class="text-gray-600">Enter your PIN to unlock your vault</p>
-                        </div>
+                        <Show when={!showRecovery() && !showPinReset()}>
+                            {/* Header */}
+                            <div class="text-center mb-6">
+                                <h2 class="text-xl font-semibold mb-2">Unlock Vault</h2>
+                                <p class="text-gray-600">Enter your PIN to unlock your vault</p>
+                            </div>
 
-                        {/* PIN Entry */}
-                        <div class="mb-6">
-                            <PinPad
-                                onComplete={handlePinUnlock}
-                                disabled={isUnlocking()}
-                            />
-                        </div>
+                            {/* PIN Entry */}
+                            <div class="mb-6">
+                                <PinPad
+                                    onComplete={handlePinUnlock}
+                                    disabled={isUnlocking()}
+                                />
+                            </div>
 
-                        {/* Error Message */}
-                        <Show when={pinUnlockError()}>
-                            <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-md text-sm mb-4">
-                                {pinUnlockError()}
+                            {/* Error Message */}
+                            <Show when={pinUnlockError()}>
+                                <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-md text-sm mb-4">
+                                    {pinUnlockError()}
+                                </div>
+                            </Show>
+
+                            {/* Action Buttons */}
+                            <div class="space-y-2 text-center">
+                                <button
+                                    onClick={() => setShowRecovery(true)}
+                                    class="text-sm text-blue-600 hover:text-blue-800 transition-colors block w-full"
+                                    disabled={isUnlocking()}
+                                >
+                                    Forgot PIN?
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setShowPinUnlock(false);
+                                        setPinUnlockError('');
+                                    }}
+                                    class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                                    disabled={isUnlocking()}
+                                >
+                                    Cancel
+                                </button>
                             </div>
                         </Show>
 
-                        {/* Cancel Button */}
-                        <button
-                            onClick={() => {
-                                setShowPinUnlock(false);
-                                setPinUnlockError('');
-                            }}
-                            class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
-                            disabled={isUnlocking()}
-                        >
-                            Cancel
-                        </button>
+                        <Show when={showRecovery()}>
+                            <PINRecovery
+                                vaultData={vaultData() || {}}
+                                onSuccess={(sessionToken: string) => {
+                                    setRecoverySessionToken(sessionToken);
+                                    setShowRecovery(false);
+                                    setShowPinReset(true);
+                                }}
+                                onCancel={() => setShowRecovery(false)}
+                            />
+                        </Show>
+
+                        <Show when={showPinReset()}>
+                            <div class="space-y-4">
+                                <PinSetup
+                                    skipRecovery={true}
+                                    onPinSet={async (newPin) => {
+                                        setTempNewPin(newPin);
+                                        setShowPasswordPrompt(true);
+                                    }}
+                                    onCancel={() => {
+                                        setShowPinReset(false);
+                                        setRecoverySessionToken(null);
+                                    }}
+                                />
+                                
+                                <Show when={showPasswordPrompt()}>
+                                    <div class="mt-4 p-4 border-t">
+                                        <h3 class="text-lg font-semibold mb-2">Verify Your Password</h3>
+                                        <p class="text-sm text-gray-600 mb-4">
+                                            Please enter your password to complete the PIN reset.
+                                        </p>
+                                        <input
+                                            type="password"
+                                            placeholder="Password"
+                                            value={passwordForReset()}
+                                            onInput={(e) => setPasswordForReset(e.currentTarget.value)}
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
+                                            onKeyPress={(e) => {
+                                                if (e.key === 'Enter') handlePasswordVerification();
+                                            }}
+                                        />
+                                        <div class="flex gap-2">
+                                            <button
+                                                onClick={handlePasswordVerification}
+                                                disabled={!passwordForReset() || isUnlocking()}
+                                                class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 disabled:bg-gray-400"
+                                            >
+                                                {isUnlocking() ? 'Resetting PIN...' : 'Complete Reset'}
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setShowPasswordPrompt(false);
+                                                    setPasswordForReset('');
+                                                }}
+                                                class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </Show>
+                            </div>
+                        </Show>
                     </div>
                 </div>
             </Show>
