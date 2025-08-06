@@ -1,12 +1,16 @@
 import { createContext, useContext, ParentComponent, createSignal, onMount, onCleanup } from 'solid-js';
 import { IframeMessenger } from '@nostrpass/messenger';
 import { setupMessageHandlers } from '../messageHandlers';
+import { useEnvironment } from './EnvironmentProvider';
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
   isReady: () => boolean;
   send: (type: string, data?: any) => void;
   request: (type: string, data?: any, timeout?: number) => Promise<any>;
+  sendVaultReady: () => void;
+  areHandlersRegistered: () => boolean;
+  setHandlersRegistered: (value: boolean) => void;
 }
 
 const MessengerContext = createContext<MessengerContextType>();
@@ -14,22 +18,57 @@ const MessengerContext = createContext<MessengerContextType>();
 export const MessengerProvider: ParentComponent = (props) => {
   const [isReady, setIsReady] = createSignal(false);
   const [messenger, setMessenger] = createSignal<IframeMessenger | null>(null);
+  const [handlersRegistered, setHandlersRegistered] = createSignal(false);
+  const { isDevelopment, isStaging, isProduction } = useEnvironment();
 
   onMount(() => {
     // Initialize messenger
     const messengerInstance = new IframeMessenger(window);
     
-    // Allow common development origins
-    // TODO: Make this dynamic based on the 
-    messengerInstance.init([
-      'http://localhost:3000'   
-    ]);
-
-    // Set up ready signal handler
-    messengerInstance.on('VAULT_READY', () => {
-      setIsReady(true);
-      return { acknowledged: true };
-    });
+    // Configure allowed origins based on environment
+    const allowedOrigins: string[] = [];
+    
+    if (isDevelopment()) {
+      // Development: Allow localhost and common dev ports
+      allowedOrigins.push(
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:8080',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:3001',
+        'http://127.0.0.1:8080'
+      );
+    }
+    
+    if (isStaging()) {
+      // Staging: Add staging domains
+      allowedOrigins.push(
+        'https://staging.nostrpass.com',
+        'https://app-staging.nostrpass.com'
+      );
+    }
+    
+    if (isProduction()) {
+      // Production: Only allow production domains
+      allowedOrigins.push(
+        'https://nostrpass.com',
+        'https://app.nostrpass.com',
+        'https://www.nostrpass.com'
+      );
+    }
+    
+    // Always allow the current origin (self)
+    if (window.parent !== window) {
+      allowedOrigins.push(window.location.origin);
+    }
+    
+    // For testing: always allow current origin even if not in iframe
+    allowedOrigins.push(window.location.origin);
+    
+    messengerInstance.init(allowedOrigins);
+    
+    // Mark as ready immediately after init
+    setIsReady(true);
 
     // Handle show/hide vault commands
     messengerInstance.route('SHOW_VAULT_RESPONSE', {
@@ -47,11 +86,12 @@ export const MessengerProvider: ParentComponent = (props) => {
     // Set up all message handlers
     setupMessageHandlers(messengerInstance);
 
-    // Send ready signal to parent
-    messengerInstance.send('VAULT_READY', {
-      timestamp: Date.now(),
-      version: '1.0.0'
-    });
+    // Don't send ready signal here - wait for AuthProvider to set up handlers
+    if (window.parent !== window) {
+      console.log('📍 In iframe mode - will send VAULT_READY after auth handlers are set up');
+    } else {
+      console.log('📍 Running standalone (not in iframe), skipping VAULT_READY signal');
+    }
 
     setMessenger(messengerInstance);
     console.log('✅ Messenger initialized');
@@ -82,11 +122,32 @@ export const MessengerProvider: ParentComponent = (props) => {
     return m.request(type, data, timeout);
   };
 
+  const sendVaultReady = () => {
+    const m = messenger();
+    if (m && window.parent !== window && handlersRegistered()) {
+      m.send('VAULT_READY', {
+        timestamp: Date.now(),
+        version: '1.0.0',
+        handlersReady: true
+      });
+      console.log('📤 Sent VAULT_READY signal to parent (handlers registered)');
+    } else {
+      console.log('⚠️ Cannot send VAULT_READY:', {
+        hasMessenger: !!m,
+        inIframe: window.parent !== window,
+        handlersRegistered: handlersRegistered()
+      });
+    }
+  };
+
   const value: MessengerContextType = {
     get messenger() { return messenger(); },
     isReady,
     send,
-    request
+    request,
+    sendVaultReady,
+    areHandlersRegistered: handlersRegistered,
+    setHandlersRegistered
   };
 
   return (

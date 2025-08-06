@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NostrPass Integration Example</title>
+</head>
+<body>
+    <h1>NostrPass Embassy Integration Example</h1>
+    
+    <div id="status">Loading NostrPass...</div>
+    
+    <button id="get-pubkey" disabled>Get Public Key</button>
+    <button id="sign-event" disabled>Sign Event</button>
+    <button id="show-vault">Show Vault</button>
+    <button id="hide-vault">Hide Vault</button>
+    
+    <div id="result"></div>
+
+    <!-- Include the Embassy SDK with config via data attributes -->
+    <script src="./dist/embassy.iife.js" 
+            data-vault-url="http://localhost:3001"
+            data-app-name="NostrPass Test App"
+            data-debug="true"></script>
+    
+    <script>
+        // The script auto-initializes window.nostr
+        console.log('Embassy script loaded, window.nostr:', window.nostr);
+        console.log('Available functions:', {
+            showVault: typeof window.showVault,
+            hideVault: typeof window.hideVault
+        });
+        
+        // Wait for Embassy to be ready
+        window.addEventListener('nostr:ready', () => {
+            console.log('nostr:ready event fired!');
+            document.getElementById('status').textContent = 'NostrPass Ready!';
+            document.getElementById('get-pubkey').disabled = false;
+            document.getElementById('sign-event').disabled = false;
+        });
+        
+        // Also check if window.nostr is available immediately
+        setTimeout(() => {
+            console.log('After timeout - window.nostr:', window.nostr);
+            if (window.nostr) {
+                document.getElementById('status').textContent = 'NostrPass Available (no ready event)';
+                document.getElementById('get-pubkey').disabled = false;
+                document.getElementById('sign-event').disabled = false;
+            }
+        }, 1000);
+
+        // Get Public Key
+        document.getElementById('get-pubkey').addEventListener('click', async () => {
+            try {
+                const pubkey = await window.nostr.getPublicKey();
+                document.getElementById('result').textContent = 'Public Key: ' + pubkey;
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+            }
+        });
+
+        // Sign Event
+        document.getElementById('sign-event').addEventListener('click', async () => {
+            try {
+                const event = {
+                    kind: 1,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [],
+                    content: "Hello from NostrPass test!"
+                };
+                
+                const signedEvent = await window.nostr.signEvent(event);
+                document.getElementById('result').textContent = 'Signed Event: ' + JSON.stringify(signedEvent, null, 2);
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+            }
+        });
+
+        // Show/Hide Vault UI
+        document.getElementById('show-vault').addEventListener('click', () => {
+            window.showVault?.();
+        });
+
+        document.getElementById('hide-vault').addEventListener('click', () => {
+            window.hideVault?.();
+        });
+    </script>
+</body>
+</html>

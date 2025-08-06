@@ -1,14 +1,15 @@
 import { Component, Show, createSignal, For, createMemo, onMount, createEffect } from 'solid-js';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 
-import { useAuth, useMessenger } from '../providers';
+import { useAuth, useMessenger, useCryptoWorker, useEnvironment } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
 import { nip19 } from 'nostr-tools';
 import { VaultTestConsole } from './VaultTestConsole';
 import PinPad from './PinPad';
 import PINRecovery from './PINRecovery';
 import PinSetup from './PinSetup';
-import { useCryptoWorker } from '../providers';
+import { PermissionService } from '../services/permissionService';
+import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
 
 export const Dashboard: Component = () => {
     const { user, logout, isVaultLocked, lockVault, unlockVault } = useAuth();
@@ -28,7 +29,18 @@ export const Dashboard: Component = () => {
     const [tempNewPin, setTempNewPin] = createSignal<string>('');
     const [showPasswordPrompt, setShowPasswordPrompt] = createSignal(false);
     const [passwordForReset, setPasswordForReset] = createSignal('');
+    const [showSettingsPanel, setShowSettingsPanel] = createSignal(false);
+    const [selectedIdentityKey, setSelectedIdentityKey] = createSignal<string | null>(null);
+    const [appPermissions, setAppPermissions] = createSignal<AppPermissions | null>(null);
+    const [isSavingPermission, setIsSavingPermission] = createSignal(false);
+    const [permissionSaveError, setPermissionSaveError] = createSignal<string | null>(null);
     const cryptoWorker = useCryptoWorker();
+    const env = useEnvironment();
+    const permissionService = PermissionService.getInstance();
+    
+    // Debounced sync to Nostr
+    let syncTimeout: NodeJS.Timeout | null = null;
+    const SYNC_DELAY = 3000; // 3 seconds
     // For now, we'll create a single identity from the user's data
     // In the future, this can be expanded to support multiple identities
     const identities = createMemo(() => {
@@ -110,6 +122,13 @@ export const Dashboard: Component = () => {
     const backToApp = () => {
         send('HIDE_VAULT');
     };
+    
+    // Load permissions when settings panel opens
+    createEffect(() => {
+        if (showSettingsPanel() && params.app) {
+            loadAppPermissions();
+        }
+    });
 
     const handlePinUnlock = async (pin: string) => {
         setIsUnlocking(true);
@@ -125,12 +144,160 @@ export const Dashboard: Component = () => {
             }
         } catch (error) {
             console.error('Failed to unlock vault:', error);
-            setPinUnlockError('Failed to unlock vault. Please try again.');
+            
+            // Check if the error indicates we need to login again
+            if (error instanceof Error && error.message.includes('login with password')) {
+                setPinUnlockError('Session expired. Please login with your password.');
+                // Close the PIN modal and redirect to login
+                setTimeout(() => {
+                    setShowPinUnlock(false);
+                    navigate(`/${params.app}/login`);
+                }, 2000);
+            } else {
+                setPinUnlockError('Failed to unlock vault. Please try again.');
+            }
         } finally {
             setIsUnlocking(false);
         }
     };
 
+    // Load permissions for the current app
+    const loadAppPermissions = async () => {
+        const currentUser = user();
+        if (!currentUser || !params.app) return;
+        
+        console.log('Loading permissions for app:', params.app);
+        
+        try {
+            const permissions = await permissionService.getAllAppPermissions(currentUser.profile.username);
+            console.log('All permissions loaded:', permissions);
+            
+            const appPerm = permissions.find(p => p.appId === params.app);
+            console.log('App permissions found:', appPerm);
+            
+            if (!appPerm) {
+                // Initialize default permissions for new app
+                const defaultPermissions: AppPermissions = {
+                    appId: params.app,
+                    appName: desanitizeDomain(params.app),
+                    getPublicKey: 'ASK_EVERYTIME',
+                    signData: 'ASK_EVERYTIME',
+                    nip04: 'ASK_EVERYTIME',
+                    getRelays: 'ASK_EVERYTIME',
+                    kinds: {},
+                    grantedAt: Date.now(),
+                    lastUsedAt: Date.now()
+                };
+                setAppPermissions(defaultPermissions);
+            } else {
+                setAppPermissions(appPerm);
+            }
+        } catch (error) {
+            console.error('Failed to load permissions:', error);
+            // Set default permissions on error
+            const defaultPermissions: AppPermissions = {
+                appId: params.app,
+                appName: desanitizeDomain(params.app),
+                getPublicKey: 'ASK_EVERYTIME',
+                signData: 'ASK_EVERYTIME',
+                nip04: 'ASK_EVERYTIME',
+                getRelays: 'ASK_EVERYTIME',
+                kinds: {},
+                grantedAt: Date.now(),
+                lastUsedAt: Date.now()
+            };
+            setAppPermissions(defaultPermissions);
+        }
+    };
+    
+    // Sync permissions to Nostr (debounced)
+    const syncPermissionsToNostr = async () => {
+        const currentUser = user();
+        if (!currentUser || !cryptoWorker) return;
+        
+        setIsSavingPermission(true);
+        setPermissionSaveError(null);
+        
+        try {
+            console.log('Syncing permissions to Nostr...');
+            const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
+                username: currentUser.profile.username 
+            });
+            const { publishEvent } = await import('@nostrpass/nostrHelpers');
+            await publishEvent(vaultEvent.event, env.getRelays());
+            console.log('✅ Permissions synced to Nostr');
+            
+            // Show success message briefly  
+            setPermissionSaveError('✅ Successfully encrypted and saved to Nostr!');
+            setTimeout(() => setPermissionSaveError(null), 3000);
+        } catch (error: any) {
+            console.error('Failed to sync to Nostr:', error);
+            if (error.message?.includes('Vault is locked')) {
+                setPermissionSaveError('Please unlock your vault with PIN first');
+            } else if (error.message?.includes('no xpriv')) {
+                setPermissionSaveError('Session expired - please unlock with PIN');
+            } else {
+                setPermissionSaveError(error.message || 'Failed to save to Nostr');
+            }
+        } finally {
+            setIsSavingPermission(false);
+        }
+    };
+    
+    // Handle permission change
+    const handlePermissionChange = async (permissionType: string, newLevel: PermissionLevel) => {
+        const currentUser = user();
+        if (!currentUser || !params.app || !appPermissions()) return;
+        
+        setIsSavingPermission(true);
+        setPermissionSaveError(null);
+        
+        try {
+            // Update local permission
+            const updates: Partial<AppPermissions> = {};
+            
+            if (permissionType === 'getPublicKey') {
+                updates.getPublicKey = newLevel;
+            } else if (permissionType === 'signEvent') {
+                updates.kinds = { ...appPermissions()!.kinds, 1: newLevel }; // Default to kind 1
+            } else if (permissionType === 'signData') {
+                updates.signData = newLevel;
+            } else if (permissionType === 'nip04_encrypt') {
+                updates.nip04 = newLevel;
+            } else if (permissionType === 'nip04_decrypt') {
+                updates.nip04 = newLevel;
+            } else if (permissionType === 'getRelays') {
+                updates.getRelays = newLevel;
+            }
+            
+            await permissionService.saveAppPermissions(
+                currentUser.profile.username,
+                params.app,
+                updates,
+                appPermissions()!.appName || params.app
+            );
+            
+            // Reload permissions to get updated state
+            await loadAppPermissions();
+            
+            // Clear existing sync timeout
+            if (syncTimeout) {
+                clearTimeout(syncTimeout);
+            }
+            
+            // Schedule sync to Nostr (debounced)
+            syncTimeout = setTimeout(() => {
+                syncPermissionsToNostr();
+            }, SYNC_DELAY);
+            
+        } catch (error) {
+            console.error('Failed to update permission:', error);
+            setPermissionSaveError('Failed to save permission');
+        } finally {
+            setIsSavingPermission(false);
+        }
+    };
+    
     const handlePasswordVerification = async () => {
         if (!cryptoWorker || !recoverySessionToken() || !tempNewPin() || !passwordForReset()) {
             console.error('Missing required data for password verification');
@@ -328,7 +495,11 @@ export const Dashboard: Component = () => {
 
                                                 {/* Settings button */}
                                                 <button
-                                                    onClick={() => navigate(`/${params.app}/settings`)}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedIdentityKey(identity.publicKey);
+                                                        setShowSettingsPanel(true);
+                                                    }}
                                                     class="p-1 hover:bg-gray-100 rounded transition-colors border border-gray-200 hover:border-gray-300"
                                                     title="Settings"
                                                 >
@@ -490,6 +661,222 @@ export const Dashboard: Component = () => {
                                 </Show>
                             </div>
                         </Show>
+                    </div>
+                </div>
+            </Show>
+
+            {/* Settings Side Panel */}
+            <Show when={showSettingsPanel()}>
+                <div class="fixed inset-0 z-50 overflow-hidden">
+                    {/* Backdrop */}
+                    <div 
+                        class="fixed inset-0 bg-black/50 transition-opacity"
+                        onClick={() => setShowSettingsPanel(false)}
+                    />
+                    
+                    {/* Side Panel */}
+                    <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+                        {/* Panel Header */}
+                        <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-900">Identity Settings</h2>
+                            <button
+                                onClick={() => setShowSettingsPanel(false)}
+                                class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Panel Content */}
+                        <div class="p-6">
+                            <Show when={(() => {
+                                const identity = identities().find(id => id.publicKey === selectedIdentityKey());
+                                return identity;
+                            })()}>
+                                {(identity) => (
+                                    <div class="space-y-6">
+                                        {/* Identity Information Section */}
+                                        <div>
+                                            <h3 class="text-lg font-medium text-gray-900 mb-3">Identity</h3>
+                                            <div class="space-y-3">
+                                                <div class="flex items-center justify-between">
+                                                    <div class="flex items-center gap-4">
+                                                        <span class="text-sm text-gray-600">Name:</span>
+                                                        <span class="text-sm font-medium text-gray-900">{identity().nickname}</span>
+                                                    </div>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-sm text-gray-600">Created:</span>
+                                                        <span class="text-sm text-gray-900">{new Date(identity().createdAt).toLocaleDateString()}</span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <span class="text-sm text-gray-600">Public Key</span>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-xs font-mono text-gray-500">{identity().publicKey.slice(0, 8)}...</span>
+                                                        <button
+                                                            onClick={() => navigator.clipboard.writeText(identity().publicKey)}
+                                                            class="text-xs text-blue-600 hover:text-blue-700"
+                                                        >
+                                                            Copy
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div class="flex items-center justify-between gap-2">
+                                                    <span class="text-sm text-gray-600">Npub</span>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-xs font-mono text-gray-500">{identity().npub.slice(0, 16)}...</span>
+                                                        <button
+                                                            onClick={() => navigator.clipboard.writeText(identity().npub)}
+                                                            class="text-xs text-blue-600 hover:text-blue-700"
+                                                        >
+                                                            Copy
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* App Permissions Section */}
+                                        <div class="border-t pt-6">
+                                            <h3 class="text-lg font-medium text-gray-900 mb-2">Permissions</h3>
+                                            <Show 
+                                                when={params.app}
+                                                fallback={
+                                                    <p class="text-sm text-gray-500">
+                                                        No app currently connected
+                                                    </p>
+                                                }
+                                            >
+                                                <div class="space-y-3">
+                                                    <p class="text-xs text-gray-600">
+                                                        What {desanitizeDomain(params.app!)} can do with this identity:
+                                                    </p>
+                                                    
+                                                    {/* Simple Permission List */}
+                                                    <div class="divide-y divide-gray-100">
+                                                        <Show when={appPermissions()} fallback={
+                                                            <p class="text-xs text-gray-500 py-2">Loading permissions...</p>
+                                                        }>
+                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 hover:bg-gray-50 transition-colors">
+                                                                <span class="text-sm text-gray-700">Read Public Key</span>
+                                                                <select 
+                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+                                                                    value={appPermissions()?.getPublicKey || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('getPublicKey', e.currentTarget.value as PermissionLevel)}
+                                                                    disabled={isSavingPermission()}
+                                                                >
+                                                                    <option value="ALLOW">Allowed</option>
+                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                                                    <option value="DENY">Blocked</option>
+                                                                </select>
+                                                            </div>
+
+                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 bg-gray-50 hover:bg-gray-100 transition-colors">
+                                                                <span class="text-sm text-gray-700">Sign Events</span>
+                                                                <select 
+                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+                                                                    value={appPermissions()?.kinds?.[1] || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('signEvent', e.currentTarget.value as PermissionLevel)}
+                                                                    disabled={isSavingPermission()}
+                                                                >
+                                                                    <option value="ALLOW">Allowed</option>
+                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                                                    <option value="DENY">Blocked</option>
+                                                                </select>
+                                                            </div>
+
+                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 hover:bg-gray-50 transition-colors">
+                                                                <span class="text-sm text-gray-700">Sign Data</span>
+                                                                <select 
+                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+                                                                    value={appPermissions()?.signData || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('signData', e.currentTarget.value as PermissionLevel)}
+                                                                    disabled={isSavingPermission()}
+                                                                >
+                                                                    <option value="ALLOW">Allowed</option>
+                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                                                    <option value="DENY">Blocked</option>
+                                                                </select>
+                                                            </div>
+
+                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 bg-gray-50 hover:bg-gray-100 transition-colors">
+                                                                <span class="text-sm text-gray-700">Encrypt Messages (NIP-04)</span>
+                                                                <select 
+                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+                                                                    value={appPermissions()?.nip04 || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('nip04_encrypt', e.currentTarget.value as PermissionLevel)}
+                                                                    disabled={isSavingPermission()}
+                                                                >
+                                                                    <option value="ALLOW">Allowed</option>
+                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                                                    <option value="DENY">Blocked</option>
+                                                                </select>
+                                                            </div>
+
+                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 hover:bg-gray-50 transition-colors">
+                                                                <span class="text-sm text-gray-700">Decrypt Messages (NIP-04)</span>
+                                                                <select 
+                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+                                                                    value={appPermissions()?.nip04 || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('nip04_decrypt', e.currentTarget.value as PermissionLevel)}
+                                                                    disabled={isSavingPermission()}
+                                                                >
+                                                                    <option value="ALLOW">Allowed</option>
+                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                                                    <option value="DENY">Blocked</option>
+                                                                </select>
+                                                            </div>
+
+                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 bg-gray-50 hover:bg-gray-100 transition-colors">
+                                                                <span class="text-sm text-gray-700">Access Relay List</span>
+                                                                <select 
+                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+                                                                    value={appPermissions()?.getRelays || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('getRelays', e.currentTarget.value as PermissionLevel)}
+                                                                    disabled={isSavingPermission()}
+                                                                >
+                                                                    <option value="ALLOW">Allowed</option>
+                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                                                    <option value="DENY">Blocked</option>
+                                                                </select>
+                                                            </div>
+                                                        </Show>
+                                                        
+                                                        <Show when={permissionSaveError()}>
+                                                            <p class={`text-xs mt-2 ${permissionSaveError()?.includes('Successfully') ? 'text-green-600' : 'text-red-600'}`}>
+                                                                {permissionSaveError()}
+                                                            </p>
+                                                        </Show>
+                                                        
+                                                        <Show when={isSavingPermission()}>
+                                                            <p class="text-xs text-gray-500 mt-2">Saving...</p>
+                                                        </Show>
+                                                        
+                                                        <div class="mt-4 pt-4 border-t border-gray-200">
+                                                            <button
+                                                                onClick={syncPermissionsToNostr}
+                                                                class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                disabled={isSavingPermission()}
+                                                            >
+                                                                {isSavingPermission() ? 'Saving...' : 'Save to Nostr'}
+                                                            </button>
+                                                            <p class="text-xs text-gray-500 mt-2">
+                                                                Backup your settings to Nostr for cross-device sync
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </Show>
+                                        </div>
+
+                                    </div>
+                                )}
+                            </Show>
+                        </div>
                     </div>
                 </div>
             </Show>

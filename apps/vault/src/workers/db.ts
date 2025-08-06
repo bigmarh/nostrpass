@@ -1,26 +1,8 @@
 // IndexedDB helper for secure storage in worker context
 
-export interface VaultData {
-  username: string;
-  publicKey: string;
-  encryptedXpriv: string;
-  salt: string;
-  pinSalt?: string;
-  pinHash?: string;
-  identities: any[];
-  currentIdentityIndex: number;
-  hasPin: boolean;
-  updatedAt: number;
-  // Password verification - a known string encrypted with password
-  passwordVerifier?: string;
-  // Recovery system for PIN
-  recovery?: {
-    questions: string[]; // The security questions
-    xprivRecovery: string; // encrypted(xpriv, recoveryKey)
-    salt: string; // Salt for answer derivation
-    version: number; // For future compatibility
-  };
-}
+// Import and re-export the unified VaultData type
+import type { VaultData } from '@nostrpass/nostrHelpers';
+export type { VaultData };
 
 export interface UserSession {
   username: string;
@@ -32,7 +14,7 @@ export interface UserSession {
 }
 
 const DB_NAME = 'NostrPassVault';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Keep at version 2 to avoid downgrade error
 
 class VaultDB {
   private db: IDBDatabase | null = null;
@@ -69,6 +51,12 @@ class VaultDB {
   async saveVault(vaultData: VaultData): Promise<void> {
     if (!this.db) await this.init();
     
+    console.log('💾 Saving vault to IndexedDB:', {
+      username: vaultData.username,
+      hasXprivEncryptedForPin: !!vaultData.xprivEncryptedForPin,
+      xprivEncryptedForPinLength: vaultData.xprivEncryptedForPin?.length
+    });
+    
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(['vaults'], 'readwrite');
       const store = transaction.objectStore('vaults');
@@ -87,7 +75,17 @@ class VaultDB {
       const store = transaction.objectStore('vaults');
       const request = store.get(username);
 
-      request.onsuccess = () => resolve(request.result || null);
+      request.onsuccess = () => {
+        const result = request.result || null;
+        if (result) {
+          console.log('📤 Retrieved vault from IndexedDB:', {
+            username: result.username,
+            hasXprivEncryptedForPin: !!result.xprivEncryptedForPin,
+            xprivEncryptedForPinLength: result.xprivEncryptedForPin?.length
+          });
+        }
+        resolve(result);
+      };
       request.onerror = () => reject(request.error);
     });
   }

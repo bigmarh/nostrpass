@@ -74,7 +74,6 @@ export async function createIdentity(xpriv: string, nickname: string, index: num
     path,
     publicKey,
     index,
-    name: nickname, // alias for compatibility
     createdAt: Date.now()
   };
   

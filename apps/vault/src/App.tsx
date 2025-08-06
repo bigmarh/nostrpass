@@ -10,7 +10,6 @@ const AppContent: Component = () => {
       <Route path="/:app" component={() => <LoginGuard><Login /></LoginGuard>} />
       <Route path="/:app/unlock" component={() => <AuthGuard><PinUnlock /></AuthGuard>} />
       <Route path="/:app/dashboard" component={() => <AuthGuard><Dashboard /></AuthGuard>} />
-      <Route path="/:app/settings" component={() => <AuthGuard><div>Settings</div></AuthGuard>} />
       <Route path="/:app/keys" component={() => <AuthGuard><div>Key Management</div></AuthGuard>} /> 
     </Router>   
   );

@@ -50,16 +50,12 @@ const PinPad: Component<PinPadProps> = (props) => {
     const newPin = currentPin().slice(0, -1);
     setCurrentPin(newPin);
     
-    // Call both onChange and onPinChange for compatibility
-    if (props.onChange) props.onChange(newPin);
     if (props.onPinChange) props.onPinChange(newPin);
   };
 
   const clearPin = () => {
     setCurrentPin('');
     
-    // Call both onChange and onPinChange for compatibility
-    if (props.onChange) props.onChange('');
     if (props.onPinChange) props.onPinChange('');
   };
 

@@ -115,14 +115,16 @@ class NostrPassEmbassy {
       }
 
       // Handle load events
+      // Initialize messenger BEFORE iframe loads to catch early messages
+      this.initializeMessenger();
+      
       this.iframe.onload = () => {
         if (this.config.debug) console.log('Iframe loaded successfully');
-
-        // Initialize messenger after iframe loads
-        this.initializeMessenger();
-
-        this._isReady = true;
-        resolve();
+        // Give the vault a moment to initialize its handlers
+        setTimeout(() => {
+          if (this.config.debug) console.log('Iframe initialization period complete');
+          resolve();
+        }, 100);
       };
 
       this.iframe.onerror = () => {
@@ -242,8 +244,18 @@ class NostrPassEmbassy {
   private initializeMessenger(): void {
     if (!this.iframe) return;
 
-    // Create messenger instance
+    // Create messenger instance with custom send function that targets our specific iframe
     this.messenger = new ParentMessenger(window);
+    
+    // Override the sendMessage method to use our specific iframe
+    (this.messenger as any).sendMessage = (message: any) => {
+      if (!this.iframe?.contentWindow) {
+        console.error('Iframe contentWindow not available');
+        return;
+      }
+      const vaultOrigin = new URL(this.config.vaultUrl!).origin;
+      this.iframe.contentWindow.postMessage(message, vaultOrigin);
+    };
 
     // Initialize with vault origin
     const vaultOrigin = new URL(this.config.vaultUrl!).origin;
@@ -260,9 +272,16 @@ class NostrPassEmbassy {
 
     // Handle vault ready signal
     const handlers = embassyMessageHandlers(this);
+    console.log('Setting up message handlers:', this.handlers);
     this.handlers.forEach((handler) => {
+      console.log('Registering handler for:', handler);
       this.messenger!.on(handler, handlers[handler as keyof typeof handlers]!);
     });
+    
+    // Debug: log all registered handlers
+    if (this.config.debug) {
+      console.log('Message handlers registered:', (this.messenger as any).messageHandlers);
+    }
   }
 
   // Core Nostr methods
@@ -397,6 +416,11 @@ let embassyInstance: NostrPassEmbassy | null = null;
 
 // Initialize function
 function initNostrPass(config: EmbassyConfig = {}): NostrProvider {
+  // If there's already an instance, destroy it first
+  if (embassyInstance) {
+    embassyInstance.destroy();
+  }
+  
   embassyInstance = new NostrPassEmbassy(config);
 
   // Create the nostr provider interface
@@ -437,14 +461,38 @@ if (typeof window !== 'undefined') {
   window.initNostrPass = initNostrPass;
   window.showVault = showVault;
   window.hideVault = hideVault;
-  // Install window.nostr
-  const provider = initNostrPass();
-  window.nostr = provider;
-
-
-
-
-  console.log('✅ NostrPass Embassy loaded');
+  
+  // Don't auto-initialize if the script will be manually initialized
+  // Check if there's a script tag with data-manual-init
+  const currentScript = document.currentScript as HTMLScriptElement;
+  const manualInit = currentScript?.getAttribute('data-manual-init') === 'true';
+  
+  if (!manualInit) {
+    // Get config from data attributes
+    const config: EmbassyConfig = {};
+    
+    // Read config from data attributes
+    if (currentScript?.hasAttribute('data-vault-url')) {
+      config.vaultUrl = currentScript.getAttribute('data-vault-url') || undefined;
+    }
+    if (currentScript?.hasAttribute('data-app-name')) {
+      config.appName = currentScript.getAttribute('data-app-name') || undefined;
+    }
+    if (currentScript?.hasAttribute('data-debug')) {
+      config.debug = currentScript.getAttribute('data-debug') === 'true';
+    }
+    if (currentScript?.hasAttribute('data-theme')) {
+      config.theme = currentScript.getAttribute('data-theme') as 'light' | 'dark' | 'auto' || undefined;
+    }
+    
+    // Auto-install window.nostr with config from data attributes
+    const provider = initNostrPass(config);
+    window.nostr = provider;
+    console.log('✅ NostrPass Embassy auto-initialized with config:', config);
+  } else {
+    console.log('✅ NostrPass Embassy loaded (manual init mode)');
+  }
+  
   console.log('💡 Use window.initNostrPass(config) to customize');
 }
 

@@ -17,5 +17,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    lib: {
+      entry: path.resolve(__dirname, 'src/embassy.ts'),
+      name: 'NostrPassEmbassy',
+      fileName: 'embassy',
+      formats: ['iife', 'es', 'umd']
+    },
+    rollupOptions: {
+      external: [],
+      output: {
+        globals: {}
+      }
+    }
   },
 });

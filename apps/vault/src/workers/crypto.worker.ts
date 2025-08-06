@@ -114,12 +114,14 @@ interface DeriveKeyResult {
 
 interface EncryptDataParams {
   data: string;
-  password: string;
+  password?: string;
+  key?: string; // Allow direct key usage
 }
 
 interface DecryptDataParams {
   encryptedData: string;
-  password: string;
+  password?: string;
+  key?: string; // Allow direct key usage
 }
 
 interface GenerateXprivResult {
@@ -252,36 +254,49 @@ const handlers = {
 
   encryptData: async (params: EncryptDataParams): Promise<string> => {
     const crypto = await ensureWasmReady();
+    
+    // Use key directly if provided, otherwise use password
+    const encryptionKey = params.key || params.password;
+    if (!encryptionKey) {
+      throw new Error('Either key or password must be provided');
+    }
+    
     console.log('🔐 encryptData called with:', {
       dataLength: params.data?.length,
-      dataType: typeof params.data,
-      passwordLength: params.password?.length,
-      passwordType: typeof params.password,
-      passwordPreview: typeof params.password === 'string' ? params.password.substring(0, 10) + '...' : 'not-a-string'
+      usingKey: !!params.key,
+      usingPassword: !!params.password
     });
-    const result = crypto.encryptData(params.data, params.password);
+    
+    const result = crypto.encryptData(params.data, encryptionKey);
     console.log('✅ encryptData result:', {
       resultType: typeof result,
-      resultLength: result?.length,
-      resultPreview: result?.substring(0, 20) + '...'
+      resultLength: result?.length
     });
     return result;
   },
 
   decryptData: async (params: DecryptDataParams): Promise<string> => {
     try {
+      // Use key directly if provided, otherwise use password
+      const decryptionKey = params.key || params.password;
+      if (!decryptionKey) {
+        throw new Error('Either key or password must be provided');
+      }
+      
       console.log('🔐 decryptData called with:', {
         hasEncryptedData: !!params.encryptedData,
         encryptedDataLength: params.encryptedData?.length,
         encryptedDataType: typeof params.encryptedData,
-        hasPassword: !!params.password,
-        passwordLength: params.password?.length,
-        passwordType: typeof params.password,
-        passwordPreview: typeof params.password === 'string' ? params.password.substring(0, 10) + '...' : 'not-a-string'
+        usingKey: !!params.key,
+        usingPassword: !!params.password
       });
       
+      if (!params.encryptedData) {
+        throw new Error('encryptedData is required');
+      }
+      
       const crypto = await ensureWasmReady();
-      const result = crypto.decryptData(params.encryptedData, params.password);
+      const result = crypto.decryptData(params.encryptedData, decryptionKey);
       console.log('✅ decryptData successful');
       return result;
     } catch (error) {
@@ -329,18 +344,14 @@ const handlers = {
     const sessionTimeout = params.sessionTimeout || 60; // default 60 minutes
     const expiresAt = Date.now() + (sessionTimeout * 60 * 1000);
     
-    const session: UserSession = {
+    const session: ExtendedSession = {
       username: params.username,
       publicKey: params.publicKey,
       privateKey: params.privateKey,
       isUnlocked: (!!params.privateKey && params.privateKey !== '') || !!params.xpriv, // Unlocked if we have private key OR xpriv
       unlockedAt: Date.now(),
-      expiresAt
-    };
-    
-    // Store xpriv if provided for full key derivation
-    if (params.xpriv) {
-      (session as any).xpriv = params.xpriv;
+      expiresAt,
+      xpriv: params.xpriv // Store xpriv directly in the session object
     }
     
     // Check if there's already an unlocked session - don't overwrite it with a locked one
@@ -362,7 +373,15 @@ const handlers = {
       username: session.username,
       isUnlocked: session.isUnlocked,
       hasPrivateKey: !!session.privateKey,
-      hasXpriv: !!(session as any).xpriv
+      hasXpriv: !!session.xpriv,
+      xprivLength: session.xpriv?.length
+    });
+    
+    // Verify session was stored correctly
+    const storedSession = activeSessions.get(params.username);
+    console.log('🔍 Verification - session in map:', {
+      found: !!storedSession,
+      hasXpriv: !!(storedSession as any)?.xpriv
     });
     
     // Store session info in DB (without private key)
@@ -496,26 +515,33 @@ const handlers = {
     console.log('🗑️ clearSession called for:', params.username);
     const existingSession = activeSessions.get(params.username);
     if (existingSession) {
-      console.log('🗑️ Clearing session:', {
+      console.log('🗑️ Clearing session memory only (keeping vault data):', {
         username: existingSession.username,
         wasUnlocked: existingSession.isUnlocked
       });
       
+      // Clear sensitive data from memory
+      delete existingSession.privateKey;
+      delete (existingSession as any).xpriv;
+      existingSession.isUnlocked = false;
+      
+      // Keep the session with basic info (username, publicKey)
+      // The vault data in IndexedDB has the PIN-encrypted xpriv
+      // This allows unlock without re-login
+      
       // Notify the vault UI about manual lock
-      if (existingSession.isUnlocked || (existingSession as any).xpriv) {
-        self.postMessage({
-          type: 'SESSION_LOCKED',
-          data: {
-            username: params.username,
-            reason: 'manual_lock'
-          }
-        });
-      }
+      self.postMessage({
+        type: 'SESSION_LOCKED',
+        data: {
+          username: params.username,
+          reason: 'manual_lock'
+        }
+      });
+      
+      logSessionState('LOCKED', params.username);
+    } else {
+      console.log('⚠️ No session found to clear');
     }
-    
-    // Remove from memory immediately (no WASM or DB needed)
-    activeSessions.delete(params.username);
-    logSessionState('CLEARED', params.username);
     console.log('🗑️ Session cleared from memory');
     
     // Note: We don't clear from DB on logout to preserve vault data
@@ -526,6 +552,12 @@ const handlers = {
   getVaultData: async (params: GetSessionParams): Promise<VaultData | null> => {
     await ensureWasmReady();
     return vaultDB.getVault(params.username);
+  },
+  
+  // Update vault data
+  updateVaultData: async (params: { username: string; vaultData: VaultData }): Promise<void> => {
+    await ensureWasmReady();
+    await vaultDB.saveVault(params.vaultData);
   },
 
   // Sign with active session or specific identity
@@ -887,35 +919,81 @@ const handlers = {
     };
   },
 
-  // Save vault to Nostr using storage key
-  saveVaultToNostr: async (params: { username: string }): Promise<{ event: any }> => {
+  // Simple login - store vault data and password key for PIN unlock
+  loginUser: async (params: { 
+    username: string; 
+    vaultData: VaultData;
+  }): Promise<{ success: boolean }> => {
     await ensureWasmReady();
     
-    console.log('💾 saveVaultToNostr called for:', params.username);
+    console.log('🔑 Logging in user:', params.username);
+    console.log('📦 Vault data to save:', {
+      username: params.vaultData.username,
+      hasXprivEncryptedForPin: !!params.vaultData.xprivEncryptedForPin,
+      xprivEncryptedForPinLength: params.vaultData.xprivEncryptedForPin?.length
+    });
     
-    // Get vault data
+    // Store vault data in IndexedDB - this IS our session
+    await vaultDB.saveVault(params.vaultData);
+    
+    // Create minimal session in memory
+    const session: ExtendedSession = {
+      username: params.username,
+      publicKey: params.vaultData.publicKey,
+      isUnlocked: false, // Not unlocked until PIN entered
+      unlockedAt: Date.now()
+    };
+    
+    activeSessions.set(params.username, session);
+    logSessionState('USER_LOGGED_IN', params.username);
+    
+    console.log('✅ User logged in - vault data stored');
+    return { success: true };
+  },
+
+  // Check if user is logged in (has vault data)
+  isUserLoggedIn: async (params: { username: string }): Promise<{ loggedIn: boolean }> => {
+    await ensureWasmReady();
+    
     const vaultData = await vaultDB.getVault(params.username);
-    if (!vaultData) {
-      throw new Error('No vault found for user');
-    }
+    return { loggedIn: !!vaultData };
+  },
+  
+  // Get password key from session (for PIN unlock)
+
+  // Simple logout - just clear vault data
+  logoutUser: async (params: { username: string }): Promise<{ success: boolean }> => {
+    await ensureWasmReady();
     
-    // Get session to check if unlocked
+    console.log('🧹 Logging out user:', params.username);
+    
+    // Remove from active sessions
+    activeSessions.delete(params.username);
+    
+    // Clear vault from IndexedDB - this removes the "logged in" state
+    await vaultDB.deleteVault(params.username);
+    
+    logSessionState('USER_LOGGED_OUT', params.username);
+    console.log('✅ User logged out - vault data cleared');
+    return { success: true };
+  },
+
+  loadVaultFromNostr: async (params: { 
+    username: string; 
+    encryptedContent: string; 
+    storagePublicKey: string 
+  }): Promise<VaultData> => {
+    await ensureWasmReady();
+    
+    console.log('📥 loadVaultFromNostr called for:', params.username);
+    
+    // Get session to access xpriv
     const session = activeSessions.get(params.username);
-    console.log('🔐 Session in saveVaultToNostr:', session ? {
-      username: session.username,
-      isUnlocked: session.isUnlocked,
-      hasXpriv: !!(session as any).xpriv
-    } : 'none');
-    
-    if (!session || (!session.isUnlocked && !(session as any).xpriv)) {
-      throw new Error('Vault is locked (no xpriv)');
+    if (!session || !(session as any).xpriv) {
+      throw new Error('Session does not have xpriv access. Cannot decrypt vault.');
     }
     
-    // Check if we have xpriv in session
     const xpriv = (session as any).xpriv;
-    if (!xpriv) {
-      throw new Error('Session does not have xpriv access. Unlock vault with PIN first.');
-    }
     
     // Get the storage keypair
     const STORAGE_INDEX = 2147483647;
@@ -924,6 +1002,118 @@ const handlers = {
       index: STORAGE_INDEX 
     });
     
+    // Verify the storage public key matches
+    if (derived.publicKey !== params.storagePublicKey) {
+      throw new Error('Storage public key mismatch. This vault belongs to a different account.');
+    }
+    
+    // Decrypt vault data using NIP-04 decryption
+    const crypto = await ensureWasmReady();
+    console.log('🔓 Decrypting vault data with storage key...');
+    
+    const decryptedContent = crypto.nip04Decrypt(
+      params.encryptedContent,
+      derived.privateKey,
+      derived.publicKey
+    );
+    console.log('✅ Vault data decrypted');
+    
+    // Parse and return the vault data
+    const vaultData = JSON.parse(decryptedContent) as VaultData;
+    return vaultData;
+  },
+
+  saveVaultToNostr: async (params: { 
+    username: string;
+    usePasswordEncryption?: boolean; // Force password encryption for initial save
+  }): Promise<{ event: any }> => {
+    await ensureWasmReady();
+    
+    console.log('💾 saveVaultToNostr called for:', params.username, {
+      usePasswordEncryption: params.usePasswordEncryption
+    });
+    
+    // Get vault data
+    const vaultData = await vaultDB.getVault(params.username);
+    if (!vaultData) {
+      console.error('❌ No vault found in IndexedDB for user:', params.username);
+      throw new Error('No vault found for user');
+    }
+    
+    console.log('📦 Vault data found:', {
+      username: vaultData.username,
+      hasXprivEncrypted: !!vaultData.xprivEncrypted,
+      hasPublicKey: !!vaultData.publicKey,
+      hasStoragePublicKey: !!vaultData.storagePublicKey
+    });
+    
+    // Get session to check if unlocked
+    console.log('🔍 Looking for session with username:', params.username);
+    console.log('📋 Active sessions:', Array.from(activeSessions.keys()));
+    
+    const session = activeSessions.get(params.username);
+    console.log('🔐 Session in saveVaultToNostr:', session ? {
+      username: session.username,
+      isUnlocked: session.isUnlocked,
+      hasXpriv: !!session.xpriv,
+      xprivLength: session.xpriv?.length,
+      hasPasswordKey: !!(session as any).passwordKey
+    } : 'none');
+    
+    // Check if we have xpriv access
+    const hasXpriv = session && session.xpriv;
+    
+    if (!hasXpriv) {
+      console.error('❌ No xpriv in session - cannot sign vault event');
+      throw new Error('No xpriv access - vault must be unlocked');
+    }
+    
+    // For initial save, we MUST use password encryption
+    const usePasswordEncryption = params.usePasswordEncryption || false;
+    
+    const crypto = await ensureWasmReady();
+    let signedEvent: any;
+    
+    // We always need xpriv to derive the storage key for signing
+    if (!hasXpriv) {
+      throw new Error('Cannot save vault without xpriv - vault must be unlocked');
+    }
+    
+    const xpriv = session!.xpriv!; // We already checked hasXpriv above
+    
+    // Get the storage keypair for signing
+    const STORAGE_INDEX = 2147483647;
+    const derived = await handlers.deriveKeypairFromXpriv({ 
+      xpriv,
+      index: STORAGE_INDEX 
+    });
+    
+    // Prepare vault content
+    let vaultContent: string;
+    
+    if (usePasswordEncryption) {
+      // INITIAL SAVE: No additional encryption, vault is already password+PIN encrypted
+      console.log('📦 Initial vault save - no additional encryption');
+      vaultContent = JSON.stringify({
+        ...vaultData,
+        version: 1
+      });
+    } else {
+      // SUBSEQUENT SAVES: Add NIP-04 encryption layer
+      console.log('🔐 Subsequent vault save - adding NIP-04 encryption');
+      const vaultDataString = JSON.stringify({
+        ...vaultData,
+        version: (vaultData.version || 1) + 1
+      });
+      
+      // Add NIP-04 encryption on top of password+PIN encryption
+      vaultContent = crypto.nip04Encrypt(
+        vaultDataString,
+        derived.privateKey,
+        derived.publicKey
+      );
+    }
+    
     // Create vault event
     const vaultEvent = {
       kind: 30078,
@@ -931,14 +1121,16 @@ const handlers = {
       tags: [
         ['d', `nostrpass.com_vault_${getEnvironment()}_${derived.publicKey}`],
         ['subject', 'encrypted-vault'],
+        ['client', 'nostrpass.com'],
+        ['version', String(vaultData.version || 1)]
       ],
-      content: JSON.stringify(vaultData),
+      content: vaultContent,
       pubkey: derived.publicKey,
     };
     
     // Sign with storage key
-    const crypto = await ensureWasmReady();
-    const signedEvent = crypto.signEvent(vaultEvent, derived.privateKey);
+    signedEvent = crypto.signEvent(vaultEvent, derived.privateKey);
+    console.log('✅ Vault event signed with storage key');
     
     return { event: signedEvent };
   },
@@ -959,6 +1151,15 @@ console.log('📋 Registering handlers:', Object.keys(handlers));
 // Initialize the worker host
 const host = createWorkerHost(handlers as any);
 console.log('✅ Worker host created');
+
+// Add debugging for message handling
+self.addEventListener('message', (event) => {
+  console.log('🔵 Worker received message:', {
+    method: event.data?.method,
+    id: event.data?.id,
+    hasParams: !!event.data?.params
+  });
+});
 
 // Pre-initialize WASM on worker startup
 ensureWasmReady()

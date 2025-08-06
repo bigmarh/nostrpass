@@ -152,9 +152,9 @@ export async function publishEvent(signedEvent: NostrEvent, relays: string[]): P
   // Try each relay individually to identify which ones require PoW
   for (const relay of relays) {
     try {
-      const result = await pool.publish([relay], signedEvent);
+      await pool.publish([relay], signedEvent);
       console.log(`✅ Published to ${relay}`);
-      successfulPublishes.push(result[0]);
+      successfulPublishes.push(relay);
     } catch (error: any) {
       if (error.message?.includes('pow:')) {
         const powMatch = error.message.match(/pow:\s*(\d+)\s*bits/);

@@ -65,6 +65,13 @@ const ENVIRONMENT_CONFIGS: Record<string, EnvironmentConfig> = {
   }
 };
 
+// Helper function to get relays without context
+export function getRelays(): string[] {
+  const envName = detectEnvironment();
+  const envConfig = ENVIRONMENT_CONFIGS[envName] || ENVIRONMENT_CONFIGS.development;
+  return envConfig.relays;
+}
+
 // Detect current environment
 function detectEnvironment(): string {
   // Check Vite environment first

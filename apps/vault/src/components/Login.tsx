@@ -80,7 +80,7 @@ export const Login: Component = () => {
         }
 
         // Normalize username
-        const normalizedUsername = username().trim();
+        const normalizedUsername = username().trim().toLowerCase();
         
         // Check username availability
         setLoadingStatus('Checking username availability...');
@@ -186,7 +186,7 @@ export const Login: Component = () => {
             
             // Create account with PIN encryption
             console.log('🔑 Creating account with PIN...');
-            const { publicKey } = await createAccount(accountData.username, accountData.password, pin);
+            const { publicKey } = await createAccount(accountData.username, accountData.password, pin, undefined);
             
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
@@ -202,18 +202,68 @@ export const Login: Component = () => {
             
             setLoadingStatus('Saving vault to Nostr...');
             
-            // Save vault to Nostr using the worker's signed event
-            if (cryptoWorker) {
+            // Save vault to Nostr - THIS IS CRITICAL FOR LOGIN TO WORK
+            setLoadingStatus('Saving vault to Nostr (required)...');
+            
+            if (!cryptoWorker) {
+                throw new Error('Crypto worker not available');
+            }
+            
+            let retryCount = 0;
+            const maxRetries = 3;
+            let savedSuccessfully = false;
+            
+            while (!savedSuccessfully && retryCount < maxRetries) {
                 try {
-                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ username: accountData.username });
+                    console.log(`🔄 Attempting to save vault to Nostr (attempt ${retryCount + 1}/${maxRetries})...`);
+                    
+                    // Wait to ensure session is ready
+                    console.log('⏳ Waiting for session to be ready...');
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
+                    
+                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
+                        username: accountData.username,
+                        usePasswordEncryption: true // Initial save uses base encryption only
+                    });
+                    
+                    console.log('📝 Vault event created, publishing to relays...');
                     
                     // Publish the signed event to relays
                     const { publishEvent } = await import('@nostrpass/nostrHelpers');
-                    await publishEvent(vaultEvent.event, userRelays);
-                    console.log('✅ Vault saved to Nostr');
+                    const publishResults = await publishEvent(vaultEvent.event, userRelays);
+                    
+                    console.log('📡 Publish results:', publishResults);
+                    
+                    // Verify the vault was saved by trying to retrieve it
+                    setLoadingStatus('Verifying vault was saved...');
+                    const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+                    const verifyVault = await getVaultFromNostr(
+                        vaultEvent.event.pubkey,
+                        userRelays
+                    );
+                    
+                    if (verifyVault) {
+                        console.log('✅ Vault verified on Nostr!');
+                        savedSuccessfully = true;
+                    } else {
+                        throw new Error('Vault save verification failed');
+                    }
+                    
                 } catch (error) {
-                    console.error('Failed to save vault to Nostr:', error);
-                    // Don't fail signup if Nostr save fails
+                    retryCount++;
+                    console.error(`❌ Attempt ${retryCount} failed:`, error);
+                    
+                    if (retryCount >= maxRetries) {
+                        // This is critical - signup must fail if we can't save to Nostr
+                        throw new Error(
+                            'Failed to save vault to Nostr after ' + maxRetries + ' attempts. ' +
+                            'Please check your internet connection and try again. ' +
+                            'Error: ' + (error instanceof Error ? error.message : String(error))
+                        );
+                    }
+                    
+                    // Wait before retry
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
             
@@ -275,18 +325,68 @@ export const Login: Component = () => {
             
             setLoadingStatus('Saving vault to Nostr...');
             
-            // Save vault to Nostr using the worker's signed event
-            if (cryptoWorker) {
+            // Save vault to Nostr - THIS IS CRITICAL FOR LOGIN TO WORK
+            setLoadingStatus('Saving vault to Nostr (required)...');
+            
+            if (!cryptoWorker) {
+                throw new Error('Crypto worker not available');
+            }
+            
+            let retryCount = 0;
+            const maxRetries = 3;
+            let savedSuccessfully = false;
+            
+            while (!savedSuccessfully && retryCount < maxRetries) {
                 try {
-                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ username: accountData.username });
+                    console.log(`🔄 Attempting to save vault to Nostr (attempt ${retryCount + 1}/${maxRetries})...`);
+                    
+                    // Wait to ensure session is ready
+                    console.log('⏳ Waiting for session to be ready...');
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
+                    
+                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
+                        username: accountData.username,
+                        usePasswordEncryption: true // Initial save uses base encryption only
+                    });
+                    
+                    console.log('📝 Vault event created, publishing to relays...');
                     
                     // Publish the signed event to relays
                     const { publishEvent } = await import('@nostrpass/nostrHelpers');
-                    await publishEvent(vaultEvent.event, userRelays);
-                    console.log('✅ Vault saved to Nostr');
+                    const publishResults = await publishEvent(vaultEvent.event, userRelays);
+                    
+                    console.log('📡 Publish results:', publishResults);
+                    
+                    // Verify the vault was saved by trying to retrieve it
+                    setLoadingStatus('Verifying vault was saved...');
+                    const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+                    const verifyVault = await getVaultFromNostr(
+                        vaultEvent.event.pubkey,
+                        userRelays
+                    );
+                    
+                    if (verifyVault) {
+                        console.log('✅ Vault verified on Nostr!');
+                        savedSuccessfully = true;
+                    } else {
+                        throw new Error('Vault save verification failed');
+                    }
+                    
                 } catch (error) {
-                    console.error('Failed to save vault to Nostr:', error);
-                    // Don't fail signup if Nostr save fails
+                    retryCount++;
+                    console.error(`❌ Attempt ${retryCount} failed:`, error);
+                    
+                    if (retryCount >= maxRetries) {
+                        // This is critical - signup must fail if we can't save to Nostr
+                        throw new Error(
+                            'Failed to save vault to Nostr after ' + maxRetries + ' attempts. ' +
+                            'Please check your internet connection and try again. ' +
+                            'Error: ' + (error instanceof Error ? error.message : String(error))
+                        );
+                    }
+                    
+                    // Wait before retry
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
             

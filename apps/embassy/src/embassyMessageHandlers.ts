@@ -16,6 +16,16 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
         },
         VAULT_READY: () => {
             console.log('Vault ready signal received');
+            
+            // Set the embassy as ready
+            (embassyInstance as any)._isReady = true;
+            
+            // Dispatch ready event
+            const readyEvent = new CustomEvent('nostr:ready', {
+                detail: { embassy: embassyInstance }
+            });
+            window.dispatchEvent(readyEvent);
+            
             return { acknowledged: true };
         },
         AUTH_STATUS: () => {

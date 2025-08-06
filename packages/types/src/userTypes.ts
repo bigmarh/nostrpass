@@ -72,10 +72,15 @@ export interface SecuritySettings {
 }
 
 /**
+ * Permission levels for app actions
+ */
+export type PermissionLevel = 'ASK_EVERYTIME' | 'ASK_PER_SESSION' | 'DENY' | 'ALLOW';
+
+/**
  * App-specific permissions and data
  */
 export interface AppPermissions {
-  /** App identifier (usually origin) */
+  /** App identifier (usually origin/domain) */
   appId: string;
   
   /** App name for display */
@@ -87,22 +92,26 @@ export interface AppPermissions {
   /** Last time app was used */
   lastUsedAt: number;
   
-  /** Granted permissions */
-  permissions: {
-    /** Can read public key */
-    getPublicKey: boolean;
-    
-    /** Can sign events */
-    signEvent: boolean;
-    
-    /** Can encrypt/decrypt (NIP-04) */
-    nip04?: boolean;
-    
-    /** Can access relay list */
-    getRelays?: boolean;
-    
-    /** Event kinds this app can sign (-1 for all) */
-    allowedEventKinds?: number[];
+  /** Permission levels for different event kinds */
+  kinds: Record<number, PermissionLevel>;
+  
+  /** Permission level for signing arbitrary data */
+  signData: PermissionLevel;
+  
+  /** Permission level for reading public key */
+  getPublicKey?: PermissionLevel;
+  
+  /** Permission level for NIP-04 encryption/decryption */
+  nip04?: PermissionLevel;
+  
+  /** Permission level for accessing relay list */
+  getRelays?: PermissionLevel;
+  
+  /** Session-specific permissions (cleared on new session) */
+  sessionPermissions?: {
+    kinds: Record<number, boolean>;
+    signData: boolean;
+    expiresAt: number;
   };
   
   /** App-specific encrypted data */

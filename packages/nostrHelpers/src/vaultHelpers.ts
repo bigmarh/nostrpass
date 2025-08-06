@@ -1,35 +1,48 @@
 import { SimplePool, Event as NostrEvent, Filter } from 'nostr-tools';
 import { finalizeEvent } from 'nostr-tools/pure';
-import { encrypt, decrypt } from 'nostr-tools/nip04';
 import { getEnvironment } from './index';
 import { hexToBytes } from '@noble/hashes/utils';
 
-/**
- * Vault data stored on Nostr
- */
-export interface NostrVaultData {
-  version: number;
-  encryptedXpriv: string;
-  salt: string;
-  pinSalt?: string;
-  pinHash?: string;
+// Use the same VaultData interface
+export interface VaultData {
+  // Core fields
+  username: string;
+  publicKey: string; // Storage public key for vault identification
+  xprivEncrypted: string; // Always double-encrypted: PIN first, then password
+  salt: string; // For password key derivation
+  
+  // Identity management
   identities: any[];
   currentIdentityIndex: number;
-  hasPin: boolean;
+  storagePublicKey?: string; // Explicit storage public key (same as publicKey)
+  
+  // Local session fields
+  xprivEncryptedForPin?: string; // PIN-encrypted only (stored locally after login)
+  
+  // Metadata
   updatedAt: number;
-  deviceId?: string;
-  username?: string;
-  storagePublicKey?: string; // Public key used for vault storage (separate from user identities)
-  // Password verification - a known string encrypted with password
-  passwordVerifier?: string;
-  // Recovery system for PIN
+  version: number; // Vault version for migrations
+  
+  // Security
+  passwordVerifier?: string; // Encrypted known string to verify password
+  
+  // Recovery system
   recovery?: {
     questions: string[]; // The security questions
-    xprivRecovery: string; // encrypted(xpriv, recoveryKey)
+    xprivRecovery: string; // xpriv encrypted with recovery key
     salt: string; // Salt for answer derivation
-    version: number; // For future compatibility
+    version: number; // Recovery system version
   };
+  
+  // Legacy fields (kept for compatibility, will be removed in future)
+  pinSalt?: string;
+  pinHash?: string;
+  hasPin?: boolean;
+  deviceId?: string;
 }
+
+// Alias for backward compatibility
+export type NostrVaultData = VaultData;
 
 /**
  * Save vault data to Nostr
@@ -40,7 +53,7 @@ export interface NostrVaultData {
  * @returns Event IDs from successful publishes
  */
 export async function saveVaultToNostr(
-  vaultData: NostrVaultData,
+  vaultData: VaultData,
   userPrivateKey: string,
   userPublicKey: string,
   relays: string[]
@@ -64,7 +77,7 @@ export async function saveVaultToNostr(
     };
 
     // Sign the event
-    const signedEvent = finalizeEvent(vaultEvent as any, userPrivateKey);
+    const signedEvent = finalizeEvent(vaultEvent as any, hexToBytes(userPrivateKey));
 
     // Publish to relays with individual error handling
     const pool = new SimplePool();
@@ -73,9 +86,9 @@ export async function saveVaultToNostr(
     // Try each relay individually
     for (const relay of relays) {
       try {
-        const result = await pool.publish([relay], signedEvent);
+        await pool.publish([relay], signedEvent);
         console.log(`✅ Published to ${relay}`);
-        successfulPublishes.push(result[0]);
+        successfulPublishes.push(relay);
       } catch (error: any) {
         if (error.message?.includes('pow:')) {
           const powMatch = error.message.match(/pow:\s*(\d+)\s*bits/);
@@ -113,18 +126,18 @@ export async function saveVaultToNostr(
  */
 export async function getVaultFromNostr(
   userPublicKey: string,
-  userPrivateKey: string,
-  relays: string[]
-): Promise<NostrVaultData | null> {
+  relays: string[],
+  storagePrivateKey?: string // Optional - for decrypting NIP-04 encrypted vaults
+): Promise<VaultData | null> {
   try {
     const pool = new SimplePool();
     
-    // Query for vault events
+    // Query for vault events - get multiple to find the right encryption type
     const filter: Filter = {
       kinds: [30078],
       authors: [userPublicKey],
       '#d': [`nostrpass.com_vault_${getEnvironment()}_${userPublicKey}`],
-      limit: 1
+      limit: 10 // Get multiple versions
     };
 
     const events = await pool.querySync(relays, filter);
@@ -134,12 +147,56 @@ export async function getVaultFromNostr(
       return null;
     }
 
-    // Get the most recent event
-    const latestEvent = events.sort((a, b) => b.created_at - a.created_at)[0];
+    // Sort by created_at to get most recent first
+    const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
+    
+    console.log(`🔍 Found ${sortedEvents.length} vault events`);
 
-    // The vault content is already password-encrypted, just parse it
-    // No need for NIP-04 decryption
-    return JSON.parse(latestEvent.content) as NostrVaultData;
+    // Try to find a vault we can decrypt
+    for (const event of sortedEvents) {
+      const versionTag = event.tags.find(t => t[0] === 'version')?.[1];
+      
+      console.log('🔍 Checking vault event:', {
+        kind: event.kind,
+        pubkey: event.pubkey,
+        created_at: event.created_at,
+        version: versionTag,
+        contentLength: event.content.length,
+        contentPreview: event.content.substring(0, 50) + '...'
+      });
+
+      try {
+        // First try to parse as plain JSON (base encryption)
+        try {
+          const vaultData = JSON.parse(event.content) as VaultData;
+          console.log('📦 Successfully parsed as base-encrypted vault');
+          return vaultData;
+        } catch (jsonError) {
+          // Not plain JSON, might be NIP-04 encrypted
+          if (storagePrivateKey) {
+            console.log('🔐 Attempting NIP-04 decryption...');
+            
+            // Import crypto functions
+            const nip04 = await import('nostr-tools/nip04');
+            const decryptedContent = nip04.decrypt(storagePrivateKey, userPublicKey, event.content);
+            
+            const vaultData = JSON.parse(decryptedContent) as VaultData;
+            console.log('✅ Successfully decrypted NIP-04 vault');
+            return vaultData;
+          } else {
+            console.log('⚠️ Cannot decrypt - no storage private key provided');
+            // Continue to next event
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to process vault event:', error);
+        // Continue to next event
+      }
+    }
+
+    // If we get here, we couldn't decrypt any vault
+    console.error('❌ Could not find a decryptable vault among', sortedEvents.length, 'events');
+    return null;
   } catch (error) {
     console.error('Error retrieving vault from Nostr:', error);
     return null;

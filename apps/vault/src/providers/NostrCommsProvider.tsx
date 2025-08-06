@@ -62,7 +62,7 @@ export const NostrCommsProvider: ParentComponent = (props) => {
       const registrationKeys = await getRegistrationKeypair();
       
       // Create a custom registry that adds environment tags
-      const registry = new EnvironmentAwareUsernameRegistry(registrationKeys, envRelays, environmentName());
+      const registry = new EnvironmentAwareUsernameRegistry(registrationKeys, envRelays);
       setUsernameRegistry(registry);
       
       // Test connections
@@ -177,13 +177,9 @@ export const NostrCommsProvider: ParentComponent = (props) => {
 
 // Environment-aware username registry that adds environment tags
 class EnvironmentAwareUsernameRegistry extends UsernameRegistry {
-  constructor(registrationKeys: KeyPair, relays: string[], _environment: string) {
+  constructor(registrationKeys: KeyPair, relays: string[]) {
     super(registrationKeys, relays);
-    // Environment is already handled in the parent class via getEnvironment()
-    // The _environment parameter is kept for compatibility but not used
   }
-
-  // No need to override methods - the parent class already includes environment in the 'd' tag
 }
 
 export const useNostrComms = () => {

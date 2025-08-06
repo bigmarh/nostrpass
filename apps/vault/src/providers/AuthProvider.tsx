@@ -4,6 +4,8 @@ import { useEnvironment } from './EnvironmentProvider';
 import type { User, UserProfile } from '@nostrpass/types';
 import { createUser, getIdentityKeypair } from '../services/userService';
 import { getCryptoWorker, getCryptoWorkerInstance } from '../services/cryptoWorkerSingleton';
+import { setupMessageHandlers } from '../messageHandlers';
+import type { VaultData } from '@nostrpass/nostrHelpers';
 
 interface AuthContextType {
   user: () => User | null;
@@ -12,7 +14,7 @@ interface AuthContextType {
   hasPinVault: () => boolean;
   isVaultLocked: () => boolean;
   login: (password: string, username?: string, registrationInfo?: any) => Promise<void>;
-  createAccount: (username: string, password: string, pin?: string, recovery?: { questions: string[], answers: string[] }) => Promise<{ publicKey: string }>;
+  createAccount: (username: string, password: string, pin: string, recovery?: { questions: string[], answers: string[] }) => Promise<{ publicKey: string }>;
   logout: () => Promise<void>;
   updateProfile: (profile: Partial<UserProfile>) => void;
   unlockVault: (pin: string) => Promise<boolean>;
@@ -24,8 +26,7 @@ const AuthContext = createContext<AuthContextType>();
 export const AuthProvider: ParentComponent = (props) => {
   const [user, setUser] = createSignal<User | null>(null);
   const [isLoading, setIsLoading] = createSignal(false);
-  const [tempVaultData, setTempVaultData] = createSignal<any>(null);
-  const [hasPinVault, setHasPinVault] = createSignal(false);
+    const [hasPinVault, setHasPinVault] = createSignal(false);
   const [isVaultLocked, setIsVaultLocked] = createSignal(true);
   const messenger = useMessenger();
   const { getRelays } = useEnvironment();
@@ -68,8 +69,8 @@ export const AuthProvider: ParentComponent = (props) => {
             setIsVaultLocked(true);
             setHasPinVault(true);
             
-            // Clear local session
-            localStorage.removeItem('vault-session');
+            // Clear username
+            localStorage.removeItem('last-username');
             
             // Notify parent of auth status change
             if (messenger.isReady()) {
@@ -98,36 +99,26 @@ export const AuthProvider: ParentComponent = (props) => {
     }
   });
   
-  // Load user session from localStorage on mount
+  // Simple session check on mount - just look for vault data
   onMount(async () => {
-    const savedSession = localStorage.getItem('vault-session');
-    if (savedSession) {
-      try {
-        const session = JSON.parse(savedSession);
-        // Verify session is still valid
-        if (session.expiresAt > Date.now()) {
-          // Check if worker has the session
-          if (cryptoWorker) {
-            const workerSession = await cryptoWorker.getSession({ 
-              username: session.user.profile.username 
-            });
-            if (workerSession) {
-              setUser(session.user);
-            } else {
-              // Session not in worker, clear localStorage
-              localStorage.removeItem('vault-session');
-            }
-          } else {
-            // Worker not ready yet, set user
-            setUser(session.user);
-          }
-        } else {
-          localStorage.removeItem('vault-session');
-        }
-      } catch (error) {
-        console.error('Failed to parse saved session:', error);
-        localStorage.removeItem('vault-session');
-      }
+    if (!cryptoWorker) return;
+    
+    // Get the last used username from localStorage
+    const lastUsername = localStorage.getItem('last-username');
+    if (!lastUsername) return;
+    
+    console.log('Checking if user is logged in...');
+    
+    // Check if user has vault data (is logged in)
+    const loginCheck = await cryptoWorker.isUserLoggedIn({ username: lastUsername });
+    
+    if (loginCheck.loggedIn) {
+      console.log('User has vault data, but password key is not persisted');
+      // We found vault data but we don't have the password key
+      // User needs to re-enter password to continue
+      // For now, just clear the session and show login
+      localStorage.removeItem('last-username');
+      console.log('Session cleared - user must login again for security');
     }
   });
 
@@ -293,10 +284,11 @@ export const AuthProvider: ParentComponent = (props) => {
   const createAccount = async (
     username: string, 
     password: string, 
-    pin?: string,
+    pin: string, // PIN is now mandatory
     recovery?: { questions: string[], answers: string[] }
   ) => {
     if (!cryptoWorker) throw new Error('Crypto worker not ready');
+    if (!pin || pin.length < 4) throw new Error('PIN must be at least 4 digits');
     
     setIsLoading(true);
     try {
@@ -332,56 +324,26 @@ export const AuthProvider: ParentComponent = (props) => {
         passwordSalt = passwordDeriveResult.salt;
       }
 
-      let encryptedXpriv;
-      let pinSalt;
-      let pinHash;
+      console.log('🔐 Double encryption flow:', {
+        step1: 'Encrypting xpriv with PIN directly',
+        pinLength: pin.length
+      });
       
-      if (pin) {
-        // If PIN is provided, encrypt xpriv with PIN only
-        console.log('🔐 Creating vault with PIN:', {
-          pin: pin,
-          pinLength: pin.length
-        });
-        // Generate a random salt for the PIN
-        const saltBytes = new Uint8Array(16);
-        crypto.getRandomValues(saltBytes);
-        pinSalt = btoa(String.fromCharCode(...saltBytes));
-        
-        console.log('📌 PIN salt generated:', {
-          salt: pinSalt,
-          saltLength: pinSalt.length
-        });
-        
-        // Hash the PIN for verification later
-        const encoder = new TextEncoder();
-        const pinData = encoder.encode(pin);
-        const hash = await crypto.subtle.digest('SHA-256', pinData);
-        pinHash = Array.from(new Uint8Array(hash))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-        
-        // For now, use PIN directly with salt as part of the password
-        // This is a temporary fix until we update the WASM module
-        const saltedPin = `${pin}:${pinSalt}`;
-        
-        console.log('🔐 Encrypting xpriv with salted PIN:', {
-          xprivLength: userMasterKey.xpriv?.length,
-          saltedPinLength: saltedPin.length
-        });
-        
-        encryptedXpriv = await cryptoWorker.encryptData({
-          data: userMasterKey.xpriv,
-          password: saltedPin  // Use salted PIN
-        });
-        
-        console.log('✅ xpriv encrypted:', {
-          encryptedLength: encryptedXpriv?.length,
-          encryptedPreview: encryptedXpriv?.substring(0, 20) + '...'
-        });
-      } else {
-        // No PIN - this shouldn't happen in the new flow
-        throw new Error('PIN is required for vault security');
-      }
+      // Step 1: Encrypt xpriv with PIN directly (no derivation needed)
+      const xprivEncryptedWithPin = await cryptoWorker.encryptData({
+        data: userMasterKey.xpriv,
+        password: pin
+      });
+      
+      console.log('📌 Step 1 complete: xpriv encrypted with PIN');
+      
+      // Step 3: Encrypt the PIN-encrypted xpriv with password key
+      const xprivEncrypted = await cryptoWorker.encryptData({
+        data: xprivEncryptedWithPin,
+        key: passwordKey
+      });
+      
+      console.log('✅ Step 2 complete: Double encryption done');
 
       // Create user object with Personal identity keys for app interactions
       const newUser: User = {
@@ -458,25 +420,23 @@ export const AuthProvider: ParentComponent = (props) => {
       });
 
       // Store encrypted data in worker's IndexedDB
-      const vaultData = {
-        encryptedXpriv,
+      const vaultData: VaultData = {
+        xprivEncrypted, // Double-encrypted: PIN then password
         salt: passwordSalt,
-        pinSalt,
-        pinHash,
         publicKey: storagePublicKey, // Storage key is the main vault key
         storagePublicKey, // Also store it explicitly
         username,
         identities: userMasterKey.identities,
         currentIdentityIndex: 0, // Using Personal identity
-        hasPin: !!pin,
         updatedAt: Date.now(),
+        version: 1, // Initial version
         recovery: recoveryData,
         passwordVerifier
       };
       
       console.log('📦 Vault data being saved:', {
         ...vaultData,
-        encryptedXpriv: '[REDACTED]',
+        xprivEncrypted: '[REDACTED]',
         recovery: recoveryData ? {
           questions: recoveryData.questions,
           xprivRecovery: '[REDACTED]',
@@ -487,29 +447,47 @@ export const AuthProvider: ParentComponent = (props) => {
       
       // Create session in worker with vault data
       // xpriv is all we need - it contains all keys
+      console.log('📝 Creating session with:', {
+        username,
+        publicKey: storagePublicKey,
+        hasXpriv: !!userMasterKey.xpriv,
+        xprivLength: userMasterKey.xpriv?.length
+      });
+      
       const sessionInfo = await cryptoWorker.createSession({
         username,
         publicKey: storagePublicKey, // Use storage key for session
-        privateKey: '', // Not needed when we have xpriv
         xpriv: userMasterKey.xpriv, // Pass xpriv for full key derivation
         vaultData,
         sessionTimeout: 60 // 60 minutes
       });
       
       console.log('✅ Session created in worker:', sessionInfo);
+      
+      // Verify session has xpriv by checking it immediately
+      const sessionCheck = await cryptoWorker.getSession({ username });
+      console.log('🔍 Session verification:', {
+        found: !!sessionCheck,
+        hasXpriv: sessionCheck ? 'xpriv' in sessionCheck : false
+      });
 
-      // Store session
-      const session = {
-        user: newUser,
-        expiresAt: Date.now() + (60 * 60 * 1000) // 1 hour
-      };
-      localStorage.setItem('vault-session', JSON.stringify(session));
+      // Save username for session persistence
+      localStorage.setItem('last-username', username);
 
       setUser(newUser);
       
       // Set vault as unlocked since user just created it
       setIsVaultLocked(false);
       setHasPinVault(false); // No PIN required - vault is fully accessible
+      
+      // IMPORTANT: The session must have xpriv for saving to Nostr
+      // Let's verify it's there
+      const sessionVerify = await cryptoWorker.getSession({ username });
+      console.log('🔍 Post-creation session check:', {
+        hasSession: !!sessionVerify,
+        sessionUsername: sessionVerify?.username,
+        isUnlocked: sessionVerify?.isUnlocked
+      });
       
       // Vault is created locally and will be saved to Nostr after registration
       // when we have access to the signed event
@@ -543,212 +521,132 @@ export const AuthProvider: ParentComponent = (props) => {
       }
 
       // First try to load from local storage
+      console.log('🔍 Checking for local vault data for username:', username);
       let vaultData = await cryptoWorker.getVaultData({ username });
+      console.log('📦 Local vault data:', vaultData ? 'Found' : 'Not found');
       
       // If no local vault but user exists on Nostr, try to retrieve from Nostr
       if (!vaultData && registrationInfo && registrationInfo.pubkey) {
         console.log('No local vault found, retrieving from Nostr...');
+        console.log('Registration info:', registrationInfo);
         
         try {
           // Import the getVaultFromNostr function directly
           const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
-          
-          // We don't need the user's private key anymore since vault is password-encrypted
-          // Pass a dummy value since the function signature still expects it
-          const dummyPrivateKey = '0000000000000000000000000000000000000000000000000000000000000001';
-          
+             
           // Retrieve vault from Nostr using the public key
+          console.log('🌐 Calling getVaultFromNostr with:', {
+            pubkey: registrationInfo.pubkey,
+            relays: getRelays()
+          });
           const nostrVault = await getVaultFromNostr(
             registrationInfo.pubkey,
-            dummyPrivateKey,
             getRelays() // Use the getRelays from the component
           );
           
+          console.log('📥 Nostr vault result:', nostrVault ? 'Found' : 'Not found');
           if (nostrVault) {
             console.log('Found vault on Nostr!');
-            vaultData = nostrVault;
+            console.log('📦 Vault Data from Nostr:', {
+              username: nostrVault.username,
+              publicKey: nostrVault.publicKey,
+              xprivEncryptedLength: nostrVault.xprivEncrypted?.length,
+              salt: nostrVault.salt,
+              hasRecovery: !!nostrVault.recovery,
+              identitiesCount: nostrVault.identities?.length || 0,
+              currentIdentityIndex: nostrVault.currentIdentityIndex,
+              updatedAt: new Date(nostrVault.updatedAt).toISOString(),
+              version: nostrVault.version,
+              storagePublicKey: nostrVault.storagePublicKey,
+              hasPasswordVerifier: !!nostrVault.passwordVerifier
+            });
+            
+            // NostrVaultData and VaultData now use the same property names
+            vaultData = nostrVault as VaultData;
             
             // Save to local storage for future use
             await cryptoWorker.createSession({
               username: vaultData.username || username,
               publicKey: registrationInfo.pubkey,
-              privateKey: '', // Will be set after decryption
               vaultData,
               sessionTimeout: 60
             });
           }
         } catch (error) {
-          console.error('Error retrieving vault from Nostr:', error);
+          console.error('❌ Error retrieving vault from Nostr:', error);
+          console.error('Error details:', error instanceof Error ? error.message : error);
         }
       }
       
+      // Check if we have vault data
       if (!vaultData) {
-        // Try old localStorage format for backward compatibility
-        const oldVaultDataStr = localStorage.getItem(`vault-data-${username}`);
-        if (oldVaultDataStr) {
-          vaultData = JSON.parse(oldVaultDataStr);
-          // Migrate to worker storage
-          await cryptoWorker.createSession({
-            username: vaultData.username,
-            publicKey: vaultData.publicKey,
-            privateKey: '', // Will be set later after decryption
-            vaultData: {
-              ...vaultData,
-              updatedAt: Date.now()
-            },
-            sessionTimeout: 60
-          });
-          localStorage.removeItem(`vault-data-${username}`);
-          console.log('Migrated vault data to worker storage');
-        }
-        
-        // Check even older format
-        if (!vaultData) {
-          const oldVaultDataStr = localStorage.getItem('vault-data');
-          if (oldVaultDataStr) {
-            const oldVaultData = JSON.parse(oldVaultDataStr);
-            if (oldVaultData.username === username) {
-              vaultData = oldVaultData;
-              // Migrate to worker storage
-              await cryptoWorker.createSession({
-                username: vaultData.username,
-                publicKey: vaultData.publicKey,
-                privateKey: '',
-                vaultData: {
-                  ...vaultData,
-                  updatedAt: Date.now()
-                },
-                sessionTimeout: 60
-              });
-              localStorage.removeItem('vault-data');
-              console.log('Migrated old vault data to worker storage');
-            }
-          }
-        }
-        
-        // If still no vault data, the user might not have saved their vault to Nostr
-        if (!vaultData && registrationInfo) {
-          console.log('No vault data found locally or on Nostr');
-          throw new Error('Invalid username or password');
-        }
-        
-        if (!vaultData) {
-          throw new Error('Invalid username or password');
-        }
+        console.error('No vault data found for user');
+        throw new Error('No vault found for this username');
       }
 
-      // Derive key from password
-      const encryptDeriveResult = await cryptoWorker.deriveKey({
-        password,
-        salt: vaultData.salt
+      console.log('Vault data loaded:', {
+        hasXprivEncrypted: !!vaultData.xprivEncrypted,
+        hasXprivEncryptedForPin: !!(vaultData as any).xprivEncryptedForPin,
+        salt: vaultData.salt ? 'present' : 'missing'
       });
       
-      // Handle both Map and object results from WASM
-      let encryptionKey: string;
-      if (encryptDeriveResult instanceof Map) {
-        encryptionKey = encryptDeriveResult.get('key');
+      // If vault already has PIN-encrypted version, skip password decryption
+      if ((vaultData as any).xprivEncryptedForPin) {
+        console.log('Vault already has PIN-encrypted xpriv, skipping password decryption');
       } else {
-        encryptionKey = encryptDeriveResult.key;
-      }
-
-      // Decrypt the master key (xpriv)
-      let xpriv: string;
-      let privateKey: string;
-      let publicKey: string;
-      
-      // Check if vault has PIN protection
-      if (vaultData.hasPin) {
-        // Vault is PIN-protected, we can only decrypt partially
-        // Store the vault data temporarily and require PIN unlock
-        setTempVaultData({
-          vaultData,
-          encryptionKey,
-          username
+        // Need to decrypt outer password layer
+        if (!vaultData.xprivEncrypted) {
+          console.error('❌ Vault missing xprivEncrypted');
+          throw new Error('Vault data is incomplete');
+        }
+        
+        console.log('Decrypting outer password layer...');
+        
+        // Derive key from password to decrypt the outer layer
+        const encryptDeriveResult = await cryptoWorker.deriveKey({
+          password,
+          salt: vaultData.salt
         });
         
-        // For PIN-protected vaults, we need to unlock with PIN first
-        // Set flag to indicate PIN is needed
-        console.log('Vault has PIN protection, PIN unlock required');
-        setHasPinVault(true);
-        setIsVaultLocked(true); // Vault is locked until PIN entered
+        // Handle both Map and object results from WASM
+        let passwordKey: string;
+        if (encryptDeriveResult instanceof Map) {
+          passwordKey = encryptDeriveResult.get('key');
+        } else {
+          passwordKey = encryptDeriveResult.key;
+        }
         
-        // Create a partial user object for navigation
-        const partialUser: User = {
-          publicKey: vaultData.publicKey,
-          privateKey: '', // No private key until PIN unlock
-          profile: {
-            username: vaultData.username,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            preferences: {},
-            security: {
-              sessionTimeout: 60
-            }
-          },
-          appPermissions: new Map(),
-          isAuthenticated: false, // Not fully authenticated until PIN unlock
-          session: {
-            startedAt: Date.now(),
-            lastActivityAt: Date.now()
-          },
-          vaultPinHash: vaultData.pinHash // Add PIN hash to user object
-        };
+        // Decrypt the outer password layer to get PIN-encrypted xpriv
+        const xprivEncryptedWithPin = await cryptoWorker.decryptData({
+          encryptedData: vaultData.xprivEncrypted,
+          key: passwordKey
+        });
         
-        // Store partial session
-        const session = {
-          user: partialUser,
-          expiresAt: Date.now() + (60 * 60 * 1000) // 1 hour
-        };
-        localStorage.setItem('vault-session', JSON.stringify(session));
-        setUser(partialUser);
-        
-        return; // Exit early - user needs to unlock with PIN
+        // Update vault data with the PIN-encrypted version
+        (vaultData as any).xprivEncryptedForPin = xprivEncryptedWithPin;
+        console.log('✅ Added xprivEncryptedForPin to vault data');
       }
       
-      // No PIN protection, decrypt normally
-      // Handle both old format (encryptedPrivateKey) and new format (encryptedXpriv)
-      try {
-        if (vaultData.encryptedXpriv) {
-          // New format with xpriv
-          xpriv = await cryptoWorker.decryptData({
-            encryptedData: vaultData.encryptedXpriv,
-            password: encryptionKey
-          });
-          
-          // Get the current identity (default to Personal at index 0)
-          const currentIdentity = vaultData.identities[vaultData.currentIdentityIndex || 0];
-          const keypair = await getIdentityKeypair(xpriv, currentIdentity);
-          privateKey = keypair.privateKey;
-          publicKey = keypair.publicKey;
-        } else {
-          // Old format with direct private key
-          privateKey = await cryptoWorker.decryptData({
-            encryptedData: vaultData.encryptedPrivateKey,
-            password: encryptionKey
-          });
-          publicKey = vaultData.publicKey;
-        }
-      } catch (decryptError) {
-        console.error('Decryption failed:', decryptError);
-        throw new Error('Invalid password. Please check your password and try again.');
-      }
-
-      // Verify key pair
-      const derivedPublicKey = await cryptoWorker.getPublicKey({ privateKey });
-      if (derivedPublicKey !== publicKey) {
-        throw new Error('Invalid password');
-      }
-
-      // Update the worker session with the unlocked private key
-      const sessionInfo = await cryptoWorker.unlockSession({
+      // Simple login - store vault data (with PIN-encrypted version if we added it)
+      console.log('Logging in user with vault data...');
+      console.log('Vault data has xprivEncryptedForPin:', !!(vaultData as any).xprivEncryptedForPin);
+      await cryptoWorker.loginUser({
         username,
-        privateKey
+        vaultData
       });
-
-      // Create user object (no longer storing private key in main thread)
-      const userToStore: User = {
-        publicKey,
-        privateKey: '', // Private key stays in worker
+      
+      // Save username for next session check
+      localStorage.setItem('last-username', username);
+      console.log('User logged in successfully');
+      
+      console.log('Vault requires PIN unlock (mandatory)');
+      setHasPinVault(true);
+      setIsVaultLocked(true); // Vault is locked until PIN entered
+      
+      // Create a partial user object for navigation
+      const partialUser: User = {
+        publicKey: vaultData.publicKey,
+        privateKey: '', // No private key until PIN unlock
         profile: {
           username: vaultData.username,
           createdAt: Date.now(),
@@ -759,35 +657,26 @@ export const AuthProvider: ParentComponent = (props) => {
           }
         },
         appPermissions: new Map(),
-        isAuthenticated: true,
+        isAuthenticated: false, // Not fully authenticated until PIN unlock
         session: {
           startedAt: Date.now(),
           lastActivityAt: Date.now()
         }
       };
-
-      // Update user state
-      setUser(userToStore);
-      setIsVaultLocked(false); // Vault is unlocked for non-PIN vaults
+        
+        // No need to store session - vault data is our session
+      setUser(partialUser);
+      console.log('✅ Login successful - vault locked, awaiting PIN');
+      setIsLoading(false); // Important: clear loading state before returning
       
-      // Save session
-      const session = {
-        user: userToStore,
-        expiresAt: sessionInfo.expiresAt || (Date.now() + (60 * 60 * 1000))
-      };
-      localStorage.setItem('vault-session', JSON.stringify(session));
-
-      // Notify parent of auth status change
-      messenger.send('AUTH_STATUS', {
-        isAuthenticated: true,
-        publicKey: userToStore.publicKey
-      });
+      return; // Exit early - user needs to unlock with PIN
 
     } catch (error) {
       console.error('Login failed:', error);
+      setIsLoading(false); // Clear loading state on error too
       throw error;
     } finally {
-      setIsLoading(false);
+      // Don't set loading false here as it might override the earlier calls
     }
   };
 
@@ -797,10 +686,20 @@ export const AuthProvider: ParentComponent = (props) => {
     
     // Clear local state immediately for fast UI response
     setUser(null);
-    setTempVaultData(null);
     setHasPinVault(false);
-    localStorage.removeItem('vault-session');
+    setIsVaultLocked(true);
+    localStorage.removeItem('last-username');
     console.log('User state cleared');
+    
+    // Clear vault data in worker (this is the real logout)
+    if (currentUser && cryptoWorker) {
+      try {
+        await cryptoWorker.logoutUser({ username: currentUser.profile.username });
+        console.log('User logged out - vault data cleared');
+      } catch (error) {
+        console.error('Failed to logout user:', error);
+      }
+    }
 
     // Notify parent of auth status change immediately if messenger is ready
     if (messenger.isReady()) {
@@ -837,12 +736,7 @@ export const AuthProvider: ParentComponent = (props) => {
       };
       setUser(updatedUser);
       
-      // Update session
-      const session = {
-        user: updatedUser,
-        expiresAt: Date.now() + (60 * 60 * 1000)
-      };
-      localStorage.setItem('vault-session', JSON.stringify(session));
+      // No session storage needed - vault data is our session
     }
   };
 
@@ -892,58 +786,41 @@ export const AuthProvider: ParentComponent = (props) => {
         throw new Error('No vault data found');
       }
       
+      console.log('🔍 Vault data check:', {
+        hasXprivEncrypted: !!freshVaultData.xprivEncrypted,
+        hasXprivEncryptedForPin: !!(freshVaultData as any).xprivEncryptedForPin,
+        xprivEncryptedLength: freshVaultData.xprivEncrypted?.length,
+        xprivEncryptedForPinLength: (freshVaultData as any).xprivEncryptedForPin?.length
+      });
+      
       // Validate vault data
-      if (!freshVaultData.pinHash || !freshVaultData.pinSalt || !freshVaultData.encryptedXpriv) {
-        console.error('❌ Vault data missing required fields:', {
-          hasPinHash: !!freshVaultData.pinHash,
-          hasPinSalt: !!freshVaultData.pinSalt,
-          hasEncryptedXpriv: !!freshVaultData.encryptedXpriv
-        });
+      if (!freshVaultData.xprivEncrypted) {
+        console.error('❌ Vault data missing xprivEncrypted');
         throw new Error('Vault data is incomplete');
       }
       
-      console.log('✅ Got vault data:', { 
-        hasPinHash: !!freshVaultData.pinHash,
-        hasPinSalt: !!freshVaultData.pinSalt,
-        hasEncryptedXpriv: !!freshVaultData.encryptedXpriv,
-        pinSalt: freshVaultData.pinSalt,
-        pinHashPreview: freshVaultData.pinHash?.substring(0, 10) + '...',
-        encryptedXprivLength: freshVaultData.encryptedXpriv?.length
-      });
-      
-      // Hash the provided PIN
-      const encoder = new TextEncoder();
-      const pinData = encoder.encode(pin);
-      const hash = await crypto.subtle.digest('SHA-256', pinData);
-      const pinHash = Array.from(new Uint8Array(hash))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-      
-      // Verify PIN hash
-      if (pinHash !== freshVaultData.pinHash) {
-        console.log('PIN hash mismatch');
-        return false;
+      // Check if we have the PIN-encrypted version
+      if (!(freshVaultData as any).xprivEncryptedForPin) {
+        console.error('❌ Vault not prepared for PIN unlock');
+        console.log('ℹ️ xprivEncryptedForPin is only available after login with password');
+        // Don't logout - just fail the unlock
+        throw new Error('Vault locked - please login with password to unlock');
       }
       
+      console.log('🔐 Decrypting with PIN...');
       
-      // For now, use PIN directly with salt as part of the password
-      // This matches how we encrypted during account creation
-      const saltedPin = `${pin}:${freshVaultData.pinSalt}`;
-      
-      console.log('🔓 Decrypting xpriv with salted PIN:', {
-        encryptedDataType: typeof freshVaultData.encryptedXpriv,
-        encryptedDataLength: freshVaultData.encryptedXpriv?.length,
-        encryptedDataPreview: freshVaultData.encryptedXpriv?.substring(0, 20) + '...',
-        saltedPinLength: saltedPin.length,
-        encryptedDataFirstChars: freshVaultData.encryptedXpriv?.substring(0, 10),
-        encryptedDataLastChars: freshVaultData.encryptedXpriv?.substring(freshVaultData.encryptedXpriv.length - 10)
-      });
-      
-      const xpriv = await cryptoWorker.decryptData({
-        encryptedData: freshVaultData.encryptedXpriv,
-        password: saltedPin  // Use salted PIN
-      });
-      console.log('✅ xpriv decrypted');
+      // Decrypt with PIN to get plain xpriv
+      let xpriv: string;
+      try {
+        xpriv = await cryptoWorker.decryptData({
+          encryptedData: (freshVaultData as any).xprivEncryptedForPin,
+          password: pin
+        });
+        console.log('✅ Decrypted with PIN - vault unlocked');
+      } catch (error) {
+        console.log('❌ PIN decryption failed - invalid PIN');
+        return false;
+      }
       
       // Get the current identity (default to Personal at index 0)
       console.log('👤 Getting identity keypair...');
@@ -958,7 +835,7 @@ export const AuthProvider: ParentComponent = (props) => {
         hasXpriv: !!xpriv
       });
       
-      const sessionInfo = await cryptoWorker.unlockSession({
+      await cryptoWorker.unlockSession({
         username: currentUser.profile.username,
         privateKey: keypair.privateKey,
         xpriv // Pass xpriv for storage key access
@@ -980,12 +857,7 @@ export const AuthProvider: ParentComponent = (props) => {
       // Small delay to ensure state propagates
       await new Promise(resolve => setTimeout(resolve, 50));
       
-      // Update session reference
-      const session = {
-        user: updatedUser,
-        expiresAt: sessionInfo.expiresAt
-      };
-      localStorage.setItem('vault-session', JSON.stringify(session));
+      // No session storage needed - vault data is our session
       
       // Save updated vault to Nostr (in case PIN was just added or reset)
       try {
@@ -1012,9 +884,6 @@ export const AuthProvider: ParentComponent = (props) => {
         isAuthenticated: true,
         publicKey: currentUser.publicKey
       });
-      
-      // Clear temp vault data
-      setTempVaultData(null);
       
       console.log('✅ Vault unlock completed successfully');
       return true;
