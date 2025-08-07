@@ -57,12 +57,84 @@ export const AuthProvider: ParentComponent = (props) => {
       // Listen for session messages from worker
       const handleWorkerMessage = (event: MessageEvent) => {
         const currentUser = user();
-        if (!currentUser) return;
         
+        // Handle vault broadcasts (for all tabs)
+        if (event.data?.type === 'VAULT_BROADCAST') {
+          console.log('📡 Raw broadcast message received:', event.data);
+          const { broadcastType, username, timestamp, ...data } = event.data.data;
+          console.log(`📡 Vault broadcast received: ${broadcastType} for ${username}`, { timestamp, data });
+          
+          // Handle different broadcast types
+          switch (broadcastType) {
+            case 'VAULT_DATA_UPDATED':
+              // Refresh vault data in all tabs
+              if (currentUser?.profile.username === username) {
+                console.log('🔄 Refreshing vault data due to broadcast');
+                // Trigger vault data refresh
+                const refreshEvent = new CustomEvent('vault-data-refresh', { 
+                  detail: { username, timestamp } 
+                });
+                console.log('📤 Dispatching vault-data-refresh event:', refreshEvent);
+                window.dispatchEvent(refreshEvent);
+                console.log('✅ Vault-data-refresh event dispatched');
+              } else {
+                console.log('❌ Username mismatch in AuthProvider:', { 
+                  currentUsername: currentUser?.profile.username, 
+                  broadcastUsername: username 
+                });
+              }
+              break;
+              
+            case 'USER_LOGGED_IN':
+              // Another tab logged in - refresh session status
+              if (currentUser?.profile.username === username) {
+                console.log('🔄 User logged in from another tab');
+                // Refresh session status
+                window.dispatchEvent(new CustomEvent('session-refresh', { 
+                  detail: { username, timestamp } 
+                }));
+              }
+              break;
+              
+            case 'USER_LOGGED_OUT':
+              // Another tab logged out - clear local state
+              if (currentUser?.profile.username === username) {
+                console.log('🔄 User logged out from another tab');
+                // Clear local state
+                setUser(null);
+                setHasPinVault(false);
+                setIsVaultLocked(true);
+                localStorage.removeItem('vaultsession');
+                localStorage.removeItem('last-username');
+              }
+              break;
+              
+            case 'SESSION_UNLOCKED':
+              // Another tab unlocked the vault
+              if (currentUser?.profile.username === username) {
+                console.log('🔓 Vault unlocked from another tab');
+                setIsVaultLocked(false);
+                setHasPinVault(false);
+              }
+              break;
+              
+            case 'SESSION_LOCKED':
+              // Another tab locked the vault
+              if (currentUser?.profile.username === username) {
+                console.log('🔒 Vault locked from another tab');
+                setIsVaultLocked(true);
+                setHasPinVault(true);
+              }
+              break;
+          }
+          return;
+        }
+        
+        // Handle existing session messages
         if (event.data?.type === 'SESSION_EXPIRED' || event.data?.type === 'SESSION_LOCKED') {
           const { username, reason } = event.data.data;
           
-          if (currentUser.profile.username === username) {
+          if (currentUser?.profile.username === username) {
             console.log(`🔒 Vault lock notification received for: ${username}, reason: ${reason || event.data.type}`);
             
             // This should already be locked, but ensure UI is in sync
@@ -90,37 +162,172 @@ export const AuthProvider: ParentComponent = (props) => {
       // Add listener to worker
       workerInstance.addEventListener('message', handleWorkerMessage);
       
+      // Set up BroadcastChannel listener for cross-tab communication
+      let broadcastChannel: BroadcastChannel | null = null;
+      if (typeof BroadcastChannel !== 'undefined') {
+        broadcastChannel = new BroadcastChannel('nostrpass-vault');
+        broadcastChannel.onmessage = (event) => {
+          console.log('📡 BroadcastChannel message received:', event.data);
+          if (event.data?.type === 'VAULT_BROADCAST') {
+            // Handle the same broadcast types as worker messages
+            const { broadcastType, username, timestamp, ...data } = event.data.data;
+            console.log(`📡 BroadcastChannel vault broadcast: ${broadcastType} for ${username}`, { timestamp, data });
+            
+            const currentUser = user();
+            
+            switch (broadcastType) {
+              case 'VAULT_DATA_UPDATED':
+                if (currentUser?.profile.username === username) {
+                  console.log('🔄 Refreshing vault data due to BroadcastChannel');
+                  const refreshEvent = new CustomEvent('vault-data-refresh', { 
+                    detail: { username, timestamp } 
+                  });
+                  window.dispatchEvent(refreshEvent);
+                }
+                break;
+                
+              case 'SESSION_UNLOCKED':
+                if (currentUser?.profile.username === username) {
+                  console.log('🔓 Vault unlocked from another tab (BroadcastChannel)');
+                  setIsVaultLocked(false);
+                  setHasPinVault(false);
+                }
+                break;
+                
+              case 'SESSION_LOCKED':
+                if (currentUser?.profile.username === username) {
+                  console.log('🔒 Vault locked from another tab (BroadcastChannel)');
+                  setIsVaultLocked(true);
+                  setHasPinVault(true);
+                }
+                break;
+            }
+          }
+        };
+        console.log('✅ BroadcastChannel listener set up');
+      }
+      
       // Cleanup
       return () => {
         workerInstance.removeEventListener('message', handleWorkerMessage);
+        if (broadcastChannel) {
+          broadcastChannel.close();
+          console.log('🧹 BroadcastChannel listener cleaned up');
+        }
       };
     } catch (error) {
       console.error('Failed to set up worker message listener:', error);
     }
   });
   
-  // Simple session check on mount - just look for vault data
+  // Session management on mount
   onMount(async () => {
     if (!cryptoWorker) return;
     
-    // Get the last used username from localStorage
-    const lastUsername = localStorage.getItem('last-username');
-    if (!lastUsername) return;
+    console.log('Checking session status...');
     
-    console.log('Checking if user is logged in...');
+    // Get session status from worker
+    const { VaultDataService } = await import('../services/vaultDataService');
+    const vaultDataService = VaultDataService.getInstance();
+    const sessionStatus = await vaultDataService.getSessionStatus();
     
-    // Check if user has vault data (is logged in)
-    const loginCheck = await cryptoWorker.isUserLoggedIn({ username: lastUsername });
+    console.log('Session status from worker:', sessionStatus);
     
-    if (loginCheck.loggedIn) {
-      console.log('User has vault data, but password key is not persisted');
-      // We found vault data but we don't have the password key
-      // User needs to re-enter password to continue
-      // For now, just clear the session and show login
+    // Update localStorage based on worker's session status
+    if (sessionStatus.sessionId && sessionStatus.username) {
+      localStorage.setItem('vaultsession', sessionStatus.sessionId);
+      localStorage.setItem('last-username', sessionStatus.username);
+      console.log('Session restored from worker:', sessionStatus.username);
+      
+      // Restore user state from worker session
+      try {
+        const vaultData = await cryptoWorker.getVaultData({ username: sessionStatus.username });
+        if (vaultData) {
+          // Check if the session is actually unlocked
+          const sessionInfo = await cryptoWorker.getSession({ username: sessionStatus.username });
+          const isUnlocked = sessionInfo?.isUnlocked || false;
+          
+          // Create user object from vault data
+          const restoredUser: User = {
+            publicKey: vaultData.publicKey,
+            privateKey: '', // Private key stays in worker
+            profile: {
+              username: vaultData.username,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              preferences: {},
+              security: {
+                sessionTimeout: 60
+              }
+            },
+            appPermissions: new Map(),
+            isAuthenticated: true, // User is authenticated since session exists
+            session: {
+              startedAt: Date.now(),
+              lastActivityAt: Date.now()
+            }
+          };
+          
+          setUser(restoredUser);
+          setHasPinVault(true); // PIN is always required after restart
+          setIsVaultLocked(!isUnlocked); // Vault is locked unless session is unlocked
+          
+          if (isUnlocked) {
+            console.log('✅ User session restored successfully (unlocked)');
+          } else {
+            console.log('✅ User session restored successfully (locked - PIN required)');
+          }
+        }
+      } catch (error) {
+        console.error('Failed to restore user session:', error);
+        // Clear invalid session
+        localStorage.removeItem('vaultsession');
+        localStorage.removeItem('last-username');
+      }
+    } else {
+      localStorage.removeItem('vaultsession');
       localStorage.removeItem('last-username');
-      console.log('Session cleared - user must login again for security');
+      console.log('No active session found');
     }
+
+    // Listen for session refresh events from other tabs
+    const handleSessionRefresh = (event: CustomEvent) => {
+      const { username: eventUsername } = event.detail;
+      const currentUser = user();
+      
+      if (currentUser?.profile.username === eventUsername) {
+        console.log('🔄 Refreshing session status due to broadcast from another tab');
+        // Re-check session status
+        refreshSessionStatus();
+      }
+    };
+
+    window.addEventListener('session-refresh', handleSessionRefresh as EventListener);
+    
+    return () => {
+      window.removeEventListener('session-refresh', handleSessionRefresh as EventListener);
+    };
   });
+
+  // Helper function to refresh session status
+  const refreshSessionStatus = async () => {
+    if (!cryptoWorker) return;
+    
+    try {
+      const currentUser = user();
+      if (!currentUser) return;
+      
+      const sessionInfo = await cryptoWorker.getSession({ username: currentUser.profile.username });
+      const isUnlocked = sessionInfo?.isUnlocked || false;
+      
+      setIsVaultLocked(!isUnlocked);
+      setHasPinVault(!isUnlocked);
+      
+      console.log('🔄 Session status refreshed:', { isUnlocked });
+    } catch (error) {
+      console.error('Failed to refresh session status:', error);
+    }
+  };
 
   // Set up message handlers for auth-related requests
   createEffect(() => {
@@ -637,6 +844,15 @@ export const AuthProvider: ParentComponent = (props) => {
       
       // Save username for next session check
       localStorage.setItem('last-username', username);
+      
+      // Get session status and save session ID
+      const { VaultDataService } = await import('../services/vaultDataService');
+      const vaultDataService = VaultDataService.getInstance();
+      const sessionStatus = await vaultDataService.getSessionStatus();
+      if (sessionStatus.sessionId) {
+        localStorage.setItem('vaultsession', sessionStatus.sessionId);
+      }
+      
       console.log('User logged in successfully');
       
       console.log('Vault requires PIN unlock (mandatory)');
@@ -689,6 +905,7 @@ export const AuthProvider: ParentComponent = (props) => {
     setHasPinVault(false);
     setIsVaultLocked(true);
     localStorage.removeItem('last-username');
+    localStorage.removeItem('vaultsession');
     console.log('User state cleared');
     
     // Clear vault data in worker (this is the real logout)
@@ -853,6 +1070,14 @@ export const AuthProvider: ParentComponent = (props) => {
       setUser(updatedUser);
       setHasPinVault(false); // Clear PIN flag after successful unlock
       setIsVaultLocked(false); // Vault is now unlocked
+      
+      // Update session ID after successful unlock
+      const { VaultDataService } = await import('../services/vaultDataService');
+      const vaultDataService = VaultDataService.getInstance();
+      const sessionStatus = await vaultDataService.getSessionStatus();
+      if (sessionStatus.sessionId) {
+        localStorage.setItem('vaultsession', sessionStatus.sessionId);
+      }
       
       // Small delay to ensure state propagates
       await new Promise(resolve => setTimeout(resolve, 50));

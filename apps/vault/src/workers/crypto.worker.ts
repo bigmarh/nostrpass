@@ -43,11 +43,74 @@ async function ensureWasmReady() {
     
     // Clear expired sessions on startup
     await vaultDB.clearExpiredSessions();
+    
+    // Restore active sessions from IndexedDB
+    await restoreActiveSessions();
   }
   if (!cryptoInstance) {
     throw new Error('WASM crypto instance not initialized');
   }
   return cryptoInstance;
+}
+
+// Restore active sessions from IndexedDB on worker startup
+async function restoreActiveSessions() {
+  try {
+    console.log('[Worker] Restoring active sessions from IndexedDB...');
+    
+    // Get all vault data from IndexedDB
+    const allVaults = await vaultDB.getAllVaults();
+    
+    for (const vaultData of allVaults) {
+      // Create a basic session entry for each vault (locked state)
+      const session: ExtendedSession = {
+        username: vaultData.username,
+        publicKey: vaultData.publicKey,
+        isUnlocked: false, // Sessions start locked after restart
+        unlockedAt: Date.now()
+      };
+      
+      activeSessions.set(vaultData.username, session);
+      console.log('[Worker] Restored session for:', vaultData.username);
+    }
+    
+    console.log('[Worker] Restored', activeSessions.size, 'sessions from IndexedDB');
+  } catch (error) {
+    console.error('[Worker] Failed to restore active sessions:', error);
+  }
+}
+
+// Broadcast vault updates to all tabs
+function broadcastVaultUpdate(username: string, type: string, data: any) {
+  try {
+    console.log('[Worker] Broadcasting vault update:', { type, username, data });
+    
+    // Broadcast to all tabs via BroadcastChannel API
+    const message = {
+      type: 'VAULT_BROADCAST',
+      data: {
+        broadcastType: type,
+        username,
+        timestamp: Date.now(),
+        ...data
+      }
+    };
+    
+    console.log('[Worker] Sending broadcast message:', message);
+    
+    // Use BroadcastChannel to communicate between tabs
+    if (typeof BroadcastChannel !== 'undefined') {
+      const broadcastChannel = new BroadcastChannel('nostrpass-vault');
+      broadcastChannel.postMessage(message);
+      console.log('[Worker] Broadcast message sent via BroadcastChannel');
+    } else {
+      // Fallback to postMessage for same tab
+      self.postMessage(message);
+      console.log('[Worker] Broadcast message sent via postMessage (fallback)');
+    }
+  } catch (error) {
+    console.error('[Worker] Failed to broadcast vault update:', error);
+  }
 }
 
 interface GenerateKeypairParams {
@@ -400,6 +463,12 @@ const handlers = {
     activeSessions.set(params.username, session);
     logSessionState('UNLOCKED', params.username);
     
+    // Broadcast session unlock to all tabs
+    broadcastVaultUpdate(params.username, 'SESSION_UNLOCKED', {
+      username: params.username,
+      publicKey: session.publicKey
+    });
+    
     return {
       username: session.username,
       publicKey: session.publicKey,
@@ -465,6 +534,12 @@ const handlers = {
         }
       });
       
+      // Broadcast session lock to all tabs
+      broadcastVaultUpdate(params.username, 'SESSION_LOCKED', {
+        username: params.username,
+        reason: 'manual_lock'
+      });
+      
       logSessionState('LOCKED', params.username);
     }
     
@@ -488,6 +563,14 @@ const handlers = {
     try {
       await vaultDB.saveVault(params.vaultData);
       console.log('[Worker] updateVaultData completed in:', Date.now() - startTime, 'ms');
+      
+      // Broadcast vault update to all tabs
+      broadcastVaultUpdate(params.username, 'VAULT_DATA_UPDATED', {
+        username: params.username,
+        timestamp: Date.now(),
+        changes: 'vault_data_updated'
+      });
+      
       return { success: true };
     } catch (error) {
       console.error('[Worker] updateVaultData error:', error);
@@ -868,6 +951,12 @@ const handlers = {
     activeSessions.set(params.username, session);
     logSessionState('USER_LOGGED_IN', params.username);
     
+    // Broadcast login event to all tabs
+    broadcastVaultUpdate(params.username, 'USER_LOGGED_IN', {
+      username: params.username,
+      publicKey: params.vaultData.publicKey
+    });
+    
     return { success: true };
   },
 
@@ -893,6 +982,12 @@ const handlers = {
     await vaultDB.deleteVault(params.username);
     
     logSessionState('USER_LOGGED_OUT', params.username);
+    
+    // Broadcast logout event to all tabs
+    broadcastVaultUpdate(params.username, 'USER_LOGGED_OUT', {
+      username: params.username
+    });
+    
     return { success: true };
   },
 
@@ -1048,6 +1143,50 @@ const handlers = {
     } catch (error) {
       console.error('[Worker] saveVaultToNostr error:', error);
       throw error;
+    }
+  },
+
+  // Get current session status
+  getSessionStatus: async (): Promise<{ sessionId: string | null; username: string | null }> => {
+    try {
+      console.log('[Worker] getSessionStatus called, activeSessions size:', activeSessions.size);
+      console.log('[Worker] activeSessions entries:', Array.from(activeSessions.entries()));
+      
+      // First check in-memory sessions (including restored locked sessions)
+      for (const [username, session] of activeSessions.entries()) {
+        console.log('[Worker] Checking in-memory session for:', username, {
+          isUnlocked: session.isUnlocked,
+          hasXpriv: !!session.xpriv,
+          expiresAt: session.expiresAt
+        });
+        
+        // Return any session that exists (unlocked or locked)
+        // This includes sessions restored from IndexedDB on worker startup
+        const sessionId = `${username}_${session.expiresAt || Date.now()}`;
+        console.log('[Worker] Found session (locked or unlocked):', { sessionId, username, isUnlocked: session.isUnlocked });
+        return { sessionId, username };
+      }
+      
+      // If no in-memory sessions, check IndexedDB for any vault data
+      console.log('[Worker] No in-memory sessions, checking IndexedDB...');
+      
+      // Get all vaults from IndexedDB
+      const allVaults = await vaultDB.getAllVaults();
+      
+      if (allVaults.length > 0) {
+        // Return the first vault found (most recent or primary user)
+        const vaultData = allVaults[0];
+        const sessionId = `${vaultData.username}_${Date.now()}`;
+        console.log('[Worker] Found vault data in IndexedDB for:', vaultData.username);
+        console.log('[Worker] Found persisted session:', { sessionId, username: vaultData.username });
+        return { sessionId, username: vaultData.username };
+      }
+      
+      console.log('[Worker] No active sessions found');
+      return { sessionId: null, username: null };
+    } catch (error) {
+      console.error('[Worker] getSessionStatus error:', error);
+      return { sessionId: null, username: null };
     }
   },
 

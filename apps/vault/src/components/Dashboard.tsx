@@ -32,6 +32,7 @@ export const Dashboard: Component = () => {
     const [showSettingsPanel, setShowSettingsPanel] = createSignal(false);
     const [selectedIdentityKey, setSelectedIdentityKey] = createSignal<string | null>(null);
     const [appPermissions, setAppPermissions] = createSignal<AppPermissions | null>(null);
+    const [isRefreshing, setIsRefreshing] = createSignal(false);
     const [isSavingPermission, setIsSavingPermission] = createSignal(false);
     const [permissionSaveError, setPermissionSaveError] = createSignal<string | null>(null);
     const [showIdentitySelection, setShowIdentitySelection] = createSignal(false);
@@ -41,6 +42,21 @@ export const Dashboard: Component = () => {
     
     // Use the vault data hook
     const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
+
+    // Listen for vault data refresh events
+    onMount(() => {
+      const handleVaultDataRefresh = () => {
+        setIsRefreshing(true);
+        // Show refresh indicator for 2 seconds
+        setTimeout(() => setIsRefreshing(false), 2000);
+      };
+
+      window.addEventListener('vault-data-refresh', handleVaultDataRefresh);
+      
+      return () => {
+        window.removeEventListener('vault-data-refresh', handleVaultDataRefresh);
+      };
+    });
     
     // Debounced sync to Nostr
     let syncTimeout: NodeJS.Timeout | null = null;
@@ -495,6 +511,16 @@ export const Dashboard: Component = () => {
                                         <span class="text-sm">{desanitizeDomain(params.app)}</span>
                                     </button>
                                 )}
+
+                                {/* Refresh indicator */}
+                                <Show when={isRefreshing()}>
+                                    <div class="flex items-center gap-2 text-blue-600 text-sm">
+                                        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        <span>Syncing...</span>
+                                    </div>
+                                </Show>
                             </div>
                             {/* Lock/Unlock vault slider toggle */}
                             <div class="flex items-center gap-2">
@@ -642,30 +668,46 @@ export const Dashboard: Component = () => {
                                         <div class="flex flex-col justify-end items-end gap-3">
                                             <div class="flex items-center gap-2">
                                                 {/* Slide switch */}
-                                                <button
-                                                    onClick={() => handleIdentitySwitch(identity.index)}
-                                                    class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700' : 'bg-gray-300'
-                                                        } hover:opacity-80`}
-                                                    title={identity.isActive ? 'Active identity' : 'Click to activate'}
-                                                >
-                                                    <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
-                                                        }`} />
-                                                </button>
+                                                <Show when={!isVaultLocked()}>
+                                                    <button
+                                                        onClick={() => handleIdentitySwitch(identity.index)}
+                                                        class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700' : 'bg-gray-300'
+                                                            } hover:opacity-80`}
+                                                        title={identity.isActive ? 'Active identity' : 'Click to activate'}
+                                                    >
+                                                        <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
+                                                            }`} />
+                                                    </button>
+                                                </Show>
+                                                <Show when={isVaultLocked()}>
+                                                    <div class="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 opacity-50">
+                                                        <span class="inline-block h-4 w-4 transform rounded-full bg-white translate-x-1" />
+                                                    </div>
+                                                </Show>
 
                                                 {/* Settings button */}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedIdentityKey(identity.publicKey);
-                                                        setShowSettingsPanel(true);
-                                                    }}
-                                                    class="p-1 hover:bg-gray-100 rounded transition-colors border border-gray-200 hover:border-gray-300"
-                                                    title="Settings"
-                                                >
-                                                    <svg class="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                                                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-                                                    </svg>
-                                                </button>
+                                                <Show when={!isVaultLocked()}>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedIdentityKey(identity.publicKey);
+                                                            setShowSettingsPanel(true);
+                                                        }}
+                                                        class="p-1 hover:bg-gray-100 rounded transition-colors border border-gray-200 hover:border-gray-300"
+                                                        title="Settings"
+                                                    >
+                                                        <svg class="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+                                                        </svg>
+                                                    </button>
+                                                </Show>
+                                                <Show when={isVaultLocked()}>
+                                                    <div class="p-1 rounded border border-gray-200 opacity-50">
+                                                        <svg class="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+                                                        </svg>
+                                                    </div>
+                                                </Show>
                                             </div>
                                             <div class="flex gap-2 items-center">
                                                 <Show when={identity.hasAppPermissions}>
@@ -683,7 +725,7 @@ export const Dashboard: Component = () => {
                                                         Not connected
                                                     </span>
                                                 </Show>
-                                                <Show when={!identity.hasAppPermissions && params.app}>
+                                                <Show when={!identity.hasAppPermissions && params.app && !isVaultLocked()}>
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -694,6 +736,11 @@ export const Dashboard: Component = () => {
                                                     >
                                                         Connect
                                                     </button>
+                                                </Show>
+                                                <Show when={!identity.hasAppPermissions && params.app && isVaultLocked()}>
+                                                    <span class="text-gray-400 text-xs">
+                                                        Unlock vault to connect
+                                                    </span>
                                                 </Show>
                                             </div>
                                         </div>
@@ -1002,12 +1049,19 @@ export const Dashboard: Component = () => {
                                                                         <p class="text-xs text-green-600">Currently connected</p>
                                                                     </div>
                                                                 </div>
-                                                                <button
-                                                                    onClick={() => handleDisconnectIdentity(identity().index, params.app!)}
-                                                                    class="text-xs text-red-600 hover:text-red-800"
-                                                                >
-                                                                    Disconnect
-                                                                </button>
+                                                                <Show when={!isVaultLocked()}>
+                                                                    <button
+                                                                        onClick={() => handleDisconnectIdentity(identity().index, params.app!)}
+                                                                        class="text-xs text-red-600 hover:text-red-800"
+                                                                    >
+                                                                        Disconnect
+                                                                    </button>
+                                                                </Show>
+                                                                <Show when={isVaultLocked()}>
+                                                                    <span class="text-xs text-gray-400">
+                                                                        Unlock to disconnect
+                                                                    </span>
+                                                                </Show>
                                                             </div>
                                                         </Show>
                                                         
@@ -1020,12 +1074,19 @@ export const Dashboard: Component = () => {
                                                                             <span class="text-sm text-gray-700">
                                                                                 {desanitizeDomain(appId)}
                                                                             </span>
-                                                                            <button
-                                                                                onClick={() => handleDisconnectIdentity(identity().index, appId)}
-                                                                                class="text-xs text-red-600 hover:text-red-800"
-                                                                            >
-                                                                                Disconnect
-                                                                            </button>
+                                                                            <Show when={!isVaultLocked()}>
+                                                                                <button
+                                                                                    onClick={() => handleDisconnectIdentity(identity().index, appId)}
+                                                                                    class="text-xs text-red-600 hover:text-red-800"
+                                                                                >
+                                                                                    Disconnect
+                                                                                </button>
+                                                                            </Show>
+                                                                            <Show when={isVaultLocked()}>
+                                                                                <span class="text-xs text-gray-400">
+                                                                                    Unlock to disconnect
+                                                                                </span>
+                                                                            </Show>
                                                                         </div>
                                                                     )}
                                                                 </For>
@@ -1063,7 +1124,7 @@ export const Dashboard: Component = () => {
                                                                     class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
                                                                     value={appPermissions()?.getPublicKey || 'ALLOW'}
                                                                     onChange={(e) => handlePermissionChange('getPublicKey', e.currentTarget.value as PermissionLevel)}
-                                                                    disabled={isSavingPermission()}
+                                                                    disabled={isSavingPermission() || isVaultLocked()}
                                                                 >
                                                                     <option value="ALLOW">Allowed</option>
                                                                     <option value="ASK_EVERYTIME">Ask Each Time</option>
@@ -1077,7 +1138,7 @@ export const Dashboard: Component = () => {
                                                                     class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
                                                                     value={appPermissions()?.permissions?.social || 'ALLOW'}
                                                                     onChange={(e) => handlePermissionChange('social', e.currentTarget.value as PermissionLevel)}
-                                                                    disabled={isSavingPermission()}
+                                                                    disabled={isSavingPermission() || isVaultLocked()}
                                                                 >
                                                                     <option value="ALLOW">Allowed</option>
                                                                     <option value="ASK_EVERYTIME">Ask Each Time</option>
@@ -1091,7 +1152,7 @@ export const Dashboard: Component = () => {
                                                                     class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
                                                                     value={appPermissions()?.permissions?.messaging || 'ASK_EVERYTIME'}
                                                                     onChange={(e) => handlePermissionChange('messaging', e.currentTarget.value as PermissionLevel)}
-                                                                    disabled={isSavingPermission()}
+                                                                    disabled={isSavingPermission() || isVaultLocked()}
                                                                 >
                                                                     <option value="ALLOW">Allowed</option>
                                                                     <option value="ASK_EVERYTIME">Ask Each Time</option>

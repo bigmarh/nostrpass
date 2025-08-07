@@ -128,6 +128,23 @@ class VaultDB {
     });
   }
 
+  async getAllVaults(): Promise<VaultData[]> {
+    if (!this.db) await this.init();
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(['vaults'], 'readonly');
+      const store = transaction.objectStore('vaults');
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const vaults = request.result || [];
+        console.log('📤 Retrieved all vaults from IndexedDB:', vaults.length, 'vaults');
+        resolve(vaults);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   async saveSession(session: UserSession): Promise<void> {
     if (!this.db) await this.init();
 

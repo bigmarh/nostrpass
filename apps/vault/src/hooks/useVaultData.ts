@@ -1,4 +1,4 @@
-import { createSignal, createEffect, createMemo } from 'solid-js';
+import { createSignal, createEffect, createMemo, onMount } from 'solid-js';
 import { useAuth } from '../providers';
 import { vaultDataService } from '../services/vaultDataService';
 import type { VaultData } from '../workers/db';
@@ -183,6 +183,34 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     if (autoLoad && username()) {
       loadVaultData();
     }
+  });
+
+  // Listen for vault data refresh events from other tabs
+  onMount(() => {
+    console.log('🔧 Setting up vault data refresh listener');
+    
+    const handleVaultDataRefresh = (event: CustomEvent) => {
+      console.log('📡 Vault data refresh event received:', event.detail);
+      const { username: eventUsername } = event.detail;
+      const currentUsername = username();
+      
+      console.log('🔍 Comparing usernames:', { eventUsername, currentUsername });
+      
+      if (currentUsername === eventUsername) {
+        console.log('🔄 Refreshing vault data due to broadcast from another tab');
+        loadVaultData(true); // Force refresh
+      } else {
+        console.log('❌ Username mismatch, not refreshing');
+      }
+    };
+
+    window.addEventListener('vault-data-refresh', handleVaultDataRefresh as EventListener);
+    console.log('✅ Vault data refresh listener set up');
+    
+    return () => {
+      window.removeEventListener('vault-data-refresh', handleVaultDataRefresh as EventListener);
+      console.log('🧹 Vault data refresh listener cleaned up');
+    };
   });
 
   return {

@@ -234,6 +234,23 @@ export class VaultDataService {
   }
 
   /**
+   * Get current session status from worker
+   */
+  async getSessionStatus(): Promise<{ sessionId: string | null; username: string | null }> {
+    const cryptoWorker = getCryptoWorker();
+    if (!cryptoWorker) {
+      return { sessionId: null, username: null };
+    }
+
+    try {
+      return await cryptoWorker.getSessionStatus();
+    } catch (error) {
+      console.error('Failed to get session status:', error);
+      return { sessionId: null, username: null };
+    }
+  }
+
+  /**
    * Get vault data from Nostr
    */
   async getVaultFromNostr(username: string): Promise<{ vaultData: any; eventId: string; timestamp: number } | null> {
