@@ -1317,28 +1317,28 @@ const handlers = {
     
     // Check specific permission based on action
     if (params.action === 'signEvent' && params.eventKind !== undefined) {
-      // Use simplified permission categories
+      // Use permission categories from types
       const { getPermissionCategoryForKind } = await import('@nostrpass/types');
       const category = getPermissionCategoryForKind(params.eventKind);
       
-      if (category) {
-        permissionLevel = appPerms.permissions[category];
+      if (category && appPerms.permissions) {
+        permissionLevel = appPerms.permissions[category] || 'DENY';
       } else {
-        // Unknown kind, deny by default
+        // Unknown kind or no permissions structure, deny by default
         permissionLevel = 'DENY';
       }
     } else if (params.action === 'signData') {
-      permissionLevel = appPerms.permissions.signData;
+      permissionLevel = appPerms.permissions?.signData || 'DENY';
     } else if (params.action === 'getPublicKey') {
-      permissionLevel = appPerms.getPublicKey;
+      permissionLevel = appPerms.getPublicKey || 'DENY';
     } else if (params.action === 'nip04') {
-      permissionLevel = appPerms.permissions.messaging;
+      permissionLevel = appPerms.permissions?.messaging || 'DENY';
     } else if (params.action === 'getRelays') {
       // For now, treat getRelays as social permission
-      permissionLevel = appPerms.permissions.social;
+      permissionLevel = appPerms.permissions?.social || 'DENY';
     }
     
-    // Check session permissions for ASK_EVERYTIME (simplified - no ASK_PER_SESSION)
+    // Check session permissions for ASK_EVERYTIME
     let sessionGranted = false;
     if (permissionLevel === 'ASK_EVERYTIME' && appPerms.sessionPermissions) {
       const now = Date.now();
@@ -1387,6 +1387,7 @@ const handlers = {
     
     const expiresAt = Date.now() + ((params.sessionDurationMinutes || 60) * 60 * 1000);
     
+    // Initialize session permissions if needed
     if (!identity.appPermissions[params.origin].sessionPermissions) {
       identity.appPermissions[params.origin].sessionPermissions = {
         social: false,
@@ -1397,6 +1398,7 @@ const handlers = {
       };
     }
     
+    // Grant permission based on action
     if (params.action === 'signEvent' && params.eventKind !== undefined) {
       const { getPermissionCategoryForKind } = await import('@nostrpass/types');
       const category = getPermissionCategoryForKind(params.eventKind);
@@ -1407,6 +1409,7 @@ const handlers = {
       identity.appPermissions[params.origin].sessionPermissions.signData = true;
     }
     
+    // Update expiration
     identity.appPermissions[params.origin].sessionPermissions.expiresAt = expiresAt;
     
     // Update vault data
@@ -1433,15 +1436,19 @@ const handlers = {
     permissions: any;
     appName?: string;
   }): Promise<void> => {
+    console.log('[Worker] saveAppPermissions called with:', params);
     await ensureWasmReady();
+    console.log('[Worker] WASM ready');
     
     const vaultData = await vaultDB.getVault(params.username);
+    console.log('[Worker] Vault data retrieved, identities count:', vaultData?.identities?.length);
     if (!vaultData?.identities) {
       throw new Error('Vault data not found');
     }
     
     const currentIndex = vaultData.currentIdentityIndex ?? 0;
     const identity = vaultData.identities[currentIndex];
+    console.log('[Worker] Current identity index:', currentIndex, 'identity found:', !!identity);
     if (!identity) {
       throw new Error('Identity not found');
     }
@@ -1452,24 +1459,52 @@ const handlers = {
     }
     
     const existingPerms = identity.appPermissions[params.origin];
+    console.log('[Worker] Existing permissions for origin:', !!existingPerms);
     
+    // Create updated permissions object with proper structure
     const updatedPermissions = {
       appId: params.origin,
       appName: params.appName || existingPerms?.appName,
       grantedAt: existingPerms?.grantedAt || Date.now(),
       lastUsedAt: Date.now(),
-      kinds: params.permissions.kinds || existingPerms?.kinds || {},
-      signData: params.permissions.signData || existingPerms?.signData || 'DENY',
-      getPublicKey: params.permissions.getPublicKey || existingPerms?.getPublicKey,
-      nip04: params.permissions.nip04 || existingPerms?.nip04,
-      getRelays: params.permissions.getRelays || existingPerms?.getRelays,
-      sessionPermissions: params.permissions.sessionPermissions || existingPerms?.sessionPermissions
+      
+      // Handle the new permission structure
+      permissions: {
+        // Preserve existing permissions or use defaults
+        social: params.permissions.social || existingPerms?.permissions?.social || 'ASK_EVERYTIME',
+        messaging: params.permissions.messaging || existingPerms?.permissions?.messaging || 'ASK_EVERYTIME',
+        signData: params.permissions.signData || existingPerms?.permissions?.signData || 'ASK_EVERYTIME',
+        financial: params.permissions.financial || existingPerms?.permissions?.financial || 'ASK_EVERYTIME',
+      },
+      
+      // Handle getPublicKey permission
+      getPublicKey: params.permissions.getPublicKey || existingPerms?.getPublicKey || 'ALLOW',
+      
+      // Preserve session permissions
+      sessionPermissions: existingPerms?.sessionPermissions,
+      
+      // Preserve any other existing fields
+      ...existingPerms,
+      
+      // Override with new values
+      ...params.permissions
     };
     
     identity.appPermissions[params.origin] = updatedPermissions;
+    console.log('[Worker] Updated permissions for origin:', params.origin);
+    console.log('[Worker] Updated permissions object:', JSON.stringify(updatedPermissions, null, 2));
     
     // Update vault data
+    console.log('[Worker] Saving vault data...');
     await vaultDB.saveVault(vaultData);
+    console.log('[Worker] Vault data saved successfully');
+    console.log('[Worker] Final vault data structure:', JSON.stringify({
+        identities: vaultData.identities?.map(id => ({
+            nickname: id.nickname,
+            appPermissions: id.appPermissions ? Object.keys(id.appPermissions) : []
+        }))
+    }, null, 2));
+    console.log('[Worker] saveAppPermissions completed successfully');
   },
 };
 

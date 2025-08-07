@@ -29,15 +29,9 @@ export const MessengerProvider: ParentComponent = (props) => {
     const allowedOrigins: string[] = [];
     
     if (isDevelopment()) {
-      // Development: Allow localhost and common dev ports
-      allowedOrigins.push(
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://localhost:8080',
-        'http://127.0.0.1:3000',
-        'http://127.0.0.1:3001',
-        'http://127.0.0.1:8080'
-      );
+      // Development: Allow all origins for Embassy flexibility
+      // The vault (iframe) needs to accept messages from any parent application
+      allowedOrigins.push('*');
     }
     
     if (isStaging()) {
@@ -83,8 +77,8 @@ export const MessengerProvider: ParentComponent = (props) => {
       }
     });
 
-    // Set up all message handlers
-    setupMessageHandlers(messengerInstance);
+    // Set up all message handlers - commented out for now due to missing dependencies
+    // setupMessageHandlers(messengerInstance);
 
     // Don't send ready signal here - wait for AuthProvider to set up handlers
     if (window.parent !== window) {

@@ -39,18 +39,40 @@ export const PermissionsDashboard: Component = () => {
       const app = permissions().find(p => p.appId === appId);
       if (!app) return;
 
-      const updates: Partial<AppPermissions> = {};
+      const updates: any = {};
       
       if (permissionType === 'signEvent' && eventKind !== null) {
-        updates.kinds = { ...app.kinds, [eventKind]: level };
+        // Map event kinds to permission categories
+        const { getPermissionCategoryForKind } = await import('@nostrpass/types');
+        const category = getPermissionCategoryForKind(eventKind);
+        if (category) {
+          updates.permissions = {
+            ...app.permissions,
+            [category]: level
+          };
+        }
       } else if (permissionType === 'signData') {
-        updates.signData = level;
+        updates.permissions = {
+          ...app.permissions,
+          signData: level
+        };
       } else if (permissionType === 'getPublicKey') {
         updates.getPublicKey = level;
-      } else if (permissionType === 'nip04') {
-        updates.nip04 = level;
-      } else if (permissionType === 'getRelays') {
-        updates.getRelays = level;
+      } else if (permissionType === 'social') {
+        updates.permissions = {
+          ...app.permissions,
+          social: level
+        };
+      } else if (permissionType === 'messaging') {
+        updates.permissions = {
+          ...app.permissions,
+          messaging: level
+        };
+      } else if (permissionType === 'financial') {
+        updates.permissions = {
+          ...app.permissions,
+          financial: level
+        };
       }
 
       await permissionService.saveAppPermissions(
@@ -97,8 +119,6 @@ export const PermissionsDashboard: Component = () => {
     switch (level) {
       case 'ALLOW':
         return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300';
-      case 'ASK_PER_SESSION':
-        return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
       case 'ASK_EVERYTIME':
         return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300';
       case 'DENY':
@@ -112,8 +132,6 @@ export const PermissionsDashboard: Component = () => {
     switch (level) {
       case 'ALLOW':
         return 'Always Allow';
-      case 'ASK_PER_SESSION':
-        return 'Ask Per Session';
       case 'ASK_EVERYTIME':
         return 'Ask Every Time';
       case 'DENY':
@@ -123,7 +141,7 @@ export const PermissionsDashboard: Component = () => {
     }
   };
 
-  const permissionLevels: PermissionLevel[] = ['ALLOW', 'ASK_PER_SESSION', 'ASK_EVERYTIME', 'DENY'];
+  const permissionLevels: PermissionLevel[] = ['ALLOW', 'ASK_EVERYTIME', 'DENY'];
 
   return (
     <div class="max-w-6xl mx-auto p-6">
@@ -215,123 +233,112 @@ export const PermissionsDashboard: Component = () => {
                       </div>
                     </Show>
 
-                    {/* Sign Data Permission */}
-                    <div class="flex items-center justify-between">
-                      <div class="flex items-center gap-2">
-                        <span>📝</span>
-                        <span class="text-sm font-medium">Sign Data</span>
-                      </div>
-                      <Show 
-                        when={editingApp() === app.appId}
-                        fallback={
-                          <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.signData)}`}>
-                            {getPermissionLevelLabel(app.signData)}
-                          </span>
-                        }
-                      >
-                        <select
-                          value={app.signData}
-                          onChange={(e) => updatePermissionLevel(app.appId, 'signData', null, e.currentTarget.value as PermissionLevel)}
-                          class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                    {/* Permission Categories */}
+                    <div class="space-y-3">
+                      {/* Social Permission */}
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span>👥</span>
+                          <span class="text-sm font-medium">Social</span>
+                        </div>
+                        <Show 
+                          when={editingApp() === app.appId}
+                          fallback={
+                            <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.permissions?.social)}`}>
+                              {getPermissionLevelLabel(app.permissions?.social)}
+                            </span>
+                          }
                         >
-                          <For each={permissionLevels}>
-                            {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
-                          </For>
-                        </select>
-                      </Show>
+                          <select
+                            value={app.permissions?.social || 'ASK_EVERYTIME'}
+                            onChange={(e) => updatePermissionLevel(app.appId, 'social', null, e.currentTarget.value as PermissionLevel)}
+                            class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                          >
+                            <For each={permissionLevels}>
+                              {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
+                            </For>
+                          </select>
+                        </Show>
+                      </div>
+
+                      {/* Messaging Permission */}
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span>💬</span>
+                          <span class="text-sm font-medium">Messaging</span>
+                        </div>
+                        <Show 
+                          when={editingApp() === app.appId}
+                          fallback={
+                            <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.permissions?.messaging)}`}>
+                              {getPermissionLevelLabel(app.permissions?.messaging)}
+                            </span>
+                          }
+                        >
+                          <select
+                            value={app.permissions?.messaging || 'ASK_EVERYTIME'}
+                            onChange={(e) => updatePermissionLevel(app.appId, 'messaging', null, e.currentTarget.value as PermissionLevel)}
+                            class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                          >
+                            <For each={permissionLevels}>
+                              {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
+                            </For>
+                          </select>
+                        </Show>
+                      </div>
+
+                      {/* Sign Data Permission */}
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span>✍️</span>
+                          <span class="text-sm font-medium">Sign Data</span>
+                        </div>
+                        <Show 
+                          when={editingApp() === app.appId}
+                          fallback={
+                            <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.permissions?.signData)}`}>
+                              {getPermissionLevelLabel(app.permissions?.signData)}
+                            </span>
+                          }
+                        >
+                          <select
+                            value={app.permissions?.signData || 'ASK_EVERYTIME'}
+                            onChange={(e) => updatePermissionLevel(app.appId, 'signData', null, e.currentTarget.value as PermissionLevel)}
+                            class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                          >
+                            <For each={permissionLevels}>
+                              {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
+                            </For>
+                          </select>
+                        </Show>
+                      </div>
+
+                      {/* Financial Permission */}
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span>💰</span>
+                          <span class="text-sm font-medium">Financial</span>
+                        </div>
+                        <Show 
+                          when={editingApp() === app.appId}
+                          fallback={
+                            <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.permissions?.financial)}`}>
+                              {getPermissionLevelLabel(app.permissions?.financial)}
+                            </span>
+                          }
+                        >
+                          <select
+                            value={app.permissions?.financial || 'ASK_EVERYTIME'}
+                            onChange={(e) => updatePermissionLevel(app.appId, 'financial', null, e.currentTarget.value as PermissionLevel)}
+                            class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                          >
+                            <For each={permissionLevels}>
+                              {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
+                            </For>
+                          </select>
+                        </Show>
+                      </div>
                     </div>
-
-                    {/* Event Kinds */}
-                    <Show when={Object.keys(app.kinds).length > 0}>
-                      <div class="border-t pt-3 mt-3">
-                        <div class="text-sm font-medium mb-2">Event Signing Permissions:</div>
-                        <div class="space-y-2">
-                          <For each={Object.entries(app.kinds)}>
-                            {([kind, level]) => (
-                              <div class="flex items-center justify-between pl-4">
-                                <div class="flex items-center gap-2">
-                                  <span>✍️</span>
-                                  <span class="text-sm">Kind {kind}</span>
-                                </div>
-                                <Show 
-                                  when={editingApp() === app.appId}
-                                  fallback={
-                                    <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(level)}`}>
-                                      {getPermissionLevelLabel(level)}
-                                    </span>
-                                  }
-                                >
-                                  <select
-                                    value={level}
-                                    onChange={(e) => updatePermissionLevel(app.appId, 'signEvent', parseInt(kind), e.currentTarget.value as PermissionLevel)}
-                                    class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
-                                  >
-                                    <For each={permissionLevels}>
-                                      {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
-                                    </For>
-                                  </select>
-                                </Show>
-                              </div>
-                            )}
-                          </For>
-                        </div>
-                      </div>
-                    </Show>
-
-                    {/* Additional Permissions */}
-                    <Show when={app.nip04 !== undefined}>
-                      <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                          <span>🔐</span>
-                          <span class="text-sm font-medium">Encrypt/Decrypt (NIP-04)</span>
-                        </div>
-                        <Show 
-                          when={editingApp() === app.appId}
-                          fallback={
-                            <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.nip04)}`}>
-                              {getPermissionLevelLabel(app.nip04)}
-                            </span>
-                          }
-                        >
-                          <select
-                            value={app.nip04}
-                            onChange={(e) => updatePermissionLevel(app.appId, 'nip04', null, e.currentTarget.value as PermissionLevel)}
-                            class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
-                          >
-                            <For each={permissionLevels}>
-                              {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
-                            </For>
-                          </select>
-                        </Show>
-                      </div>
-                    </Show>
-
-                    <Show when={app.getRelays !== undefined}>
-                      <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                          <span>📡</span>
-                          <span class="text-sm font-medium">Access Relay List</span>
-                        </div>
-                        <Show 
-                          when={editingApp() === app.appId}
-                          fallback={
-                            <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.getRelays)}`}>
-                              {getPermissionLevelLabel(app.getRelays)}
-                            </span>
-                          }
-                        >
-                          <select
-                            value={app.getRelays}
-                            onChange={(e) => updatePermissionLevel(app.appId, 'getRelays', null, e.currentTarget.value as PermissionLevel)}
-                            class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
-                          >
-                            <For each={permissionLevels}>
-                              {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
-                            </For>
-                          </select>
-                        </Show>
-                      </div>
-                    </Show>
                   </div>
                 </div>
               )}

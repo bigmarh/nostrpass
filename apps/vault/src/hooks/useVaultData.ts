@@ -27,9 +27,16 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     setError(null);
 
     try {
+      console.log('🔄 Loading vault data for:', currentUsername, 'force:', force || forceRefresh);
       const data = await vaultDataService.getVaultData(currentUsername, { 
         forceRefresh: force || forceRefresh 
       });
+      console.log('📋 Loaded vault data:', JSON.stringify({
+        identities: data?.identities?.map(id => ({
+          nickname: id.nickname,
+          appPermissions: id.appPermissions ? Object.keys(id.appPermissions) : []
+        }))
+      }, null, 2));
       setVaultData(data);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load vault data';
@@ -100,8 +107,23 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     if (!currentUsername) throw new Error('No user logged in');
 
     try {
-      await vaultDataService.switchIdentity(currentUsername, newIndex);
-      await loadVaultData(true);
+      // Identity switching should be local to this tab only
+      // Update the local vault data signal without broadcasting
+      const currentData = vaultData();
+      if (!currentData) {
+        throw new Error('No current vault data available');
+      }
+
+      // Update only the currentIdentityIndex locally
+      const updatedData: VaultData = {
+        ...currentData,
+        currentIdentityIndex: newIndex
+      };
+
+      // Update the signal directly without going through the service
+      setVaultData(updatedData);
+      
+      console.log(`🔄 Switched to identity ${newIndex} (local only)`);
     } catch (err) {
       console.error('useVaultData: Failed to switch identity:', err);
       throw err;

@@ -5,9 +5,15 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
 
     return {
         HIDE_VAULT: () => {
-            console.log('Hide vault signal received');
-            embassyInstance.hide();
-            return { acknowledged: true };
+            console.log('🔙 Hide vault signal received from vault iframe');
+            try {
+                embassyInstance.hide();
+                console.log('✅ Vault hidden successfully');
+                return { acknowledged: true };
+            } catch (error) {
+                console.error('❌ Failed to hide vault:', error);
+                return { acknowledged: false, error: error instanceof Error ? error.message : 'Unknown error' };
+            }
         },
         SHOW_VAULT: (page: string = 'vault') => {
             console.log('Show vault signal received');

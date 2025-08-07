@@ -78,12 +78,17 @@ export class WorkerMessenger {
   }
 
   private handleMessage = async (event: MessageEvent) => {
+    console.log('[WorkerMessenger] Received message:', event.data);
     const data = event.data;
 
     if (this.isRequest(data)) {
+      console.log('[WorkerMessenger] Processing as request');
       await this.handleRequest(data);
     } else if (this.isResponse(data)) {
+      console.log('[WorkerMessenger] Processing as response');
       this.handleResponse(data);
+    } else {
+      console.log('[WorkerMessenger] Unknown message type:', typeof data, data);
     }
   };
 
@@ -92,9 +97,11 @@ export class WorkerMessenger {
   };
 
   private async handleRequest(request: WorkerRequest) {
+    console.log('[WorkerMessenger] Handling request:', request.method, request.id);
     const handler = this.handlers[request.method];
     
     if (!handler) {
+      console.log('[WorkerMessenger] Handler not found for method:', request.method);
       this.sendResponse(request.id, null, {
         code: 'METHOD_NOT_FOUND',
         message: `Method "${request.method}" not found`,
@@ -103,9 +110,12 @@ export class WorkerMessenger {
     }
 
     try {
+      console.log('[WorkerMessenger] Calling handler for method:', request.method);
       const result = await handler(request.params);
+      console.log('[WorkerMessenger] Handler completed successfully for method:', request.method);
       this.sendResponse(request.id, result);
     } catch (error) {
+      console.error('[WorkerMessenger] Handler error for method:', request.method, error);
       this.sendResponse(request.id, null, {
         code: 'HANDLER_ERROR',
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -115,18 +125,23 @@ export class WorkerMessenger {
   }
 
   private handleResponse(response: WorkerResponse) {
+    console.log('[WorkerMessenger] Received response for request:', response.id, 'error:', !!response.error);
     const pending = this.pendingRequests.get(response.id);
     
     if (!pending) {
+      console.log('[WorkerMessenger] No pending request found for response:', response.id);
       return;
     }
 
+    console.log('[WorkerMessenger] Resolving pending request:', response.id);
     clearTimeout(pending.timeout);
     this.pendingRequests.delete(response.id);
 
     if (response.error) {
+      console.log('[WorkerMessenger] Rejecting request with error:', response.error.message);
       pending.reject(new Error(response.error.message));
     } else {
+      console.log('[WorkerMessenger] Resolving request with result');
       pending.resolve(response.result);
     }
   }
@@ -138,6 +153,8 @@ export class WorkerMessenger {
       error,
       timestamp: Date.now(),
     };
+
+    console.log('[WorkerMessenger] Sending response for request:', id, 'error:', !!error);
 
     if (this.isWorkerContext) {
       self.postMessage(response);
@@ -152,7 +169,7 @@ export class WorkerMessenger {
 
   private isResponse(data: any): data is WorkerResponse {
     return data && typeof data.id === 'string' && 
-           (data.result !== undefined || data.error !== undefined);
+           ('result' in data || 'error' in data);
   }
 
   public destroy() {

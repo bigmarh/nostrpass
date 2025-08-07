@@ -160,10 +160,14 @@ class NostrPassEmbassy {
   }
 
   public hide(): void {
+    console.log('🔙 Embassy hide() method called');
+    
     if (!this.iframe) {
       console.warn('Cannot hide iframe - not created yet');
       return;
     }
+
+    console.log('🔙 Hiding iframe, current classes:', this.iframe.className);
 
     // Add hidden class to move off-screen
     this.iframe.classList.remove('nostrpass-iframe-visible');
@@ -175,6 +179,7 @@ class NostrPassEmbassy {
 
     document.body.style.overflow = ''; // Restore scrolling
 
+    console.log('🔙 Iframe hidden, new classes:', this.iframe.className);
     if (this.config.debug) console.log('Iframe hidden');
   }
 
@@ -253,17 +258,29 @@ class NostrPassEmbassy {
         console.error('Iframe contentWindow not available');
         return;
       }
-      const vaultOrigin = new URL(this.config.vaultUrl!).origin;
-      this.iframe.contentWindow.postMessage(message, vaultOrigin);
+      // Use the actual iframe origin instead of config vaultUrl
+      const iframeOrigin = new URL(this.iframe.src).origin;
+      this.iframe.contentWindow.postMessage(message, iframeOrigin);
     };
 
-    // Initialize with vault origin
-    const vaultOrigin = new URL(this.config.vaultUrl!).origin;
-    this.messenger.init([vaultOrigin]);
+    // Initialize with trusted vault origins only
+    // The Embassy (parent) should only accept messages from our trusted vault domain
+    const trustedOrigins = [
+      'https://nostrpass.com',
+      'https://app.nostrpass.com',
+      'https://www.nostrpass.com'
+    ];
+    
+    // In development, also allow localhost for testing
+    if (this.iframe.src.includes('localhost') || this.iframe.src.includes('127.0.0.1')) {
+      trustedOrigins.push('http://localhost:3001', 'http://127.0.0.1:3001');
+    }
+    
+    this.messenger.init(trustedOrigins);
 
     // Set up message handlers
     this.setupMessageHandlers();
-    if (this.config.debug) console.log('Messenger initialized with origin:', vaultOrigin);
+    if (this.config.debug) console.log('Messenger initialized with trusted origins:', trustedOrigins);
   }
 
   // Set up handlers for vault messages
