@@ -98,7 +98,7 @@ export class PermissionService {
   }
 
   async getAllAppPermissions(username: string): Promise<AppPermissions[]> {
-    const vaultData = await vaultDataService.getVaultData(username);
+    const vaultData = await vaultDataService.getVaultData(username, { forceRefresh: true });
     if (!vaultData?.identities) return [];
 
     const currentIndex = vaultData.currentIdentityIndex ?? 0;

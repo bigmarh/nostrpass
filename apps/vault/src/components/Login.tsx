@@ -22,7 +22,7 @@ export const Login: Component = () => {
     const navigate = useNavigate();
     const { send } = useMessenger();
     const { login, createAccount, hasPinVault } = useAuth();
-    const { checkUsernameAvailable, registerUsername, isConnected, getRegistrationInfo } = useNostrComms();
+    const { checkUsernameAvailable, registerUsername, isConnected } = useNostrComms();
     
     const cryptoReady = useCryptoWorkerReady();
     const cryptoWorker = useCryptoWorker();
@@ -136,20 +136,9 @@ export const Login: Component = () => {
             throw new Error('Not connected to Nostr relays. Please try again.');
         }
         
-        // First check if username exists on Nostr
-        setLoadingStatus('Checking username...');
-        
-        const registrationInfo = await getRegistrationInfo(username().trim().toLowerCase());
-
-        console.log('registrationInfo', registrationInfo);
-        
-        if (!registrationInfo) {
-            throw new Error('Invalid username or password');
-        }
-        
-        // Login with password
+        // Login with password (new flow uses LoginObj lookup)
         setLoadingStatus('Verifying credentials...');
-        await login(password(), username(), registrationInfo);
+        await login(password(), username().trim().toLowerCase());
         
         setLoadingStatus('Loading your vault...');
         
@@ -212,8 +201,7 @@ export const Login: Component = () => {
                     await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
                     
                     const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
-                        username: accountData.username,
-                        usePasswordEncryption: true // Initial save uses base encryption only
+                        username: accountData.username
                     });
                     
                     
@@ -313,8 +301,7 @@ export const Login: Component = () => {
                     await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
                     
                     const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
-                        username: accountData.username,
-                        usePasswordEncryption: true // Initial save uses base encryption only
+                        username: accountData.username
                     });
                     
                     

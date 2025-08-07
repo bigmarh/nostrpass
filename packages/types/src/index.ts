@@ -8,3 +8,33 @@ export * from './userTypes';
 export * from './identityTypes';
 export * from './permissionHelpers';
 
+// New event types for the updated auth flow
+export interface LoginObj {
+  storagePublicKey: string;
+  username: string;
+  createdAt: number;
+  version: number;
+}
+
+export interface VaultObj {
+  username: string;
+  identities: any[];
+  xprivEncrypted: string; // PIN-encrypted only
+  xprivRecovery: string;  // Recovery-encrypted
+  recovery?: {
+    questions: string[];
+    salt: string;
+    version: number;
+  };
+  salt: string;
+  version: number;
+  updatedAt: number;
+}
+
+export interface RecoveryData {
+  questions: string[];
+  xprivRecovery: string;
+  salt: string;
+  version: number;
+}
+

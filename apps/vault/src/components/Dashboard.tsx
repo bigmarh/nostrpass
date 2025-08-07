@@ -44,101 +44,111 @@ export const Dashboard: Component = () => {
 
     const cryptoWorker = useCryptoWorker();
     const permissionService = PermissionService.getInstance();
-    
+
     // Use the vault data hook
     const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
 
     // Listen for vault data refresh events
     onMount(() => {
-      const handleVaultDataRefresh = () => {
-        setIsRefreshing(true);
-        // Show refresh indicator for 2 seconds
-        setTimeout(() => setIsRefreshing(false), 2000);
-      };
+        const handleVaultDataRefresh = () => {
+            setIsRefreshing(true);
+            // Show refresh indicator for 2 seconds
+            setTimeout(() => setIsRefreshing(false), 2000);
+        };
 
-      window.addEventListener('vault-data-refresh', handleVaultDataRefresh);
-      
-      return () => {
-        window.removeEventListener('vault-data-refresh', handleVaultDataRefresh);
-        // Clean up sync queue on unmount
-        clearSyncQueue();
-      };
+        window.addEventListener('vault-data-refresh', handleVaultDataRefresh);
+
+        return () => {
+            window.removeEventListener('vault-data-refresh', handleVaultDataRefresh);
+            // Clean up sync queue on unmount
+            clearSyncQueue();
+        };
     });
-    
+
     // Sync to Nostr immediately (no debouncing)
-    
+
     // Queuing system for Nostr sync operations
     let syncQueue: Array<() => Promise<void>> = [];
     let isProcessingQueue = false;
-    
+
     const processSyncQueue = async () => {
         if (isProcessingQueue || syncQueue.length === 0) return;
-        
+
         isProcessingQueue = true;
         setSyncQueueStatus({ length: syncQueue.length, isProcessing: true });
         console.log('🔄 Processing sync queue, items:', syncQueue.length);
-        
-        while (syncQueue.length > 0) {
-            const syncOperation = syncQueue.shift();
-            if (syncOperation) {
-                try {
-                    console.log('🔄 Executing sync operation...');
-                    await syncOperation();
-                    console.log('✅ Sync operation completed');
-                } catch (error) {
-                    console.error('❌ Sync operation failed:', error);
-                    // Continue processing other items in queue
+
+        try {
+            while (syncQueue.length > 0) {
+                const syncOperation = syncQueue.shift();
+                if (syncOperation) {
+                    try {
+                        console.log('🔄 Executing sync operation...');
+                        await syncOperation();
+                        console.log('✅ Sync operation completed');
+                    } catch (error) {
+                        console.error('❌ Sync operation failed:', error);
+                        // Continue processing other items in queue
+                    }
                 }
+                // Update status after each operation
+                setSyncQueueStatus({ length: syncQueue.length, isProcessing: true });
             }
-            // Update status after each operation
-            setSyncQueueStatus({ length: syncQueue.length, isProcessing: true });
+        } catch (error) {
+            console.error('❌ Queue processing error:', error);
+        } finally {
+            isProcessingQueue = false;
+            setSyncQueueStatus({ length: 0, isProcessing: false });
+            console.log('✅ Sync queue processing complete');
         }
-        
-        isProcessingQueue = false;
-        setSyncQueueStatus({ length: 0, isProcessing: false });
-        console.log('✅ Sync queue processing complete');
     };
-    
+
     const queueSyncToNostr = async () => {
-        const syncOperation = async () => {
-            try {
-                await syncToNostr();
-                console.log('✅ Queued Nostr sync completed successfully');
-                setPermissionSaveError('✅ Settings saved to Nostr');
-                setTimeout(() => setPermissionSaveError(null), 3000);
-            } catch (error: any) {
-                console.error('❌ Queued Nostr sync failed:', error);
-                if (error.message?.includes('Vault is locked')) {
-                    setPermissionSaveError('Please unlock your vault with PIN first');
-                } else if (error.message?.includes('no xpriv')) {
-                    setPermissionSaveError('Session expired - please unlock with PIN');
-                } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
-                    setPermissionSaveError('Nostr sync timed out - settings saved locally but may not be synced to all relays');
-                } else if (error.message?.includes('Failed to publish to any relay')) {
-                    setPermissionSaveError('Failed to sync to Nostr relays - settings saved locally');
-                } else {
-                    setPermissionSaveError(error.message || 'Failed to save to Nostr');
+        return new Promise<void>((resolve, reject) => {
+            const syncOperation = async () => {
+                try {
+                    await syncToNostr();
+                    console.log('✅ Queued Nostr sync completed successfully');
+                    setPermissionSaveError('✅ Settings saved to Nostr');
+                    setTimeout(() => setPermissionSaveError(null), 3000);
+                    resolve(); // Resolve the promise when sync completes
+                } catch (error: any) {
+                    console.error('❌ Queued Nostr sync failed:', error);
+                    if (error.message?.includes('Vault is locked')) {
+                        setPermissionSaveError('Please unlock your vault with PIN first');
+                    } else if (error.message?.includes('no xpriv')) {
+                        setPermissionSaveError('Session expired - please unlock with PIN');
+                    } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
+                        setPermissionSaveError('Nostr sync timed out - settings saved locally but may not be synced to all relays');
+                    } else if (error.message?.includes('Failed to publish to any relay')) {
+                        setPermissionSaveError('Failed to sync to Nostr relays - settings saved locally');
+                    } else {
+                        setPermissionSaveError(error.message || 'Failed to save to Nostr');
+                    }
+                    reject(error); // Reject the promise when sync fails
                 }
-                throw error; // Re-throw to mark this operation as failed
-            }
-        };
-        
-        // Add to queue
-        syncQueue.push(syncOperation);
-        setSyncQueueStatus({ length: syncQueue.length, isProcessing: isProcessingQueue });
-        console.log('📋 Added sync operation to queue, queue length:', syncQueue.length);
-        
-        // Limit queue size to prevent memory issues
-        if (syncQueue.length > 10) {
-            console.log('⚠️ Queue too long, removing oldest items');
-            syncQueue = syncQueue.slice(-5); // Keep only the 5 most recent
+            };
+
+            // Add to queue
+            syncQueue.push(syncOperation);
             setSyncQueueStatus({ length: syncQueue.length, isProcessing: isProcessingQueue });
-        }
-        
-        // Start processing if not already running
-        processSyncQueue();
+            console.log('📋 Added sync operation to queue, queue length:', syncQueue.length);
+
+            // Limit queue size to prevent memory issues
+            if (syncQueue.length > 10) {
+                console.log('⚠️ Queue too long, removing oldest items');
+                syncQueue = syncQueue.slice(-5); // Keep only the 5 most recent
+                setSyncQueueStatus({ length: syncQueue.length, isProcessing: isProcessingQueue });
+            }
+
+            // Start processing if not already running
+            processSyncQueue().catch(error => {
+                console.error('❌ Queue processing failed:', error);
+                reject(error);
+            });
+        });
     };
-    
+
     const clearSyncQueue = () => {
         console.log('🧹 Clearing sync queue, items:', syncQueue.length);
         syncQueue = [];
@@ -157,7 +167,7 @@ export const Dashboard: Component = () => {
     const identities = createMemo(() => {
         const currentUser = user();
         const vault = vaultData();
-        
+
         if (!currentUser || !vault?.identities) {
             // Fallback to basic identity from user data
             let npub = '';
@@ -237,10 +247,10 @@ export const Dashboard: Component = () => {
     const toggleVaultLock = async () => {
         if (isVaultLocked()) {
             // If locked, show PIN unlock modal
-            
+
             // Load vault data for recovery
             await loadVaultData();
-            
+
             setShowPinUnlock(true);
             setPinUnlockError('');
         } else {
@@ -252,7 +262,7 @@ export const Dashboard: Component = () => {
     const backToApp = () => {
         console.log('🔙 Back to app clicked, sending HIDE_VAULT message');
         console.log('📍 Current app:', params.app);
-        
+
         try {
             // Use the send function that's already available from useMessenger
             send('HIDE_VAULT');
@@ -261,7 +271,7 @@ export const Dashboard: Component = () => {
             console.error('❌ Failed to send HIDE_VAULT message:', error);
         }
     };
-    
+
     // Load permissions when settings panel opens
     createEffect(() => {
         if (showSettingsPanel() && params.app) {
@@ -281,7 +291,7 @@ export const Dashboard: Component = () => {
                 setPinUnlockError('Incorrect PIN. Please try again.');
             }
         } catch (error) {
-            
+
             // Check if the error indicates we need to login again
             if (error instanceof Error && error.message.includes('login with password')) {
                 setPinUnlockError('Session expired. Please login with your password.');
@@ -317,28 +327,32 @@ export const Dashboard: Component = () => {
     const loadAppPermissions = async () => {
         const currentUser = user();
         if (!currentUser || !params.app) return;
-        
+
         console.log('🔄 Loading app permissions for:', params.app);
         try {
             const permissions = await permissionService.getAllAppPermissions(currentUser.profile.username);
             console.log('📋 Retrieved permissions:', permissions.length, 'total');
+            console.log('📋 All permissions:', JSON.stringify(permissions, null, 2));
             const appPerm = permissions.find(p => p.appId === params.app);
             console.log('🎯 Found app permissions:', !!appPerm);
-            
+            if (appPerm) {
+                console.log('🎯 App permissions details:', JSON.stringify(appPerm, null, 2));
+            }
+
             setAppPermissions(appPerm || createDefaultPermissions(params.app));
         } catch (error) {
             console.error('❌ Error loading app permissions:', error);
             setAppPermissions(createDefaultPermissions(params.app));
         }
     };
-    
 
-    
+
+
     // Manual sync function for user-triggered sync
     const handleManualSync = async () => {
         const currentUser = user();
         if (!currentUser) return;
-        
+
         try {
             console.log('🔄 Manual sync triggered...');
             await syncToNostr();
@@ -350,11 +364,80 @@ export const Dashboard: Component = () => {
         }
     };
 
+    // Test queue function for debugging
+    const handleTestQueue = async () => {
+        console.log('🧪 Testing queue system...');
+        console.log('Current queue status:', syncQueueStatus());
+        console.log('Queue length:', syncQueue.length);
+        console.log('Is processing:', isProcessingQueue);
+
+        // Add a test operation to the queue
+        const testOperation = async () => {
+            console.log('🧪 Test operation executing...');
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate 1 second work
+            console.log('🧪 Test operation completed');
+        };
+
+        syncQueue.push(testOperation);
+        setSyncQueueStatus({ length: syncQueue.length, isProcessing: isProcessingQueue });
+        processSyncQueue();
+    };
+
+    // Test permission save/load cycle
+    const handleTestPermissionCycle = async () => {
+        const currentUser = user();
+        if (!currentUser || !params.app) return;
+
+        console.log('🧪 Testing permission save/load cycle...');
+
+        // 1. Load current permissions
+        console.log('📋 Step 1: Loading current permissions...');
+        await loadAppPermissions();
+        const currentPerms = appPermissions();
+        console.log('📋 Current permissions:', JSON.stringify(currentPerms, null, 2));
+
+        // 2. Save a test permission
+        console.log('📋 Step 2: Saving test permission...');
+        const testUpdates: any = {
+            permissions: {
+                social: 'ALLOW',
+                messaging: currentPerms?.permissions?.messaging || 'ASK_EVERYTIME',
+                signData: currentPerms?.permissions?.signData || 'ASK_EVERYTIME',
+                financial: currentPerms?.permissions?.financial || 'ASK_EVERYTIME'
+            }
+        };
+
+        await permissionService.saveAppPermissions(
+            currentUser.profile.username,
+            params.app,
+            testUpdates,
+            currentPerms?.appName || params.app
+        );
+        console.log('✅ Test permission saved');
+
+        // 3. Load permissions again
+        console.log('📋 Step 3: Loading permissions again...');
+        await loadAppPermissions();
+        const newPerms = appPermissions();
+        console.log('📋 New permissions:', JSON.stringify(newPerms, null, 2));
+
+        // 4. Check if they match
+        console.log('📋 Step 4: Comparing permissions...');
+        const socialPermission = newPerms?.permissions?.social;
+        console.log('🎯 Social permission is now:', socialPermission);
+
+        if (socialPermission === 'ALLOW') {
+            console.log('✅ Test PASSED - permission persisted correctly');
+        } else {
+            console.log('❌ Test FAILED - permission did not persist');
+        }
+    };
+
     // Get vault from Nostr function
     const handleGetFromNostr = async () => {
         const currentUser = user();
         if (!currentUser) return;
-        
+
         try {
             console.log('🔄 Getting vault from Nostr...');
             const result = await getVaultFromNostr();
@@ -374,48 +457,48 @@ export const Dashboard: Component = () => {
             // Could show an error toast here
         }
     };
-    
+
     // Handle permission change
     const handlePermissionChange = async (permissionType: string, newLevel: PermissionLevel) => {
         const currentUser = user();
         if (!currentUser || !params.app || !appPermissions()) return;
-        
+
         console.log('🔄 Starting permission change...');
         setIsSavingPermission(true);
         setPermissionSaveError(null);
-        
+
         try {
             // Update local permission
             const updates: Partial<AppPermissions> = {};
-            
+
             if (permissionType === 'getPublicKey') {
                 updates.getPublicKey = newLevel;
             } else if (permissionType === 'social') {
-                updates.permissions = { 
-                    ...appPermissions()!.permissions, 
-                    social: newLevel 
+                updates.permissions = {
+                    ...appPermissions()!.permissions,
+                    social: newLevel
                 };
             } else if (permissionType === 'messaging') {
-                updates.permissions = { 
-                    ...appPermissions()!.permissions, 
-                    messaging: newLevel 
+                updates.permissions = {
+                    ...appPermissions()!.permissions,
+                    messaging: newLevel
                 };
             } else if (permissionType === 'signData') {
-                updates.permissions = { 
-                    ...appPermissions()!.permissions, 
-                    signData: newLevel 
+                updates.permissions = {
+                    ...appPermissions()!.permissions,
+                    signData: newLevel
                 };
             } else if (permissionType === 'financial') {
-                updates.permissions = { 
-                    ...appPermissions()!.permissions, 
-                    financial: newLevel 
+                updates.permissions = {
+                    ...appPermissions()!.permissions,
+                    financial: newLevel
                 };
             }
-            
+
             console.log('💾 Saving app permissions...');
             console.log('📋 Current vault data before save:', JSON.stringify(vaultData(), null, 2));
             console.log('🔧 Permission updates:', JSON.stringify(updates, null, 2));
-            
+
             try {
                 await permissionService.saveAppPermissions(
                     currentUser.profile.username,
@@ -424,7 +507,7 @@ export const Dashboard: Component = () => {
                     appPermissions()!.appName || params.app
                 );
                 console.log('✅ App permissions saved locally');
-                
+
                 // Reload vault data to see the changes
                 await loadVaultData();
                 console.log('📋 Vault data after save:', JSON.stringify(vaultData(), null, 2));
@@ -432,37 +515,52 @@ export const Dashboard: Component = () => {
                 console.error('❌ Error in saveAppPermissions:', error);
                 throw error;
             }
-            
+
             // Reload permissions to get updated state
             console.log('🔄 Reloading permissions...');
             await loadAppPermissions();
             console.log('✅ Permissions reloaded');
-            
-            // No longer using debounced sync - removed timeout clearing
-            
-            // Queue sync to Nostr
-            console.log('📋 Queuing Nostr sync...');
-            await queueSyncToNostr();
-            
-            // Clear saving state immediately after queuing
+
+            // Clear saving state immediately after local save
             console.log('🏁 Clearing saving state...');
             setIsSavingPermission(false);
-            
+
+            // Sync to Nostr in background (don't await)
+            console.log('🔄 Starting Nostr sync in background...');
+            syncToNostr().then(() => {
+                console.log('✅ Nostr sync completed successfully');
+                setPermissionSaveError('✅ Settings saved');
+                setTimeout(() => setPermissionSaveError(null), 3000);
+            }).catch((error: any) => {
+                console.error('❌ Nostr sync failed:', error);
+                if (error.message?.includes('Vault is locked')) {
+                    setPermissionSaveError('Please unlock your vault with PIN first');
+                } else if (error.message?.includes('no xpriv')) {
+                    setPermissionSaveError('Session expired - please unlock with PIN');
+                } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
+                    setPermissionSaveError('Nostr sync timed out - settings saved locally but may not be synced to all relays');
+                } else if (error.message?.includes('Failed to publish to any relay')) {
+                    setPermissionSaveError('Failed to sync to Nostr relays - settings saved locally');
+                } else {
+                    setPermissionSaveError(error.message || 'Failed to save to Nostr');
+                }
+            });
+
         } catch (error) {
             console.error('❌ Permission save failed:', error);
             setPermissionSaveError('Failed to save permission');
             setIsSavingPermission(false);
         }
     };
-    
+
     const handlePasswordVerification = async () => {
         if (!cryptoWorker || !recoverySessionToken() || !tempNewPin() || !passwordForReset()) {
             return;
         }
-        
+
         setIsUnlocking(true);
         setPinUnlockError('');
-        
+
         try {
             // Complete PIN reset in worker
             const result = await cryptoWorker.completePinReset({
@@ -470,11 +568,11 @@ export const Dashboard: Component = () => {
                 newPin: tempNewPin(),
                 password: passwordForReset()
             });
-            
+
             if (result.success) {
                 // Success! Unlock with new PIN
                 await handlePinUnlock(tempNewPin());
-                
+
                 // Reset the recovery flow state
                 setShowRecovery(false);
                 setShowPinReset(false);
@@ -512,7 +610,7 @@ export const Dashboard: Component = () => {
     const handleIdentitySwitch = async (identityIndex: number) => {
         const currentUser = user();
         if (!currentUser) return;
-        
+
         try {
             // Update the current identity index in the vault
             await updateVaultData({
@@ -530,43 +628,43 @@ export const Dashboard: Component = () => {
             console.warn('Cannot connect identity: no active vault session or app parameter');
             return;
         }
-        
+
         // Check if vault is locked before proceeding
         if (isVaultLocked()) {
             console.warn('Cannot connect identity: vault is locked');
             return;
         }
-        
+
         setIsConnectingIdentity(true);
         setIdentityOperationError(null);
-        
+
         try {
             // Create default permissions for the new connection
             const defaultPermissions = createDefaultPermissions(params.app);
-            
+
             // Get current vault data
             const currentVault = vaultData();
             if (!currentVault) {
                 console.warn('Cannot connect identity: no vault data available');
                 return;
             }
-            
+
             // Create updated identities array
             const updatedIdentities = [...currentVault.identities];
             if (!updatedIdentities[identityIndex].appPermissions) {
                 updatedIdentities[identityIndex].appPermissions = {};
             }
             updatedIdentities[identityIndex].appPermissions[params.app] = defaultPermissions;
-            
+
             // Update vault data with the new identities
             await updateVaultData({
                 identities: updatedIdentities
             });
-            
+
             console.log('✅ Identity connected successfully');
         } catch (error: any) {
             console.error('Failed to connect identity:', error);
-            
+
             // Check if it's a timeout error and provide user feedback
             if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
                 const errorMsg = 'Nostr sync timed out - identity saved locally but may not be synced to all relays';
@@ -579,10 +677,10 @@ export const Dashboard: Component = () => {
             } else {
                 setIdentityOperationError(error.message || 'Failed to connect identity');
             }
-            
+
             // Clear error after 5 seconds
             setTimeout(() => setIdentityOperationError(null), 5000);
-            
+
             // Re-throw the error so the UI can handle it appropriately
             throw error;
         } finally {
@@ -597,16 +695,16 @@ export const Dashboard: Component = () => {
             console.warn('Cannot disconnect identity: no active vault session');
             return;
         }
-        
+
         // Check if vault is locked before proceeding
         if (isVaultLocked()) {
             console.warn('Cannot disconnect identity: vault is locked');
             return;
         }
-        
+
         setIsConnectingIdentity(true);
         setIdentityOperationError(null);
-        
+
         try {
             // Get current vault data
             const currentVault = vaultData();
@@ -614,22 +712,22 @@ export const Dashboard: Component = () => {
                 console.warn('Cannot disconnect identity: no vault data available');
                 return;
             }
-            
+
             // Create updated identities array
             const updatedIdentities = [...currentVault.identities];
             if (updatedIdentities[identityIndex].appPermissions) {
                 delete updatedIdentities[identityIndex].appPermissions[appId];
             }
-            
+
             // Update vault data with the new identities
             await updateVaultData({
                 identities: updatedIdentities
             });
-            
+
             console.log('✅ Identity disconnected successfully');
         } catch (error: any) {
             console.error('Failed to disconnect identity:', error);
-            
+
             // Check if it's a timeout error and provide user feedback
             if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
                 const errorMsg = 'Nostr sync timed out - identity saved locally but may not be synced to all relays';
@@ -642,10 +740,10 @@ export const Dashboard: Component = () => {
             } else {
                 setIdentityOperationError(error.message || 'Failed to disconnect identity');
             }
-            
+
             // Clear error after 5 seconds
             setTimeout(() => setIdentityOperationError(null), 5000);
-            
+
             // Re-throw the error so the UI can handle it appropriately
             throw error;
         } finally {
@@ -810,44 +908,76 @@ export const Dashboard: Component = () => {
                             <For each={filteredIdentities()}>
                                 {(identity) => (
                                     <div
-                                        class={`flex cursor-pointer border rounded-lg p-4 justify-between items-center hover:shadow-md transition-all ${identity.isActive ? 'border-gray-700 bg-gray-200' : 'border-gray-300 bg-white hover:bg-gray-50'
+                                        class={`flex flex-col  cursor-pointer border rounded-lg p-4 justify-between items-center hover:shadow-md transition-all ${identity.isActive ? 'border-gray-700 bg-gray-200' : 'border-gray-300 bg-white hover:bg-gray-50'
                                             }`}
                                     >
-                                        <div class="flex flex-col justify-start gap-2">
-                                            <div class="flex items-center gap-2">
-                                                <span class="font-medium text-gray-900">{identity.nickname}</span>
-                                                <Show when={identity.isActive}>
-                                                    <span class="text-xs text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">
-                                                        Active
+                                        <div class="flex flex-row justify-between w-full items-center ">
+                                            <div class="flex flex-col justify-start gap-2">
+                                                <div class="flex items-center gap-2">
+                                                    <span class="font-medium text-gray-900">{identity.nickname}</span>
+                                                    <Show when={identity.isActive}>
+                                                        <span class="text-xs text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">
+                                                            Active
+                                                        </span>
+                                                    </Show>
+                                                </div>
+                                                <span class="text-gray-500 text-xs font-mono">
+                                                    ({identity.npub.substring(0, 8)}...)
+                                                </span>
+                                            </div>
+
+                                            <div class="flex flex-col justify-end items-end gap-3">
+                                                <div class="flex items-center gap-2">
+                                                    {/* Slide switch */}
+                                                    <Show when={!isVaultLocked()}>
+                                                        <button
+                                                            onClick={() => handleIdentitySwitch(identity.index)}
+                                                            class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700' : 'bg-gray-300'
+                                                                } hover:opacity-80`}
+                                                            title={identity.isActive ? 'Active identity (local to this tab)' : 'Click to activate (local to this tab)'}
+                                                        >
+                                                            <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
+                                                                }`} />
+                                                        </button>
+                                                    </Show>
+                                                    <Show when={isVaultLocked()}>
+                                                        <div class="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 opacity-50">
+                                                            <span class="inline-block h-4 w-4 transform rounded-full bg-white translate-x-1" />
+                                                        </div>
+                                                    </Show>
+
+
+                                                </div>
+
+                                            </div>
+                                        </div>
+                                        {/* Connected to */}
+                                        <div class="flex flex-row justify-between w-full mt-4 items-center">
+                                            <div>
+                                                <Show when={identity.hasAppPermissions}>
+                                                    <span class="text-green-600 text-xs font-medium">
+                                                        Connected to {desanitizeDomain(params.app)}
+                                                    </span>
+                                                </Show>
+                                                <Show when={!identity.hasAppPermissions && params.app && !isVaultLocked()}>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleConnectIdentity(identity.index);
+                                                        }}
+                                                        class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                                        title={`Connect ${identity.nickname} to ${desanitizeDomain(params.app)}`}
+                                                    >
+                                                        Connect
+                                                    </button>
+                                                </Show>
+                                                <Show when={!identity.hasAppPermissions && params.app && isVaultLocked()}>
+                                                    <span class="text-gray-400 text-xs">
+                                                        Unlock vault to connect
                                                     </span>
                                                 </Show>
                                             </div>
-                                            <span class="text-gray-500 text-xs font-mono">
-                                                ({identity.npub.substring(0, 8)}...)
-                                            </span>
-                                        </div>
-
-                                        <div class="flex flex-col justify-end items-end gap-3">
-                                            <div class="flex items-center gap-2">
-                                                {/* Slide switch */}
-                                                <Show when={!isVaultLocked()}>
-                                                    <button
-                                                        onClick={() => handleIdentitySwitch(identity.index)}
-                                                        class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700' : 'bg-gray-300'
-                                                            } hover:opacity-80`}
-                                                        title={identity.isActive ? 'Active identity (local to this tab)' : 'Click to activate (local to this tab)'}
-                                                    >
-                                                        <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
-                                                            }`} />
-                                                    </button>
-                                                </Show>
-                                                <Show when={isVaultLocked()}>
-                                                    <div class="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 opacity-50">
-                                                        <span class="inline-block h-4 w-4 transform rounded-full bg-white translate-x-1" />
-                                                    </div>
-                                                </Show>
-
-                                                {/* Settings button */}
+                                            <div>          {/* Settings button */}
                                                 <Show when={!isVaultLocked()}>
                                                     <button
                                                         onClick={(e) => {
@@ -871,36 +1001,7 @@ export const Dashboard: Component = () => {
                                                     </div>
                                                 </Show>
                                             </div>
-                                            <div class="flex gap-2 items-center">
-                                                <Show when={identity.hasAppPermissions}>
-                                                    <span class="text-green-600 text-xs font-medium">
-                                                        Connected to {desanitizeDomain(params.app)}
-                                                    </span>
-                                                </Show>
-                                        
-                                                <Show when={!identity.hasAppPermissions && identity.connectedApps.length === 0}>
-                                                    <span class="text-gray-400 text-xs">
-                                                        Not connected
-                                                    </span>
-                                                </Show>
-                                                <Show when={!identity.hasAppPermissions && params.app && !isVaultLocked()}>
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleConnectIdentity(identity.index);
-                                                        }}
-                                                        class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                                                        title={`Connect ${identity.nickname} to ${desanitizeDomain(params.app)}`}
-                                                    >
-                                                        Connect
-                                                    </button>
-                                                </Show>
-                                                <Show when={!identity.hasAppPermissions && params.app && isVaultLocked()}>
-                                                    <span class="text-gray-400 text-xs">
-                                                        Unlock vault to connect
-                                                    </span>
-                                                </Show>
-                                            </div>
+
                                         </div>
                                     </div>
                                 )}
@@ -920,12 +1021,12 @@ export const Dashboard: Component = () => {
 
 
                         {/* Test Console for Development */}
-                        <Show when={import.meta.env.DEV}>   
+                        <Show when={import.meta.env.DEV}>
                             <VaultTestConsole />
                         </Show>
                         {/* Results count */}
 
-        
+
                     </main>
 
                     <footer class="text-sm py-4 px-4 border-t border-gray-200 flex justify-between items-center">
@@ -949,11 +1050,11 @@ export const Dashboard: Component = () => {
                             </Show>
                         </div>
                         <div class="text-gray-400">
-                    {searchQuery() && (
+                            {searchQuery() && (
                                 <span>
-                            Found {filteredIdentities().length} of {identities().length} Identities
+                                    Found {filteredIdentities().length} of {identities().length} Identities
                                 </span>
-                    )}
+                            )}
                         </div>
                     </footer>
                 </div>
@@ -1032,7 +1133,7 @@ export const Dashboard: Component = () => {
                                         setRecoverySessionToken(null);
                                     }}
                                 />
-                                
+
                                 <Show when={showPasswordPrompt()}>
                                     <div class="mt-4 p-4 border-t">
                                         <h3 class="text-lg font-semibold mb-2">Verify Your Password</h3>
@@ -1149,11 +1250,11 @@ export const Dashboard: Component = () => {
             <Show when={showSettingsPanel()}>
                 <div class="fixed inset-0 z-50 overflow-hidden">
                     {/* Backdrop */}
-                    <div 
+                    <div
                         class="fixed inset-0 bg-black/50 transition-opacity"
                         onClick={() => setShowSettingsPanel(false)}
                     />
-                    
+
                     {/* Side Panel */}
                     <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
                         {/* Panel Header */}
@@ -1191,7 +1292,7 @@ export const Dashboard: Component = () => {
                                                         <span class="text-sm text-gray-900">{new Date(identity().createdAt).toLocaleDateString()}</span>
                                                     </div>
                                                 </div>
-                                                
+
                                                 <div class="flex items-center justify-between gap-2">
                                                     <span class="text-sm text-gray-600">Public Key</span>
                                                     <div class="flex items-center gap-2">
@@ -1250,8 +1351,8 @@ export const Dashboard: Component = () => {
                                                     </span>
                                                 </div>
                                                 <p class="text-xs text-blue-600 mt-1">
-                                                    {syncQueueStatus().isProcessing 
-                                                        ? 'Saving your changes to Nostr relays...' 
+                                                    {syncQueueStatus().isProcessing
+                                                        ? 'Saving your changes to Nostr relays...'
                                                         : 'Changes will be synced shortly'}
                                                 </p>
                                             </div>
@@ -1271,7 +1372,7 @@ export const Dashboard: Component = () => {
                     </div>
                 </div>
             </Show>
-           
+
         </div>
     );
 };

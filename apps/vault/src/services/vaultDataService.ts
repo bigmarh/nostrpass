@@ -251,6 +251,26 @@ export class VaultDataService {
   }
 
   /**
+   * Get LoginObj from Nostr
+   */
+  async getLoginObj(username: string, environment: string = 'prod'): Promise<any | null> {
+    const cryptoWorker = getCryptoWorker();
+    if (!cryptoWorker) {
+      throw new Error('Crypto worker not ready');
+    }
+
+    try {
+      console.log('🔄 Getting LoginObj from Nostr for user:', username);
+      const result = await cryptoWorker.getLoginObj({ username, environment });
+      console.log('✅ LoginObj retrieved from Nostr:', result ? 'found' : 'not found');
+      return result?.loginObj || null;
+    } catch (error) {
+      console.error('❌ Failed to get LoginObj from Nostr:', error);
+      throw new Error(`Failed to get LoginObj from Nostr: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Get vault data from Nostr
    */
   async getVaultFromNostr(username: string): Promise<{ vaultData: any; eventId: string; timestamp: number } | null> {
@@ -355,6 +375,9 @@ export class VaultDataService {
       throw new Error('Crypto worker not ready');
     }
 
+    // Clear cache to ensure we get fresh data
+    this.clearCache(username);
+
     return cryptoWorker.getAppPermissions({ username, origin });
   }
 
@@ -373,6 +396,9 @@ export class VaultDataService {
     }
 
     await cryptoWorker.saveAppPermissions({ username, origin, permissions, appName });
+    
+    // Clear cache to ensure fresh data is loaded next time
+    this.clearCache(username);
   }
 }
 

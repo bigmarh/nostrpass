@@ -1035,7 +1035,6 @@ const handlers = {
 
   saveVaultToNostr: async (params: { 
     username: string;
-    usePasswordEncryption?: boolean; // Force password encryption for initial save
   }): Promise<{ event: any }> => {
     try {
       console.log('[Worker] saveVaultToNostr called for:', params.username);
@@ -1061,16 +1060,8 @@ const handlers = {
         throw new Error('No xpriv access - vault must be unlocked');
       }
       
-      // For initial save, we MUST use password encryption
-      const usePasswordEncryption = params.usePasswordEncryption || false;
-      
       const crypto = await ensureWasmReady();
       let signedEvent: any;
-      
-      // We always need xpriv to derive the storage key for signing
-      if (!hasXpriv) {
-        throw new Error('Cannot save vault without xpriv - vault must be unlocked');
-      }
       
       const xpriv = session!.xpriv!; // We already checked hasXpriv above
       console.log('[Worker] Xpriv available, deriving storage keypair...');
@@ -1083,47 +1074,35 @@ const handlers = {
       });
       console.log('[Worker] Storage keypair derived, pubkey:', derived.publicKey.substring(0, 16) + '...');
       
-      // Prepare vault content
-      let vaultContent: string;
+      // Create VaultObj from VaultData
+      const vaultObj = {
+        username: vaultData.username,
+        identities: vaultData.identities,
+        xprivEncrypted: vaultData.xprivEncrypted,
+        xprivRecovery: vaultData.recovery?.xprivRecovery || '',
+        recovery: vaultData.recovery ? {
+          questions: vaultData.recovery.questions,
+          salt: vaultData.recovery.salt,
+          version: vaultData.recovery.version
+        } : undefined,
+        salt: vaultData.salt,
+        version: (vaultData.version || 1) + 1,
+        updatedAt: Date.now()
+      };
       
-      if (usePasswordEncryption) {
-        // INITIAL SAVE: No additional encryption, vault is already password+PIN encrypted
-        vaultContent = JSON.stringify({
-          ...vaultData,
-          version: 1
-        });
-        console.log('[Worker] Using password encryption mode');
-      } else {
-        // SUBSEQUENT SAVES: Add NIP-04 encryption layer
-        const vaultDataString = JSON.stringify({
-          ...vaultData,
-          version: (vaultData.version || 1) + 1
-        });
-        
-        console.log('[Worker] Encrypting vault data with storage key...');
-        console.log('[Worker] Vault data string length:', vaultDataString.length);
-        console.log('[Worker] Private key length:', derived.privateKey.length);
-        console.log('[Worker] Public key length:', derived.publicKey.length);
-        
-        try {
-          // Use the private key as the encryption key for additional security
-          vaultContent = crypto.encryptData(vaultDataString, derived.privateKey);
-          console.log('[Worker] Vault data encrypted, content length:', vaultContent.length);
-        } catch (encryptError) {
-          console.error('[Worker] Data encryption failed:', encryptError);
-          throw new Error(`Data encryption failed: ${encryptError instanceof Error ? encryptError.message : 'Unknown error'}`);
-        }
-      }
+      // Store as plain JSON (no additional encryption needed)
+      const vaultContent = JSON.stringify(vaultObj);
+      console.log('[Worker] VaultObj created, content length:', vaultContent.length);
       
       // Create vault event
       const vaultEvent = {
         kind: 30078,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
-          ['d', `nostrpass.com_vault_${getEnvironment()}_${derived.publicKey}`],
+          ['d', `nostrpass.com_vault_${derived.publicKey}_${getEnvironment()}`],
           ['subject', 'encrypted-vault'],
           ['client', 'nostrpass.com'],
-          ['version', String(vaultData.version || 1)]
+          ['version', String(vaultObj.version)]
         ],
         content: vaultContent,
         pubkey: derived.publicKey,
@@ -1142,6 +1121,40 @@ const handlers = {
       return { event: signedEvent };
     } catch (error) {
       console.error('[Worker] saveVaultToNostr error:', error);
+      throw error;
+    }
+  },
+
+  // Get LoginObj from Nostr
+  getLoginObj: async (params: { 
+    username: string; 
+    environment: string;
+  }): Promise<{ loginObj: any } | null> => {
+    try {
+      console.log('[Worker] getLoginObj called for:', params.username);
+      
+      // Import Nostr helpers
+      const { getLoginObj } = await import('@nostrpass/nostrHelpers');
+      
+      // Get relays from environment
+      const { getRelays } = await import('../providers/EnvironmentProvider');
+      const relays = getRelays();
+      
+      // Get LoginObj from Nostr
+      const loginObj = await getLoginObj(params.username, params.environment, relays);
+      
+      if (loginObj) {
+        console.log('[Worker] LoginObj found:', {
+          storagePublicKey: loginObj.storagePublicKey,
+          username: loginObj.username
+        });
+        return { loginObj };
+      } else {
+        console.log('[Worker] No LoginObj found for username:', params.username);
+        return null;
+      }
+    } catch (error) {
+      console.error('[Worker] getLoginObj error:', error);
       throw error;
     }
   },
@@ -1237,7 +1250,7 @@ const handlers = {
       const filter = {
         kinds: [30078],
         authors: [derived.publicKey],
-        '#d': [`nostrpass.com_vault_${getEnvironment()}_${derived.publicKey}`],
+        '#d': [`nostrpass.com_vault_${derived.publicKey}_${getEnvironment()}`],
         limit: 1
       };
       
@@ -1252,22 +1265,9 @@ const handlers = {
       
       console.log('[Worker] Vault event found, event ID:', vaultEvent.id);
       
-      // Decrypt the vault content
-      let vaultDataString: string;
-      const crypto = await ensureWasmReady();
-      try {
-        // Try to decrypt with storage key (for subsequent saves)
-        vaultDataString = crypto.decryptData(vaultEvent.content, derived.privateKey);
-        console.log('[Worker] Vault data decrypted with storage key');
-      } catch (decryptError) {
-        console.log('[Worker] Storage key decryption failed, trying password encryption...');
-        // If that fails, try password encryption (for initial saves)
-        vaultDataString = vaultEvent.content;
-      }
-      
-      // Parse the vault data
-      const vaultData = JSON.parse(vaultDataString);
-      console.log('[Worker] Vault data parsed, identities count:', vaultData.identities?.length || 0);
+      // VaultObj is stored as plain JSON, no decryption needed
+      const vaultData = JSON.parse(vaultEvent.content);
+      console.log('[Worker] VaultObj parsed, identities count:', vaultData.identities?.length || 0);
       
       return {
         vaultData,

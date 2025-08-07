@@ -1,30 +1,22 @@
 import { SimplePool, Event as NostrEvent, Filter } from 'nostr-tools';
-import { finalizeEvent } from 'nostr-tools/pure';
+import { finalizeEvent, getPublicKey as nostrGetPublicKey } from 'nostr-tools/pure';
 import { getEnvironment } from './index';
-import { hexToBytes } from '@noble/hashes/utils';
+import { hexToBytes, bytesToHex } from '@noble/hashes/utils';
+import { sha256 } from '@noble/hashes/sha256';
 
-// Use the same VaultData interface
+
+// Updated VaultData interface for new auth flow
 export interface VaultData {
   // Core fields
   username: string;
   publicKey: string; // Storage public key for vault identification
-  xprivEncrypted: string; // Always double-encrypted: PIN first, then password
+  xprivEncrypted: string; // PIN-encrypted only (single encryption)
   salt: string; // For password key derivation
   
   // Identity management
   identities: any[];
   currentIdentityIndex: number;
   storagePublicKey?: string; // Explicit storage public key (same as publicKey)
-  
-  // Local session fields
-  xprivEncryptedForPin?: string; // PIN-encrypted only (stored locally after login)
-  
-  // Metadata
-  updatedAt: number;
-  version: number; // Vault version for migrations
-  
-  // Security
-  passwordVerifier?: string; // Encrypted known string to verify password
   
   // Recovery system
   recovery?: {
@@ -34,15 +26,169 @@ export interface VaultData {
     version: number; // Recovery system version
   };
   
-  // Legacy fields (kept for compatibility, will be removed in future)
-  pinSalt?: string;
-  pinHash?: string;
-  hasPin?: boolean;
-  deviceId?: string;
+  // Metadata
+  updatedAt: number;
+  version: number; // Vault version for migrations
+  
+  // Security
+  passwordVerifier?: string; // Encrypted known string to verify password
 }
 
 // Alias for backward compatibility
 export type NostrVaultData = VaultData;
+
+// New helper functions for the updated auth flow
+import type { LoginObj, VaultObj } from '@nostrpass/types';
+
+/**
+ * Save LoginObj to Nostr using random key for privacy
+ */
+export async function saveLoginObj(
+  username: string,
+  loginObj: LoginObj,
+  randomPublicKey: string,
+  randomPrivateKey: string,
+  relays: string[]
+): Promise<string[]> {
+  try {
+    const loginContent = JSON.stringify(loginObj);
+    
+    // Derive public key from the provided private key to ensure consistency
+    const privateKeyBytes = hexToBytes(randomPrivateKey);
+    const derivedPublicKey = nostrGetPublicKey(privateKeyBytes);
+    const pubkeyToUse = derivedPublicKey || randomPublicKey;
+
+    // Create login event with random key for privacy
+    const loginEvent: Partial<NostrEvent> = {
+      kind: 30078,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ['d', `nostrpass.com_login_${hash(username)}_${getEnvironment()}`],
+        ['client', 'nostrpass.com'],
+        ['subject', 'login-lookup'],
+      ],
+      content: loginContent,
+      pubkey: pubkeyToUse, // Random public key for privacy
+    };
+
+    // Sign the event with random private key
+    const signedEvent = finalizeEvent(loginEvent as any, privateKeyBytes);
+
+    // Publish to relays
+    const pool = new SimplePool();
+    const successfulPublishes: string[] = [];
+    
+    for (const relay of relays) {
+      try {
+        await pool.publish([relay], signedEvent);
+        console.log(`✅ Published LoginObj to ${relay}`);
+        successfulPublishes.push(relay);
+      } catch (error: any) {
+        console.error(`❌ Failed to publish LoginObj to ${relay}:`, error.message);
+      }
+    }
+    
+    if (successfulPublishes.length === 0) {
+      throw new Error('Failed to publish LoginObj to any relay');
+    }
+    
+    return successfulPublishes;
+  } catch (error) {
+    console.error('Failed to save LoginObj:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get LoginObj from Nostr by username
+ */
+export async function getLoginObj(
+  username: string,
+  environment: string,
+  relays: string[]
+): Promise<LoginObj | null> {
+  try {
+    const pool = new SimplePool();
+    
+    // Create filter for login event
+    const filter: Filter = {
+      kinds: [30078],
+      '#d': [`nostrpass.com_login_${hash(username)}_${environment}`],
+      limit: 1
+    };
+
+    // Get the latest login event
+    const events = await pool.get(relays, filter);
+    if (!events) {
+      return null;
+    }
+
+    // Parse the login object
+    const loginObj = JSON.parse(events.content) as LoginObj;
+    return loginObj;
+  } catch (error) {
+    console.error('Failed to get LoginObj:', error);
+    return null;
+  }
+}
+
+/**
+ * Save VaultObj to Nostr using storage key
+ */
+export async function saveVaultObj(
+  vaultObj: VaultObj,
+  storagePublicKey: string,
+  storagePrivateKey: string,
+  relays: string[]
+): Promise<string[]> {
+  try {
+    const vaultContent = JSON.stringify(vaultObj);
+    
+    // Create vault event with storage key as author
+    const vaultEvent: Partial<NostrEvent> = {
+      kind: 30078,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ['d', `nostrpass.com_vault_${storagePublicKey}_${getEnvironment()}`],
+        ['client', 'nostrpass.com'],
+        ['subject', 'encrypted-vault'],
+      ],
+      content: vaultContent,
+      pubkey: storagePublicKey, // Storage key as author
+    };
+
+    // Sign the event with storage key
+    const signedEvent = finalizeEvent(vaultEvent as any, hexToBytes(storagePrivateKey));
+
+    // Publish to relays
+    const pool = new SimplePool();
+    const successfulPublishes: string[] = [];
+    
+    for (const relay of relays) {
+      try {
+        await pool.publish([relay], signedEvent);
+        console.log(`✅ Published VaultObj to ${relay}`);
+        successfulPublishes.push(relay);
+      } catch (error: any) {
+        console.error(`❌ Failed to publish VaultObj to ${relay}:`, error.message);
+      }
+    }
+    
+    return successfulPublishes;
+  } catch (error) {
+    console.error('Failed to save VaultObj:', error);
+    throw error;
+  }
+}
+
+/**
+ * Hash username using SHA-256 hex, matching UsernameRegistry
+ */
+function hash(input: string): string {
+  const data = new TextEncoder().encode(input);
+  const digest = sha256(data);
+  return bytesToHex(digest);
+}
 
 /**
  * Save vault data to Nostr
@@ -67,7 +213,7 @@ export async function saveVaultToNostr(
       kind: 30078, // NIP-78 arbitrary custom app data (replaceable)
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['d', `nostrpass.com_vault_${getEnvironment()}_${userPublicKey}`], // Unique identifier
+        ['d', `nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`], // Use new VaultObj pattern
         ['client', 'nostrpass.com'],
         ['subject', 'encrypted-vault'],
       ],
@@ -134,7 +280,7 @@ export async function getVaultFromNostr(
     const filter: Filter = {
       kinds: [30078],
       authors: [userPublicKey],
-      '#d': [`nostrpass.com_vault_${getEnvironment()}_${userPublicKey}`],
+      '#d': [`nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`],
       limit: 10 // Get multiple versions
     };
 
@@ -206,7 +352,7 @@ export async function vaultExistsOnNostr(
     const filter: Filter = {
       kinds: [30078],
       authors: [userPublicKey],
-      '#d': [`nostrpass.com_vault_${getEnvironment()}_${userPublicKey}`],
+      '#d': [`nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`],
       limit: 1
     };
 

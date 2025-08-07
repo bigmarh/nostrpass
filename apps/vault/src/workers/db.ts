@@ -56,8 +56,6 @@ class VaultDB {
     
     console.log('💾 Saving vault to IndexedDB:', {
       username: vaultData.username,
-      hasXprivEncryptedForPin: !!vaultData.xprivEncryptedForPin,
-      xprivEncryptedForPinLength: vaultData.xprivEncryptedForPin?.length,
       dataSize: `${(dataSize / 1024).toFixed(2)} KB`,
       identitiesCount: vaultData.identities?.length || 0
     });
@@ -90,9 +88,7 @@ class VaultDB {
         const result = request.result || null;
         if (result) {
           console.log('📤 Retrieved vault from IndexedDB:', {
-            username: result.username,
-            hasXprivEncryptedForPin: !!result.xprivEncryptedForPin,
-            xprivEncryptedForPinLength: result.xprivEncryptedForPin?.length
+            username: result.username
           });
         }
         resolve(result);

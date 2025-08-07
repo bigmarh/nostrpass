@@ -253,7 +253,7 @@ export class UsernameRegistry {
       // We don't filter by author because different instances might use different keys
       const filter: Filter = {
         kinds: [30078], // NIP-78 arbitrary custom app data (replaceable)
-        '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`], // Use 'd' tag for indexing
+        '#d': [`nostrpass.com_login_${hash}_${getEnvironment()}`], // Use LoginObj pattern for consistency
         // Remove limit to get ALL events with this d-tag
       };
       
@@ -345,7 +345,7 @@ export class UsernameRegistry {
     try {
       const filter: Filter = {
         kinds: [30078],
-        '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`]
+        '#d': [`nostrpass.com_login_${hash}_${getEnvironment()}`]
       };
       
       console.log('Query filter:', JSON.stringify(filter, null, 2));
@@ -457,7 +457,7 @@ export class UsernameRegistry {
       
       // Add relay tags if user relays are provided
       const tags: string[][] = [
-        ['d', `nostrpass.com_username_${getEnvironment()}_${hash}`], // Unique identifier using 'd' tag
+        ['d', `nostrpass.com_login_${hash}_${getEnvironment()}`], // Use LoginObj pattern for consistency
         ['p', userPubkey, ''], // Reference to user's public key using standard 'p' tag
       ];
       
@@ -507,7 +507,7 @@ export class UsernameRegistry {
         // Verify the event was stored
         const verifyFilter = {
           kinds: [30078],
-          '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`],
+          '#d': [`nostrpass.com_login_${hash}_${getEnvironment()}`],
           limit: 1
         };
         let verifyEvents: NostrEvent[] = [];
@@ -570,7 +570,7 @@ export class UsernameRegistry {
       // Filter for our app's registrations
       const nostrpassEvents = events.filter(event => {
         const dTag = event.tags.find(tag => tag[0] === 'd')?.[1] || '';
-        return dTag.startsWith(`nostrpass.com_username_${getEnvironment()}_`);
+        return dTag.startsWith(`nostrpass.com_login_`);
       });
       
       return nostrpassEvents.map(event => {
@@ -600,7 +600,7 @@ export class UsernameRegistry {
     try {
       const filter: Filter = {
         kinds: [30078],
-        '#d': [`nostrpass.com_username_${getEnvironment()}_${hash}`], // Use indexed 'd' tag
+        '#d': [`nostrpass.com_login_${hash}_${getEnvironment()}`], // Use LoginObj pattern for consistency
       };
 
       return await this.pool.querySync(this.relays, filter);
