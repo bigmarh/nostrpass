@@ -94,7 +94,6 @@ export const MessengerProvider: ParentComponent = (props) => {
     }
 
     setMessenger(messengerInstance);
-    console.log('✅ Messenger initialized');
   });
 
   onCleanup(() => {

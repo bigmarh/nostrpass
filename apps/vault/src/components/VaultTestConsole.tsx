@@ -85,7 +85,6 @@ export const VaultTestConsole: Component = () => {
               }
             }
           } catch (error) {
-            console.warn('Failed to get identity info:', error);
           }
         }
 

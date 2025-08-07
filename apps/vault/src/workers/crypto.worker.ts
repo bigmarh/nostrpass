@@ -8,7 +8,6 @@ let cryptoInstance: NostrCrypto | null = null;
 
 // Worker initialization timestamp
 const workerInitTime = Date.now();
-console.log('🚀 Worker initialized at:', new Date(workerInitTime).toISOString());
 
 // Extended session type for recovery
 interface ExtendedSession extends UserSession {
@@ -22,9 +21,6 @@ const activeSessions = new Map<string, ExtendedSession>();
 
 // Debug helper to log session changes
 function logSessionState(action: string, username: string) {
-  console.log(`🔐 Session ${action} for ${username}. Total sessions: ${activeSessions.size}`);
-  console.log('🔐 All usernames:', Array.from(activeSessions.keys()));
-  
   // Also log to a global for debugging
   (globalThis as any).__DEBUG_SESSIONS = {
     count: activeSessions.size,
@@ -41,11 +37,9 @@ async function ensureWasmReady() {
     await init();
     cryptoInstance = new NostrCrypto();
     wasmReady = true;
-    console.log('WASM module initialized in worker');
     
     // Initialize database
     await vaultDB.init();
-    console.log('IndexedDB initialized in worker');
     
     // Clear expired sessions on startup
     await vaultDB.clearExpiredSessions();
@@ -221,15 +215,7 @@ const handlers = {
   },
 
   deriveKey: async (params: DeriveKeyParams): Promise<DeriveKeyResult> => {
-    console.log('🔑 deriveKey called with:', {
-      password: params.password,
-      passwordLength: params.password?.length,
-      salt: params.salt,
-      saltLength: params.salt?.length
-    });
-    
     const crypto = await ensureWasmReady();
-    console.log('🔑 Calling WASM deriveKeyFromPassword with salt:', params.salt ? 'provided' : 'will-generate');
     const result = crypto.deriveKeyFromPassword(params.password, params.salt);
     
     // Handle if result is a Map (from serde_wasm_bindgen)
@@ -238,17 +224,9 @@ const handlers = {
         key: result.get('key'),
         salt: result.get('salt'),
       };
-      console.log('✅ deriveKey result (from Map):', {
-        keyLength: derived.key?.length,
-        saltLength: derived.salt?.length
-      });
       return derived;
     }
     
-    console.log('✅ deriveKey result:', {
-      keyLength: result.key?.length,
-      saltLength: result.salt?.length
-    });
     return result;
   },
 
@@ -261,17 +239,7 @@ const handlers = {
       throw new Error('Either key or password must be provided');
     }
     
-    console.log('🔐 encryptData called with:', {
-      dataLength: params.data?.length,
-      usingKey: !!params.key,
-      usingPassword: !!params.password
-    });
-    
     const result = crypto.encryptData(params.data, encryptionKey);
-    console.log('✅ encryptData result:', {
-      resultType: typeof result,
-      resultLength: result?.length
-    });
     return result;
   },
 
@@ -283,24 +251,14 @@ const handlers = {
         throw new Error('Either key or password must be provided');
       }
       
-      console.log('🔐 decryptData called with:', {
-        hasEncryptedData: !!params.encryptedData,
-        encryptedDataLength: params.encryptedData?.length,
-        encryptedDataType: typeof params.encryptedData,
-        usingKey: !!params.key,
-        usingPassword: !!params.password
-      });
-      
       if (!params.encryptedData) {
         throw new Error('encryptedData is required');
       }
       
       const crypto = await ensureWasmReady();
       const result = crypto.decryptData(params.encryptedData, decryptionKey);
-      console.log('✅ decryptData successful');
       return result;
     } catch (error) {
-      console.error('❌ decryptData failed:', error);
       throw error;
     }
   },
@@ -312,30 +270,43 @@ const handlers = {
 
   deriveKeypairFromXpriv: async (params: DeriveKeypairFromXprivParams): Promise<DeriveKeypairFromXprivResult> => {
     const crypto = await ensureWasmReady();
-    const result = crypto.deriveKeypairFromXpriv(params.xpriv, params.index);
     
-    // Handle if result is a Map (from serde_wasm_bindgen)
-    if (result instanceof Map) {
-      return {
-        path: result.get('path'),
-        privateKey: result.get('privateKey'),
-        publicKey: result.get('publicKey'),
-      };
+    // Log the xpriv being used
+    console.log('[Worker] deriveKeypairFromXpriv called with:', {
+      xprivType: typeof params.xpriv,
+      xprivLength: params.xpriv?.length,
+      xprivPrefix: params.xpriv?.substring(0, 4),
+      index: params.index
+    });
+    
+    // Validate xpriv before passing to WASM
+    if (!params.xpriv || typeof params.xpriv !== 'string') {
+      throw new Error('Invalid xpriv: must be a non-empty string');
     }
     
-    return result;
+    try {
+      const result = crypto.deriveKeypairFromXpriv(params.xpriv, params.index);
+      
+      // Handle if result is a Map (from serde_wasm_bindgen)
+      if (result instanceof Map) {
+        return {
+          path: result.get('path'),
+          privateKey: result.get('privateKey'),
+          publicKey: result.get('publicKey'),
+        };
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('[Worker] deriveKeypairFromXpriv WASM error:', error);
+      throw error;
+    }
   },
 
   // Session management methods
   createSession: async (params: CreateSessionParams): Promise<SessionInfo> => {
     await ensureWasmReady();
     
-    console.log('🆕 createSession called for:', params.username, {
-      hasPrivateKey: !!params.privateKey,
-      privateKeyEmpty: params.privateKey === '',
-      hasXpriv: !!params.xpriv,
-      willBeUnlocked: !!params.privateKey && params.privateKey !== ''
-    });
     
     // Save vault data to IndexedDB
     await vaultDB.saveVault(params.vaultData);
@@ -357,7 +328,6 @@ const handlers = {
     // Check if there's already an unlocked session - don't overwrite it with a locked one
     const existingSession = activeSessions.get(params.username);
     if (existingSession && existingSession.isUnlocked && !session.isUnlocked) {
-      console.log('⚠️ Preventing overwrite of unlocked session with locked session');
       return {
         username: existingSession.username,
         publicKey: existingSession.publicKey,
@@ -369,20 +339,9 @@ const handlers = {
     // Store in memory
     activeSessions.set(params.username, session);
     logSessionState('CREATED', params.username);
-    console.log('✅ Session created and stored:', {
-      username: session.username,
-      isUnlocked: session.isUnlocked,
-      hasPrivateKey: !!session.privateKey,
-      hasXpriv: !!session.xpriv,
-      xprivLength: session.xpriv?.length
-    });
     
     // Verify session was stored correctly
     const storedSession = activeSessions.get(params.username);
-    console.log('🔍 Verification - session in map:', {
-      found: !!storedSession,
-      hasXpriv: !!(storedSession as any)?.xpriv
-    });
     
     // Store session info in DB (without private key)
     await vaultDB.saveSession({
@@ -401,8 +360,6 @@ const handlers = {
   unlockSession: async (params: UnlockSessionParams): Promise<SessionInfo> => {
     await ensureWasmReady();
     
-    console.log('🔓 unlockSession called for:', params.username);
-    
     // Get vault data from DB
     const vaultData = await vaultDB.getVault(params.username);
     if (!vaultData) {
@@ -411,9 +368,6 @@ const handlers = {
     
     // Update session
     const existingSession = activeSessions.get(params.username);
-    console.log('🔍 Existing session before unlock:', existingSession ? 
-      { username: existingSession.username, isUnlocked: existingSession.isUnlocked, hasXpriv: !!(existingSession as any).xpriv } : 
-      'none');
     
     const session = existingSession || {
       username: params.username,
@@ -428,19 +382,23 @@ const handlers = {
     
     // Store xpriv if provided for storage key access
     if (params.xpriv) {
+      console.log('[Worker] Storing xpriv in session:', {
+        type: typeof params.xpriv,
+        length: params.xpriv.length,
+        prefix: params.xpriv.substring(0, 4),
+        suffix: params.xpriv.substring(params.xpriv.length - 4)
+      });
+      
+      // Validate xpriv format (should start with 'xprv' for mainnet)
+      if (!params.xpriv.startsWith('xprv') && !params.xpriv.startsWith('tprv')) {
+        console.warn('[Worker] WARNING: xpriv has unexpected format');
+      }
+      
       (session as any).xpriv = params.xpriv;
-      console.log('✅ xpriv stored in session');
     }
     
     activeSessions.set(params.username, session);
     logSessionState('UNLOCKED', params.username);
-    console.log('✅ Session unlocked and stored:', { 
-      username: session.username, 
-      isUnlocked: session.isUnlocked,
-      hasPrivateKey: !!session.privateKey,
-      hasXpriv: !!(session as any).xpriv,
-      expiresAt: new Date(session.expiresAt).toISOString()
-    });
     
     return {
       username: session.username,
@@ -453,37 +411,14 @@ const handlers = {
   getSession: async (params: GetSessionParams): Promise<SessionInfo | null> => {
     await ensureWasmReady();
     
-    console.log('🔍 getSession called for:', params.username);
-    console.log('⏰ Worker uptime:', Math.floor((Date.now() - workerInitTime) / 1000), 'seconds');
-    
     // Check in-memory session first
-    console.log('🔍 Looking for session with username:', params.username);
-    console.log('🗂️ Current sessions in memory:', {
-      count: activeSessions.size,
-      keys: Array.from(activeSessions.keys()),
-      debug: (globalThis as any).__DEBUG_SESSIONS
-    });
     const session = activeSessions.get(params.username);
-    console.log('📋 Active session found:', session ? {
-      username: session.username,
-      isUnlocked: session.isUnlocked,
-      hasPrivateKey: !!session.privateKey,
-      hasXpriv: !!(session as any).xpriv,
-      expiresAt: session.expiresAt ? new Date(session.expiresAt).toISOString() : 'none'
-    } : 'none');
     
     if (session) {
       const now = Date.now();
       const expired = session.expiresAt && session.expiresAt <= now;
-      console.log('📊 Session check:', {
-        exists: true,
-        expired,
-        expiresAt: session.expiresAt ? new Date(session.expiresAt).toISOString() : 'none',
-        timeLeft: session.expiresAt ? Math.floor((session.expiresAt - now) / 1000) + 's' : 'n/a'
-      });
       
       if (!expired) {
-        console.log('✅ Returning active session');
         return {
           username: session.username,
           publicKey: session.publicKey,
@@ -491,7 +426,6 @@ const handlers = {
           expiresAt: session.expiresAt
         };
       } else {
-        console.log('⚠️ Session expired, removing from memory');
         activeSessions.delete(params.username);
       }
     }
@@ -499,11 +433,9 @@ const handlers = {
     // Check DB for vault info
     const vaultData = await vaultDB.getVault(params.username);
     if (!vaultData) {
-      console.log('❌ No vault data found');
       return null;
     }
     
-    console.log('⚠️ Returning vault data with isUnlocked: false');
     return {
       username: vaultData.username,
       publicKey: vaultData.publicKey,
@@ -512,13 +444,8 @@ const handlers = {
   },
 
   clearSession: (params: GetSessionParams): void => {
-    console.log('🗑️ clearSession called for:', params.username);
     const existingSession = activeSessions.get(params.username);
     if (existingSession) {
-      console.log('🗑️ Clearing session memory only (keeping vault data):', {
-        username: existingSession.username,
-        wasUnlocked: existingSession.isUnlocked
-      });
       
       // Clear sensitive data from memory
       delete existingSession.privateKey;
@@ -539,10 +466,7 @@ const handlers = {
       });
       
       logSessionState('LOCKED', params.username);
-    } else {
-      console.log('⚠️ No session found to clear');
     }
-    console.log('🗑️ Session cleared from memory');
     
     // Note: We don't clear from DB on logout to preserve vault data
     // Sessions are only in-memory and expire naturally
@@ -555,9 +479,20 @@ const handlers = {
   },
   
   // Update vault data
-  updateVaultData: async (params: { username: string; vaultData: VaultData }): Promise<void> => {
+  updateVaultData: async (params: { username: string; vaultData: VaultData }): Promise<{ success: boolean }> => {
+    const startTime = Date.now();
+    console.log('[Worker] updateVaultData called for:', params.username);
+    
     await ensureWasmReady();
-    await vaultDB.saveVault(params.vaultData);
+    
+    try {
+      await vaultDB.saveVault(params.vaultData);
+      console.log('[Worker] updateVaultData completed in:', Date.now() - startTime, 'ms');
+      return { success: true };
+    } catch (error) {
+      console.error('[Worker] updateVaultData error:', error);
+      throw error;
+    }
   },
 
   // Sign with active session or specific identity
@@ -746,24 +681,17 @@ const handlers = {
     }
     
     // Concatenate answers
-    console.log('Recovery attempt with answers:', params.answers);
-    console.log('Raw answer values:', params.answers.map((a, i) => `[${i}]: "${a}" (length: ${a.length})`));
     const concatenated = params.answers
       .map(a => a.toLowerCase().trim())
       .join('|');
-    console.log('Concatenated for recovery:', concatenated);
-    console.log('Concatenated length:', concatenated.length);
     
     // Derive recovery key
     const recoveryKeyResult = await handlers.deriveKey({
       password: concatenated,
       salt: params.vaultData.recovery.salt
     });
-    console.log('Using salt:', params.vaultData.recovery.salt);
-    console.log('Recovery key result:', recoveryKeyResult);
     
     const recoveryKey = recoveryKeyResult.key;
-    console.log('Recovery key derived:', recoveryKey ? 'Key present' : 'Key missing');
     
     try {
       // Try to decrypt xpriv with recovery key
@@ -831,7 +759,6 @@ const handlers = {
         }
       } else {
         // Fallback for old vaults - we can't verify password with the new scheme
-        console.warn('No password verifier found. Unable to verify password for PIN reset.');
         // For now, we'll have to trust that the user knows their password
         // In production, you might want to require migration or use recovery questions
       }
@@ -886,7 +813,6 @@ const handlers = {
         version: 1
       };
       
-      console.log('✅ Updated recovery data with same questions and answers');
     }
     
     // Create new password verifier with the provided password
@@ -926,12 +852,7 @@ const handlers = {
   }): Promise<{ success: boolean }> => {
     await ensureWasmReady();
     
-    console.log('🔑 Logging in user:', params.username);
-    console.log('📦 Vault data to save:', {
-      username: params.vaultData.username,
-      hasXprivEncryptedForPin: !!params.vaultData.xprivEncryptedForPin,
-      xprivEncryptedForPinLength: params.vaultData.xprivEncryptedForPin?.length
-    });
+   
     
     // Store vault data in IndexedDB - this IS our session
     await vaultDB.saveVault(params.vaultData);
@@ -947,7 +868,6 @@ const handlers = {
     activeSessions.set(params.username, session);
     logSessionState('USER_LOGGED_IN', params.username);
     
-    console.log('✅ User logged in - vault data stored');
     return { success: true };
   },
 
@@ -965,7 +885,6 @@ const handlers = {
   logoutUser: async (params: { username: string }): Promise<{ success: boolean }> => {
     await ensureWasmReady();
     
-    console.log('🧹 Logging out user:', params.username);
     
     // Remove from active sessions
     activeSessions.delete(params.username);
@@ -974,7 +893,6 @@ const handlers = {
     await vaultDB.deleteVault(params.username);
     
     logSessionState('USER_LOGGED_OUT', params.username);
-    console.log('✅ User logged out - vault data cleared');
     return { success: true };
   },
 
@@ -985,7 +903,6 @@ const handlers = {
   }): Promise<VaultData> => {
     await ensureWasmReady();
     
-    console.log('📥 loadVaultFromNostr called for:', params.username);
     
     // Get session to access xpriv
     const session = activeSessions.get(params.username);
@@ -1009,14 +926,12 @@ const handlers = {
     
     // Decrypt vault data using NIP-04 decryption
     const crypto = await ensureWasmReady();
-    console.log('🔓 Decrypting vault data with storage key...');
     
     const decryptedContent = crypto.nip04Decrypt(
       params.encryptedContent,
       derived.privateKey,
       derived.publicKey
     );
-    console.log('✅ Vault data decrypted');
     
     // Parse and return the vault data
     const vaultData = JSON.parse(decryptedContent) as VaultData;
@@ -1027,112 +942,395 @@ const handlers = {
     username: string;
     usePasswordEncryption?: boolean; // Force password encryption for initial save
   }): Promise<{ event: any }> => {
+    try {
+      console.log('[Worker] saveVaultToNostr called for:', params.username);
+      
+      await ensureWasmReady();
+      console.log('[Worker] WASM ready');
+      
+      // Get vault data
+      const vaultData = await vaultDB.getVault(params.username);
+      if (!vaultData) {
+        throw new Error('No vault found for user');
+      }
+      console.log('[Worker] Vault data retrieved, identities count:', vaultData.identities?.length || 0);
+      
+      // Get session to check if unlocked
+      const session = activeSessions.get(params.username);
+      console.log('[Worker] Session found:', !!session, 'has xpriv:', !!(session && session.xpriv));
+      
+      // Check if we have xpriv access
+      const hasXpriv = session && session.xpriv;
+      
+      if (!hasXpriv) {
+        throw new Error('No xpriv access - vault must be unlocked');
+      }
+      
+      // For initial save, we MUST use password encryption
+      const usePasswordEncryption = params.usePasswordEncryption || false;
+      
+      const crypto = await ensureWasmReady();
+      let signedEvent: any;
+      
+      // We always need xpriv to derive the storage key for signing
+      if (!hasXpriv) {
+        throw new Error('Cannot save vault without xpriv - vault must be unlocked');
+      }
+      
+      const xpriv = session!.xpriv!; // We already checked hasXpriv above
+      console.log('[Worker] Xpriv available, deriving storage keypair...');
+      
+      // Get the storage keypair for signing
+      const STORAGE_INDEX = 2147483647;
+      const derived = await handlers.deriveKeypairFromXpriv({ 
+        xpriv,
+        index: STORAGE_INDEX 
+      });
+      console.log('[Worker] Storage keypair derived, pubkey:', derived.publicKey.substring(0, 16) + '...');
+      
+      // Prepare vault content
+      let vaultContent: string;
+      
+      if (usePasswordEncryption) {
+        // INITIAL SAVE: No additional encryption, vault is already password+PIN encrypted
+        vaultContent = JSON.stringify({
+          ...vaultData,
+          version: 1
+        });
+        console.log('[Worker] Using password encryption mode');
+      } else {
+        // SUBSEQUENT SAVES: Add NIP-04 encryption layer
+        const vaultDataString = JSON.stringify({
+          ...vaultData,
+          version: (vaultData.version || 1) + 1
+        });
+        
+        console.log('[Worker] Encrypting vault data with storage key...');
+        console.log('[Worker] Vault data string length:', vaultDataString.length);
+        console.log('[Worker] Private key length:', derived.privateKey.length);
+        console.log('[Worker] Public key length:', derived.publicKey.length);
+        
+        try {
+          // Use the private key as the encryption key for additional security
+          vaultContent = crypto.encryptData(vaultDataString, derived.privateKey);
+          console.log('[Worker] Vault data encrypted, content length:', vaultContent.length);
+        } catch (encryptError) {
+          console.error('[Worker] Data encryption failed:', encryptError);
+          throw new Error(`Data encryption failed: ${encryptError instanceof Error ? encryptError.message : 'Unknown error'}`);
+        }
+      }
+      
+      // Create vault event
+      const vaultEvent = {
+        kind: 30078,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['d', `nostrpass.com_vault_${getEnvironment()}_${derived.publicKey}`],
+          ['subject', 'encrypted-vault'],
+          ['client', 'nostrpass.com'],
+          ['version', String(vaultData.version || 1)]
+        ],
+        content: vaultContent,
+        pubkey: derived.publicKey,
+      };
+      console.log('[Worker] Vault event created, signing...');
+      
+      try {
+        // Sign with storage key
+        signedEvent = crypto.signEvent(vaultEvent, derived.privateKey);
+        console.log('[Worker] Vault event signed successfully, event ID:', signedEvent.id);
+      } catch (signError) {
+        console.error('[Worker] Event signing failed:', signError);
+        throw new Error(`Event signing failed: ${signError instanceof Error ? signError.message : 'Unknown error'}`);
+      }
+      
+      return { event: signedEvent };
+    } catch (error) {
+      console.error('[Worker] saveVaultToNostr error:', error);
+      throw error;
+    }
+  },
+
+  // Get vault data from Nostr
+  getVaultFromNostr: async (params: { 
+    username: string;
+  }): Promise<{ vaultData: any; eventId: string; timestamp: number } | null> => {
+    try {
+      console.log('[Worker] getVaultFromNostr called for:', params.username);
+      
+      await ensureWasmReady();
+      
+      // Get session to check if unlocked
+      const session = activeSessions.get(params.username);
+      if (!session || !session.xpriv) {
+        throw new Error('No xpriv access - vault must be unlocked');
+      }
+      
+      console.log('[Worker] Session xpriv type:', typeof session.xpriv);
+      console.log('[Worker] Session xpriv length:', session.xpriv?.length);
+      
+      // Validate xpriv format
+      if (typeof session.xpriv !== 'string' || session.xpriv.length === 0) {
+        throw new Error('Invalid xpriv format in session');
+      }
+      
+      // Get the storage keypair for decryption
+      const STORAGE_INDEX = 2147483647;
+      let derived;
+      try {
+        derived = await handlers.deriveKeypairFromXpriv({ 
+          xpriv: session.xpriv,
+          index: STORAGE_INDEX 
+        });
+      } catch (deriveError) {
+        console.error('[Worker] Failed to derive keypair from xpriv:', deriveError);
+        throw new Error(`Failed to derive storage keypair: ${deriveError instanceof Error ? deriveError.message : 'Unknown error'}`);
+      }
+      
+      console.log('[Worker] Storage keypair derived for retrieval, pubkey:', derived.publicKey.substring(0, 16) + '...');
+      
+      // Get relays and fetch from Nostr
+      const { getEvent } = await import('@nostrpass/nostrHelpers');
+      const { getRelays } = await import('../providers/EnvironmentProvider');
+      const relays = getRelays();
+      
+      // Create filter to find vault events
+      const filter = {
+        kinds: [30078],
+        authors: [derived.publicKey],
+        '#d': [`nostrpass.com_vault_${getEnvironment()}_${derived.publicKey}`],
+        limit: 1
+      };
+      
+      console.log('[Worker] Fetching vault from Nostr with filter:', filter);
+      
+      // Get the latest vault event
+      const vaultEvent = await getEvent(relays, filter);
+      if (!vaultEvent) {
+        console.log('[Worker] No vault event found on Nostr');
+        return null;
+      }
+      
+      console.log('[Worker] Vault event found, event ID:', vaultEvent.id);
+      
+      // Decrypt the vault content
+      let vaultDataString: string;
+      const crypto = await ensureWasmReady();
+      try {
+        // Try to decrypt with storage key (for subsequent saves)
+        vaultDataString = crypto.decryptData(vaultEvent.content, derived.privateKey);
+        console.log('[Worker] Vault data decrypted with storage key');
+      } catch (decryptError) {
+        console.log('[Worker] Storage key decryption failed, trying password encryption...');
+        // If that fails, try password encryption (for initial saves)
+        vaultDataString = vaultEvent.content;
+      }
+      
+      // Parse the vault data
+      const vaultData = JSON.parse(vaultDataString);
+      console.log('[Worker] Vault data parsed, identities count:', vaultData.identities?.length || 0);
+      
+      return {
+        vaultData,
+        eventId: vaultEvent.id,
+        timestamp: vaultEvent.created_at * 1000 // Convert to milliseconds
+      };
+    } catch (error) {
+      console.error('[Worker] getVaultFromNostr error:', error);
+      throw error;
+    }
+  },
+
+  // Check permissions for an operation
+  checkPermission: async (params: { 
+    username: string; 
+    origin: string; 
+    action: 'signEvent' | 'signData' | 'getPublicKey' | 'nip04' | 'getRelays';
+    eventKind?: number;
+  }): Promise<{ allowed: boolean; level: string; needsPrompt: boolean }> => {
     await ensureWasmReady();
     
-    console.log('💾 saveVaultToNostr called for:', params.username, {
-      usePasswordEncryption: params.usePasswordEncryption
-    });
-    
-    // Get vault data
-    const vaultData = await vaultDB.getVault(params.username);
-    if (!vaultData) {
-      console.error('❌ No vault found in IndexedDB for user:', params.username);
-      throw new Error('No vault found for user');
-    }
-    
-    console.log('📦 Vault data found:', {
-      username: vaultData.username,
-      hasXprivEncrypted: !!vaultData.xprivEncrypted,
-      hasPublicKey: !!vaultData.publicKey,
-      hasStoragePublicKey: !!vaultData.storagePublicKey
-    });
-    
-    // Get session to check if unlocked
-    console.log('🔍 Looking for session with username:', params.username);
-    console.log('📋 Active sessions:', Array.from(activeSessions.keys()));
-    
     const session = activeSessions.get(params.username);
-    console.log('🔐 Session in saveVaultToNostr:', session ? {
-      username: session.username,
-      isUnlocked: session.isUnlocked,
-      hasXpriv: !!session.xpriv,
-      xprivLength: session.xpriv?.length,
-      hasPasswordKey: !!(session as any).passwordKey
-    } : 'none');
-    
-    // Check if we have xpriv access
-    const hasXpriv = session && session.xpriv;
-    
-    if (!hasXpriv) {
-      console.error('❌ No xpriv in session - cannot sign vault event');
-      throw new Error('No xpriv access - vault must be unlocked');
+    if (!session) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
     }
     
-    // For initial save, we MUST use password encryption
-    const usePasswordEncryption = params.usePasswordEncryption || false;
-    
-    const crypto = await ensureWasmReady();
-    let signedEvent: any;
-    
-    // We always need xpriv to derive the storage key for signing
-    if (!hasXpriv) {
-      throw new Error('Cannot save vault without xpriv - vault must be unlocked');
+    // Get vault data to check permissions
+    const vaultData = await vaultDB.getVault(params.username);
+    if (!vaultData?.identities) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
     }
     
-    const xpriv = session!.xpriv!; // We already checked hasXpriv above
+    // Get current identity
+    const currentIndex = vaultData.currentIdentityIndex ?? 0;
+    const identity = vaultData.identities[currentIndex];
+    if (!identity?.appPermissions) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
+    }
     
-    // Get the storage keypair for signing
-    const STORAGE_INDEX = 2147483647;
-    const derived = await handlers.deriveKeypairFromXpriv({ 
-      xpriv,
-      index: STORAGE_INDEX 
-    });
+    // Check app permissions
+    const appPerms = identity.appPermissions[params.origin];
+    if (!appPerms) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
+    }
     
-    // Prepare vault content
-    let vaultContent: string;
+    let permissionLevel = 'DENY';
     
-    if (usePasswordEncryption) {
-      // INITIAL SAVE: No additional encryption, vault is already password+PIN encrypted
-      console.log('📦 Initial vault save - no additional encryption');
-      vaultContent = JSON.stringify({
-        ...vaultData,
-        version: 1
-      });
-    } else {
-      // SUBSEQUENT SAVES: Add NIP-04 encryption layer
-      console.log('🔐 Subsequent vault save - adding NIP-04 encryption');
-      const vaultDataString = JSON.stringify({
-        ...vaultData,
-        version: (vaultData.version || 1) + 1
-      });
+    // Check specific permission based on action
+    if (params.action === 'signEvent' && params.eventKind !== undefined) {
+      // Use simplified permission categories
+      const { getPermissionCategoryForKind } = await import('@nostrpass/types');
+      const category = getPermissionCategoryForKind(params.eventKind);
       
-      // Add NIP-04 encryption on top of password+PIN encryption
-      vaultContent = crypto.nip04Encrypt(
-        vaultDataString,
-        derived.privateKey,
-        derived.publicKey
-      );
+      if (category) {
+        permissionLevel = appPerms.permissions[category];
+      } else {
+        // Unknown kind, deny by default
+        permissionLevel = 'DENY';
+      }
+    } else if (params.action === 'signData') {
+      permissionLevel = appPerms.permissions.signData;
+    } else if (params.action === 'getPublicKey') {
+      permissionLevel = appPerms.getPublicKey;
+    } else if (params.action === 'nip04') {
+      permissionLevel = appPerms.permissions.messaging;
+    } else if (params.action === 'getRelays') {
+      // For now, treat getRelays as social permission
+      permissionLevel = appPerms.permissions.social;
     }
     
-    // Create vault event
-    const vaultEvent = {
-      kind: 30078,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['d', `nostrpass.com_vault_${getEnvironment()}_${derived.publicKey}`],
-        ['subject', 'encrypted-vault'],
-        ['client', 'nostrpass.com'],
-        ['version', String(vaultData.version || 1)]
-      ],
-      content: vaultContent,
-      pubkey: derived.publicKey,
+    // Check session permissions for ASK_EVERYTIME (simplified - no ASK_PER_SESSION)
+    let sessionGranted = false;
+    if (permissionLevel === 'ASK_EVERYTIME' && appPerms.sessionPermissions) {
+      const now = Date.now();
+      if (appPerms.sessionPermissions.expiresAt > now) {
+        if (params.action === 'signEvent' && params.eventKind !== undefined) {
+          const { getPermissionCategoryForKind } = await import('@nostrpass/types');
+          const category = getPermissionCategoryForKind(params.eventKind);
+          if (category) {
+            sessionGranted = appPerms.sessionPermissions[category] === true;
+          }
+        } else if (params.action === 'signData') {
+          sessionGranted = appPerms.sessionPermissions.signData === true;
+        } else if (params.action === 'nip04') {
+          sessionGranted = appPerms.sessionPermissions.messaging === true;
+        }
+      }
+    }
+    
+    return {
+      allowed: permissionLevel === 'ALLOW' || (permissionLevel === 'ASK_EVERYTIME' && sessionGranted),
+      level: permissionLevel,
+      needsPrompt: permissionLevel === 'ASK_EVERYTIME' && !sessionGranted
+    };
+  },
+
+  // Grant session permission (for ASK_EVERYTIME operations)
+  grantSessionPermission: async (params: {
+    username: string;
+    origin: string;
+    action: 'signEvent' | 'signData';
+    eventKind?: number;
+    sessionDurationMinutes?: number;
+  }): Promise<void> => {
+    await ensureWasmReady();
+    
+    const vaultData = await vaultDB.getVault(params.username);
+    if (!vaultData?.identities) {
+      throw new Error('Vault data not found');
+    }
+    
+    const currentIndex = vaultData.currentIdentityIndex ?? 0;
+    const identity = vaultData.identities[currentIndex];
+    if (!identity?.appPermissions?.[params.origin]) {
+      throw new Error('App permissions not found');
+    }
+    
+    const expiresAt = Date.now() + ((params.sessionDurationMinutes || 60) * 60 * 1000);
+    
+    if (!identity.appPermissions[params.origin].sessionPermissions) {
+      identity.appPermissions[params.origin].sessionPermissions = {
+        social: false,
+        messaging: false,
+        signData: false,
+        financial: false,
+        expiresAt
+      };
+    }
+    
+    if (params.action === 'signEvent' && params.eventKind !== undefined) {
+      const { getPermissionCategoryForKind } = await import('@nostrpass/types');
+      const category = getPermissionCategoryForKind(params.eventKind);
+      if (category) {
+        identity.appPermissions[params.origin].sessionPermissions[category] = true;
+      }
+    } else if (params.action === 'signData') {
+      identity.appPermissions[params.origin].sessionPermissions.signData = true;
+    }
+    
+    identity.appPermissions[params.origin].sessionPermissions.expiresAt = expiresAt;
+    
+    // Update vault data
+    await vaultDB.saveVault(vaultData);
+  },
+
+  // Get app permissions for an origin
+  getAppPermissions: async (params: { username: string; origin: string }): Promise<any> => {
+    await ensureWasmReady();
+    
+    const vaultData = await vaultDB.getVault(params.username);
+    if (!vaultData?.identities) return null;
+    
+    const currentIndex = vaultData.currentIdentityIndex ?? 0;
+    const identity = vaultData.identities[currentIndex];
+    
+    return identity?.appPermissions?.[params.origin] || null;
+  },
+
+  // Save app permissions
+  saveAppPermissions: async (params: {
+    username: string;
+    origin: string;
+    permissions: any;
+    appName?: string;
+  }): Promise<void> => {
+    await ensureWasmReady();
+    
+    const vaultData = await vaultDB.getVault(params.username);
+    if (!vaultData?.identities) {
+      throw new Error('Vault data not found');
+    }
+    
+    const currentIndex = vaultData.currentIdentityIndex ?? 0;
+    const identity = vaultData.identities[currentIndex];
+    if (!identity) {
+      throw new Error('Identity not found');
+    }
+    
+    // Initialize app permissions if needed
+    if (!identity.appPermissions) {
+      identity.appPermissions = {};
+    }
+    
+    const existingPerms = identity.appPermissions[params.origin];
+    
+    const updatedPermissions = {
+      appId: params.origin,
+      appName: params.appName || existingPerms?.appName,
+      grantedAt: existingPerms?.grantedAt || Date.now(),
+      lastUsedAt: Date.now(),
+      kinds: params.permissions.kinds || existingPerms?.kinds || {},
+      signData: params.permissions.signData || existingPerms?.signData || 'DENY',
+      getPublicKey: params.permissions.getPublicKey || existingPerms?.getPublicKey,
+      nip04: params.permissions.nip04 || existingPerms?.nip04,
+      getRelays: params.permissions.getRelays || existingPerms?.getRelays,
+      sessionPermissions: params.permissions.sessionPermissions || existingPerms?.sessionPermissions
     };
     
-    // Sign with storage key
-    signedEvent = crypto.signEvent(vaultEvent, derived.privateKey);
-    console.log('✅ Vault event signed with storage key');
+    identity.appPermissions[params.origin] = updatedPermissions;
     
-    return { event: signedEvent };
+    // Update vault data
+    await vaultDB.saveVault(vaultData);
   },
 };
 
@@ -1145,28 +1343,18 @@ function getEnvironment(): string {
 
 export type CryptoWorkerMethods = typeof handlers;
 
-// Log available handler methods
-console.log('📋 Registering handlers:', Object.keys(handlers));
-
 // Initialize the worker host
 const host = createWorkerHost(handlers as any);
-console.log('✅ Worker host created');
 
-// Add debugging for message handling
-self.addEventListener('message', (event) => {
-  console.log('🔵 Worker received message:', {
-    method: event.data?.method,
-    id: event.data?.id,
-    hasParams: !!event.data?.params
-  });
-});
 
 // Pre-initialize WASM on worker startup
 ensureWasmReady()
   .then(() => {
-    console.log('WASM crypto module ready');
+    // WASM crypto module ready
   })
-  .catch(console.error);
+  .catch(() => {
+    // Error initializing WASM
+  });
 
 // Check for expired sessions and notify
 const checkSessionExpiry = () => {
@@ -1174,8 +1362,6 @@ const checkSessionExpiry = () => {
   
   activeSessions.forEach((session, username) => {
     if (session.expiresAt && session.expiresAt <= now && session.isUnlocked) {
-      console.log('⏰ Session expired for:', username);
-      
       // Mark session as locked
       session.isUnlocked = false;
       
@@ -1198,11 +1384,3 @@ const checkSessionExpiry = () => {
 // Check for expired sessions every 30 seconds
 setInterval(checkSessionExpiry, 30000);
 
-// Log every minute to show worker is alive
-setInterval(() => {
-  console.log('💓 Worker heartbeat:', {
-    uptime: Math.floor((Date.now() - workerInitTime) / 1000) + 's',
-    sessions: activeSessions.size,
-    time: new Date().toISOString()
-  });
-}, 60000);

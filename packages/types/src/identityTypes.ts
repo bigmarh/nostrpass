@@ -8,9 +8,12 @@
 export interface Identity {
   /** Identity nickname */
   nickname: string;
-  
+  /** Identity public key */  
+  publicKey: string;
   /** Full BIP44 derivation path: m/44'/1237'/0'/0/${index} */
   path: string;
+  /** Identity index */
+  index: number;
   
   /** App permissions for this identity */
   appPermissions?: Record<string, import('./userTypes').AppPermissions>;

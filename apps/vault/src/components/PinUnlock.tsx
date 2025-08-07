@@ -35,7 +35,6 @@ export const PinUnlock: Component = () => {
                 const data = await cryptoWorker.getVaultData({ username });
                 setVaultData(data);
             } catch (err) {
-                console.error('Failed to load vault data:', err);
             }
         }
     });
@@ -72,14 +71,7 @@ export const PinUnlock: Component = () => {
     };
 
     const handlePasswordVerification = async () => {
-        console.log('handlePasswordVerification called');
-        console.log('cryptoWorker:', !!cryptoWorker);
-        console.log('recoverySessionToken:', recoverySessionToken());
-        console.log('tempNewPin:', !!tempNewPin());
-        console.log('passwordForReset:', !!passwordForReset());
-        
         if (!cryptoWorker || !recoverySessionToken() || !tempNewPin() || !passwordForReset()) {
-            console.error('Missing required data for password verification');
             return;
         }
         
@@ -87,18 +79,14 @@ export const PinUnlock: Component = () => {
         setError('');
         
         try {
-            console.log('Calling completePinReset...');
             // Complete PIN reset in worker (all crypto operations happen there)
             const result = await cryptoWorker.completePinReset({
                 sessionToken: recoverySessionToken()!,
                 newPin: tempNewPin(),
                 password: passwordForReset()
             });
-            console.log('completePinReset result:', result);
             
             if (result.success) {
-                console.log('✅ PIN reset successful, now unlocking with new PIN...');
-                
                 // Success! Unlock with new PIN - this will create the session
                 // The vault will be saved to Nostr during the unlock process
                 await handlePinSuccess(tempNewPin());

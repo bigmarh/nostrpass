@@ -9,10 +9,6 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('User not authenticated');
       }
 
-      console.log('🔍 GET_PUBLIC_KEY request received:', {
-        user: currentUser.profile?.username,
-        origin: context?.origin
-      });
 
       // Get origin from context
       const origin = context?.origin || 'unknown';
@@ -40,24 +36,20 @@ export const authHandlers: MessageHandler[] = [
               const identity = vaultData.identities[i];
               if (identity.appPermissions && identity.appPermissions[origin]) {
                 appIdentity = identity;
-                console.log(`✅ Found identity '${identity.name}' assigned to app ${origin}`);
                 break;
               }
             }
             
             // If no identity is assigned to this app yet, use the current identity
             if (!appIdentity) {
-              console.log(`⚠️ No identity assigned to app ${origin}, using current identity`);
               appIdentity = vaultData.identities[vaultData.currentIdentityIndex || 0];
             }
             
             if (appIdentity?.publicKey) {
-              console.log(`✅ Returning public key for identity: ${appIdentity.name}`);
               return appIdentity.publicKey;
             }
           }
         } catch (error) {
-          console.error('Failed to get identity public key:', error);
         }
       }
 
@@ -75,11 +67,6 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('User not authenticated or crypto not ready');
       }
 
-      console.log('🔍 SIGN_EVENT request received:', {
-        user: currentUser.profile?.username,
-        origin: context?.origin,
-        eventKind: data.event?.kind
-      });
 
       // Get origin from context
       const origin = context?.origin || 'unknown';
@@ -234,7 +221,6 @@ export const authHandlers: MessageHandler[] = [
     route: 'AUTH_STATUS_RESPONSE',
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       // Just acknowledge - parent is confirming receipt of AUTH_STATUS
-      console.log('Auth status acknowledged by parent:', data);
     }
   }
 ];

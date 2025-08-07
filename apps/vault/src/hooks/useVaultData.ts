@@ -1,0 +1,210 @@
+import { createSignal, createEffect, createMemo } from 'solid-js';
+import { useAuth } from '../providers';
+import { vaultDataService } from '../services/vaultDataService';
+import type { VaultData } from '../workers/db';
+import type { Identity } from '@nostrpass/types';
+
+export interface UseVaultDataOptions {
+  autoLoad?: boolean;
+  forceRefresh?: boolean;
+}
+
+export function useVaultData(options: UseVaultDataOptions = {}) {
+  const { autoLoad = true, forceRefresh = false } = options;
+  const { user } = useAuth();
+  
+  const [vaultData, setVaultData] = createSignal<VaultData | null>(null);
+  const [isLoading, setIsLoading] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+
+  const username = createMemo(() => user()?.profile?.username);
+
+  const loadVaultData = async (force = false) => {
+    const currentUsername = username();
+    if (!currentUsername) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await vaultDataService.getVaultData(currentUsername, { 
+        forceRefresh: force || forceRefresh 
+      });
+      setVaultData(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load vault data';
+      setError(errorMessage);
+      console.error('useVaultData: Failed to load vault data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateVaultData = async (
+    updates: Partial<VaultData> | ((current: VaultData) => Partial<VaultData>),
+    options: { syncToNostr?: boolean; updateTimestamp?: boolean } = {}
+  ) => {
+    // Enable Nostr sync by default for vault updates
+    const finalOptions = { syncToNostr: true, ...options };
+    const currentUsername = username();
+    if (!currentUsername) throw new Error('No user logged in');
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Get current vault data for the update
+      const currentData = vaultData();
+      if (!currentData) {
+        throw new Error('No current vault data available');
+      }
+
+      // Apply updates to get the new data
+      const updatedData: VaultData = {
+        ...currentData,
+        ...(typeof updates === 'function' ? updates(currentData) : updates),
+        ...(options.updateTimestamp !== false ? { updatedAt: Date.now() } : {})
+      };
+
+      // Update in the vault data service
+      await vaultDataService.updateVaultData(currentUsername, updatedData, finalOptions);
+      
+      // Directly update the signal with the new data
+      setVaultData(updatedData);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update vault data';
+      setError(errorMessage);
+      console.error('useVaultData: Failed to update vault data:', err);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getCurrentIdentity = createMemo(() => {
+    const data = vaultData();
+    if (!data?.identities) return null;
+
+    const index = data.currentIdentityIndex ?? 0;
+    return data.identities[index] || null;
+  });
+
+  const getIdentity = (index: number): Identity | null => {
+    const data = vaultData();
+    if (!data?.identities) return null;
+    return data.identities[index] || null;
+  };
+
+  const switchIdentity = async (newIndex: number) => {
+    const currentUsername = username();
+    if (!currentUsername) throw new Error('No user logged in');
+
+    try {
+      await vaultDataService.switchIdentity(currentUsername, newIndex);
+      await loadVaultData(true);
+    } catch (err) {
+      console.error('useVaultData: Failed to switch identity:', err);
+      throw err;
+    }
+  };
+
+  const updateIdentity = async (index: number, updates: Partial<Identity>) => {
+    const currentUsername = username();
+    if (!currentUsername) throw new Error('No user logged in');
+
+    try {
+      await vaultDataService.updateIdentity(currentUsername, index, updates);
+      await loadVaultData(true);
+    } catch (err) {
+      console.error('useVaultData: Failed to update identity:', err);
+      throw err;
+    }
+  };
+
+  const addIdentity = async (identity: Identity) => {
+    const currentUsername = username();
+    if (!currentUsername) throw new Error('No user logged in');
+
+    try {
+      await vaultDataService.addIdentity(currentUsername, identity);
+      await loadVaultData(true);
+    } catch (err) {
+      console.error('useVaultData: Failed to add identity:', err);
+      throw err;
+    }
+  };
+
+  const removeIdentity = async (index: number) => {
+    const currentUsername = username();
+    if (!currentUsername) throw new Error('No user logged in');
+
+    try {
+      await vaultDataService.removeIdentity(currentUsername, index);
+      await loadVaultData(true);
+    } catch (err) {
+      console.error('useVaultData: Failed to remove identity:', err);
+      throw err;
+    }
+  };
+
+  const syncToNostr = async () => {
+    const currentUsername = username();
+    if (!currentUsername) throw new Error('No user logged in');
+
+    try {
+      await vaultDataService.syncToNostr(currentUsername);
+    } catch (err) {
+      console.error('useVaultData: Failed to sync to Nostr:', err);
+      throw err;
+    }
+  };
+
+  const getVaultFromNostr = async () => {
+    const currentUsername = username();
+    if (!currentUsername) throw new Error('No user logged in');
+
+    try {
+      return await vaultDataService.getVaultFromNostr(currentUsername);
+    } catch (err) {
+      console.error('useVaultData: Failed to get vault from Nostr:', err);
+      throw err;
+    }
+  };
+
+  const clearCache = () => {
+    const currentUsername = username();
+    if (currentUsername) {
+      vaultDataService.clearCache(currentUsername);
+    }
+  };
+
+  // Auto-load vault data when user changes
+  createEffect(() => {
+    if (autoLoad && username()) {
+      loadVaultData();
+    }
+  });
+
+  return {
+    // Data
+    vaultData,
+    currentIdentity: getCurrentIdentity,
+    isLoading,
+    error,
+    
+    // Actions
+    loadVaultData,
+    updateVaultData,
+    getIdentity,
+    switchIdentity,
+    updateIdentity,
+    addIdentity,
+    removeIdentity,
+    syncToNostr,
+    getVaultFromNostr,
+    clearCache,
+    
+    // Utilities
+    username
+  };
+} 

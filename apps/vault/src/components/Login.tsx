@@ -84,12 +84,9 @@ export const Login: Component = () => {
         
         // Check username availability
         setLoadingStatus('Checking username availability...');
-        console.log('🔍 Checking username availability:', normalizedUsername);
         const isAvailable = await checkUsernameAvailable(normalizedUsername);
-        console.log('🔍 Username availability result:', isAvailable);
         
         if (!isAvailable) {
-            console.log('❌ Username is already taken!');
             throw new Error('Username is already taken');
         }
 
@@ -107,7 +104,7 @@ export const Login: Component = () => {
     // Reactive signal for background that updates based on time
     const getTimeBasedBackground = () => {
         const timeOfDay = new Date().getHours();
-        console.log('Current hour:', timeOfDay);
+        
         if (timeOfDay < 6 || timeOfDay > 20) {
             return 3; // Night
         } else if (timeOfDay < 15) {
@@ -141,10 +138,10 @@ export const Login: Component = () => {
         
         // First check if username exists on Nostr
         setLoadingStatus('Checking username...');
-        console.log('🔍 Checking if username exists on Nostr:', username());
         
-        const registrationInfo = await getRegistrationInfo(username().trim());
-        console.log('📝 Registration info:', registrationInfo);
+        const registrationInfo = await getRegistrationInfo(username().trim().toLowerCase());
+
+        console.log('registrationInfo', registrationInfo);
         
         if (!registrationInfo) {
             throw new Error('Invalid username or password');
@@ -152,11 +149,9 @@ export const Login: Component = () => {
         
         // Login with password
         setLoadingStatus('Verifying credentials...');
-        console.log('🔑 Login attempt:', { username: username() });
         await login(password(), username(), registrationInfo);
         
         setLoadingStatus('Loading your vault...');
-        console.log('✅ Login successful!');
         
         // Check if PIN unlock is needed
         if (hasPinVault()) {
@@ -185,18 +180,14 @@ export const Login: Component = () => {
             setLoadingStatus('Securing your vault with PIN...');
             
             // Create account with PIN encryption
-            console.log('🔑 Creating account with PIN...');
             const { publicKey } = await createAccount(accountData.username, accountData.password, pin, undefined);
             
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
-            console.log('📝 Registering username on Nostr...');
-            console.log('Public key:', publicKey);
-            console.log('Username:', accountData.username);
+        
             
             // Get the user's relays from environment config
             const userRelays = getRelays();
-            console.log('User relays for registration:', userRelays);
             
             await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
             
@@ -215,10 +206,9 @@ export const Login: Component = () => {
             
             while (!savedSuccessfully && retryCount < maxRetries) {
                 try {
-                    console.log(`🔄 Attempting to save vault to Nostr (attempt ${retryCount + 1}/${maxRetries})...`);
+
                     
                     // Wait to ensure session is ready
-                    console.log('⏳ Waiting for session to be ready...');
                     await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
                     
                     const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
@@ -226,13 +216,11 @@ export const Login: Component = () => {
                         usePasswordEncryption: true // Initial save uses base encryption only
                     });
                     
-                    console.log('📝 Vault event created, publishing to relays...');
                     
                     // Publish the signed event to relays
                     const { publishEvent } = await import('@nostrpass/nostrHelpers');
-                    const publishResults = await publishEvent(vaultEvent.event, userRelays);
+                    await publishEvent(vaultEvent.event, userRelays);
                     
-                    console.log('📡 Publish results:', publishResults);
                     
                     // Verify the vault was saved by trying to retrieve it
                     setLoadingStatus('Verifying vault was saved...');
@@ -243,7 +231,6 @@ export const Login: Component = () => {
                     );
                     
                     if (verifyVault) {
-                        console.log('✅ Vault verified on Nostr!');
                         savedSuccessfully = true;
                     } else {
                         throw new Error('Vault save verification failed');
@@ -251,7 +238,6 @@ export const Login: Component = () => {
                     
                 } catch (error) {
                     retryCount++;
-                    console.error(`❌ Attempt ${retryCount} failed:`, error);
                     
                     if (retryCount >= maxRetries) {
                         // This is critical - signup must fail if we can't save to Nostr
@@ -269,7 +255,6 @@ export const Login: Component = () => {
             
             setLoadingStatus('Finalizing registration...');
             
-            console.log('✅ Signup successful!');
             
             // Navigate to dashboard after successful signup
             navigate(`/${params.app}/dashboard`);
@@ -291,19 +276,6 @@ export const Login: Component = () => {
             setShowPinSetup(false);
             setLoadingStatus('Securing your vault with PIN and recovery questions...');
             
-            // Create account with PIN encryption and recovery data
-            console.log('🔑 Creating account with PIN and recovery...');
-            console.log('PIN being set:', pin);
-            console.log('Recovery questions:', questions);
-            console.log('Recovery answers (raw):', answers);
-            console.log('Recovery answer values:', answers.map((a, i) => `[${i}]: "${a}" (length: ${a.length})`));
-            console.log('Type of answers:', typeof answers, Array.isArray(answers));
-            // Log each answer individually to avoid array formatting
-            answers.forEach((answer, index) => {
-                console.log(`Answer ${index} raw value:`, answer);
-                console.log(`Answer ${index} JSON stringified:`, JSON.stringify(answer));
-            });
-            
             const { publicKey } = await createAccount(
                 accountData.username, 
                 accountData.password, 
@@ -313,13 +285,9 @@ export const Login: Component = () => {
             
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
-            console.log('📝 Registering username on Nostr...');
-            console.log('Public key:', publicKey);
-            console.log('Username:', accountData.username);
-            
+         
             // Get the user's relays from environment config
             const userRelays = getRelays();
-            console.log('User relays for registration:', userRelays);
             
             await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
             
@@ -338,10 +306,10 @@ export const Login: Component = () => {
             
             while (!savedSuccessfully && retryCount < maxRetries) {
                 try {
-                    console.log(`🔄 Attempting to save vault to Nostr (attempt ${retryCount + 1}/${maxRetries})...`);
+                    
                     
                     // Wait to ensure session is ready
-                    console.log('⏳ Waiting for session to be ready...');
+                    
                     await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
                     
                     const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
@@ -349,13 +317,13 @@ export const Login: Component = () => {
                         usePasswordEncryption: true // Initial save uses base encryption only
                     });
                     
-                    console.log('📝 Vault event created, publishing to relays...');
+                    
                     
                     // Publish the signed event to relays
                     const { publishEvent } = await import('@nostrpass/nostrHelpers');
-                    const publishResults = await publishEvent(vaultEvent.event, userRelays);
+                    await publishEvent(vaultEvent.event, userRelays);
                     
-                    console.log('📡 Publish results:', publishResults);
+                    
                     
                     // Verify the vault was saved by trying to retrieve it
                     setLoadingStatus('Verifying vault was saved...');
@@ -366,7 +334,7 @@ export const Login: Component = () => {
                     );
                     
                     if (verifyVault) {
-                        console.log('✅ Vault verified on Nostr!');
+                        
                         savedSuccessfully = true;
                     } else {
                         throw new Error('Vault save verification failed');
@@ -374,7 +342,6 @@ export const Login: Component = () => {
                     
                 } catch (error) {
                     retryCount++;
-                    console.error(`❌ Attempt ${retryCount} failed:`, error);
                     
                     if (retryCount >= maxRetries) {
                         // This is critical - signup must fail if we can't save to Nostr
@@ -392,7 +359,7 @@ export const Login: Component = () => {
             
             setLoadingStatus('Finalizing registration...');
             
-            console.log('✅ Signup successful with recovery!');
+            
             
             // Navigate to dashboard after successful signup
             navigate(`/${params.app}/dashboard`);

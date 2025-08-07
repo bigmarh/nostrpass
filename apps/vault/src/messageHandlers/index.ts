@@ -28,7 +28,6 @@ export function setupMessageHandlers(
     });
   });
 
-  console.log('✅ All message handlers registered');
 }
 
 export interface MessageHandlerDependencies {

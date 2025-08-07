@@ -72,9 +72,23 @@ export interface SecuritySettings {
 }
 
 /**
- * Permission levels for app actions
+ * Simplified permission levels for app actions
  */
-export type PermissionLevel = 'ASK_EVERYTIME' | 'ASK_PER_SESSION' | 'DENY' | 'ALLOW';
+export type PermissionLevel = 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+
+/**
+ * Permission categories with their associated event kinds
+ */
+export interface PermissionCategories {
+  /** Social interactions (kinds 0, 1, 3, 5, 6, 7, etc.) - ALLOW by default */
+  social: PermissionLevel;
+  /** Messaging (kind 4, 14, etc.) - ASK_EVERYTIME by default */
+  messaging: PermissionLevel;
+  /** General data signing (arbitrary data, authentication, etc.) - ASK_EVERYTIME by default */
+  signData: PermissionLevel;
+  /** Financial operations (payments, zaps, etc.) - ASK_EVERYTIME by default */
+  financial: PermissionLevel;
+}
 
 /**
  * App-specific permissions and data
@@ -92,25 +106,18 @@ export interface AppPermissions {
   /** Last time app was used */
   lastUsedAt: number;
   
-  /** Permission levels for different event kinds */
-  kinds: Record<number, PermissionLevel>;
+  /** Permission categories */
+  permissions: PermissionCategories;
   
-  /** Permission level for signing arbitrary data */
-  signData: PermissionLevel;
-  
-  /** Permission level for reading public key */
-  getPublicKey?: PermissionLevel;
-  
-  /** Permission level for NIP-04 encryption/decryption */
-  nip04?: PermissionLevel;
-  
-  /** Permission level for accessing relay list */
-  getRelays?: PermissionLevel;
+  /** Permission level for reading public key - ALLOW by default */
+  getPublicKey: PermissionLevel;
   
   /** Session-specific permissions (cleared on new session) */
   sessionPermissions?: {
-    kinds: Record<number, boolean>;
+    social: boolean;
+    messaging: boolean;
     signData: boolean;
+    financial: boolean;
     expiresAt: number;
   };
   

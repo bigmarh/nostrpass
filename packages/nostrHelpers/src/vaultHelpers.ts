@@ -58,7 +58,6 @@ export async function saveVaultToNostr(
   userPublicKey: string,
   relays: string[]
 ): Promise<string[]> {
-  console.log('Attempting to save vault to relays:', relays);
   try {
     // Store vault data as JSON
     const vaultContent = JSON.stringify(vaultData);
@@ -105,7 +104,6 @@ export async function saveVaultToNostr(
       throw new Error('Failed to publish to any relay');
     }
     
-    console.log(`✅ Vault published to ${successfulPublishes.length}/${relays.length} relays`);
     
     // Don't close the pool - let it be reused or garbage collected
     // Closing immediately causes WebSocket errors
@@ -150,38 +148,27 @@ export async function getVaultFromNostr(
     // Sort by created_at to get most recent first
     const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
     
-    console.log(`🔍 Found ${sortedEvents.length} vault events`);
 
     // Try to find a vault we can decrypt
     for (const event of sortedEvents) {
       const versionTag = event.tags.find(t => t[0] === 'version')?.[1];
       
-      console.log('🔍 Checking vault event:', {
-        kind: event.kind,
-        pubkey: event.pubkey,
-        created_at: event.created_at,
-        version: versionTag,
-        contentLength: event.content.length,
-        contentPreview: event.content.substring(0, 50) + '...'
-      });
+
 
       try {
         // First try to parse as plain JSON (base encryption)
         try {
           const vaultData = JSON.parse(event.content) as VaultData;
-          console.log('📦 Successfully parsed as base-encrypted vault');
           return vaultData;
         } catch (jsonError) {
           // Not plain JSON, might be NIP-04 encrypted
           if (storagePrivateKey) {
-            console.log('🔐 Attempting NIP-04 decryption...');
             
             // Import crypto functions
             const nip04 = await import('nostr-tools/nip04');
             const decryptedContent = nip04.decrypt(storagePrivateKey, userPublicKey, event.content);
             
             const vaultData = JSON.parse(decryptedContent) as VaultData;
-            console.log('✅ Successfully decrypted NIP-04 vault');
             return vaultData;
           } else {
             console.log('⚠️ Cannot decrypt - no storage private key provided');

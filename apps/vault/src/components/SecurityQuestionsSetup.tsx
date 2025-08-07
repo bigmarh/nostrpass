@@ -46,8 +46,6 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
   };
 
   const updateAnswer = (index: number, value: string) => {
-    console.log(`SecurityQuestionsSetup - Answer input for question ${index}:`, value);
-    console.log(`Answer value details: "${value}" (length: ${value.length}, charCodes: ${Array.from(value).map(c => c.charCodeAt(0)).join(',')})`);
     setAnswers(prev => ({ ...prev, [index]: value }));
     setError('');
   };
@@ -77,23 +75,6 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
         .trim() // Trim again after removing quotes
     );
     
-    console.log('📝 Security questions setup:', {
-      questions: questionTexts,
-      answerCount: answerTexts.length,
-      rawAnswersObject: answers(),
-      answersBeforeProcessing: selected.map(i => answers()[i]),
-      answersAfterTrim: selected.map(i => answers()[i].trim()),
-      answersAfterQuoteRemoval: answerTexts,
-      finalAnswers: answerTexts
-    });
-    
-    console.log('🎯 Calling onComplete with:');
-    console.log('Questions:', questionTexts);
-    console.log('Answers:', answerTexts);
-    answerTexts.forEach((answer, index) => {
-        console.log(`Answer ${index} being passed:`, answer);
-        console.log(`Answer ${index} JSON:`, JSON.stringify(answer));
-    });
     
     props.onComplete(questionTexts, answerTexts);
   };

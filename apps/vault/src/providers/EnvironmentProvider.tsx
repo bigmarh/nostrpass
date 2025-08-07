@@ -109,11 +109,6 @@ export const EnvironmentProvider: ParentComponent = (props) => {
     const envConfig = ENVIRONMENT_CONFIGS[envName] || ENVIRONMENT_CONFIGS.development;
     setEnvironment(envConfig);
     
-    console.log(`🌍 Environment detected: ${envName}`, {
-      relays: envConfig.relays.length,
-      debug: envConfig.debug,
-      apiUrl: envConfig.apiBaseUrl
-    });
   });
 
   const value: EnvironmentContextType = {

@@ -1,5 +1,5 @@
 import type { AppPermissions, PermissionLevel, Identity } from '@nostrpass/types';
-import { getCryptoWorker } from './cryptoWorkerSingleton';
+import { vaultDataService } from './vaultDataService';
 
 export interface PermissionRequest {
   origin: string;
@@ -25,31 +25,10 @@ export class PermissionService {
     return this.instance;
   }
 
-  private async getCurrentIdentity(username: string): Promise<{ identity: Identity; index: number } | null> {
-    const cryptoWorker = getCryptoWorker();
-    if (!cryptoWorker) throw new Error('Crypto worker not ready');
 
-    const vaultData = await cryptoWorker.getVaultData({ username });
-    if (!vaultData) return null;
-
-    const index = vaultData.currentIdentityIndex ?? 0;
-    const identity = vaultData.identities[index];
-    
-    if (!identity) return null;
-    
-    return { identity, index };
-  }
 
   async getAppPermissions(username: string, origin: string): Promise<AppPermissions | null> {
-    const identityData = await this.getCurrentIdentity(username);
-    if (!identityData) return null;
-
-    // Check identity's app permissions
-    if (identityData.identity.appPermissions?.[origin]) {
-      return identityData.identity.appPermissions[origin];
-    }
-
-    return null;
+    return vaultDataService.getAppPermissions(username, origin);
   }
 
   async checkPermission(
@@ -58,51 +37,12 @@ export class PermissionService {
     action: PermissionRequest['action'],
     eventKind?: number
   ): Promise<PermissionCheckResult> {
-    const appPerms = await this.getAppPermissions(username, origin);
+    const result = await vaultDataService.checkPermission(username, origin, action, eventKind);
     
-    if (!appPerms) {
-      return {
-        allowed: false,
-        level: 'ASK_EVERYTIME',
-        needsPrompt: true
-      };
-    }
-
-    let permissionLevel: PermissionLevel = 'DENY';
-    
-    // Check the specific permission level based on action
-    if (action === 'signEvent' && eventKind !== undefined) {
-      // Check event kind specific permission
-      permissionLevel = appPerms.kinds[eventKind] || 'ASK_EVERYTIME';
-    } else if (action === 'signData') {
-      permissionLevel = appPerms.signData;
-    } else if (action === 'getPublicKey') {
-      permissionLevel = appPerms.getPublicKey || 'ASK_EVERYTIME';
-    } else if (action === 'nip04') {
-      permissionLevel = appPerms.nip04 || 'ASK_EVERYTIME';
-    } else if (action === 'getRelays') {
-      permissionLevel = appPerms.getRelays || 'ASK_EVERYTIME';
-    }
-
-    // Check session permissions for ASK_PER_SESSION
-    let sessionGranted = false;
-    if (permissionLevel === 'ASK_PER_SESSION' && appPerms.sessionPermissions) {
-      const now = Date.now();
-      if (appPerms.sessionPermissions.expiresAt > now) {
-        if (action === 'signEvent' && eventKind !== undefined) {
-          sessionGranted = appPerms.sessionPermissions.kinds[eventKind] === true;
-        } else if (action === 'signData') {
-          sessionGranted = appPerms.sessionPermissions.signData === true;
-        }
-      }
-    }
-
     return {
-      allowed: permissionLevel === 'ALLOW' || (permissionLevel === 'ASK_PER_SESSION' && sessionGranted),
-      level: permissionLevel,
-      needsPrompt: permissionLevel === 'ASK_EVERYTIME' || 
-                   (permissionLevel === 'ASK_PER_SESSION' && !sessionGranted),
-      sessionGranted
+      allowed: result.allowed,
+      level: result.level as PermissionLevel,
+      needsPrompt: result.needsPrompt
     };
   }
 
@@ -112,54 +52,7 @@ export class PermissionService {
     permissions: Partial<AppPermissions>,
     appName?: string
   ): Promise<void> {
-    const cryptoWorker = getCryptoWorker();
-    if (!cryptoWorker) throw new Error('Crypto worker not ready');
-
-    const vaultData = await cryptoWorker.getVaultData({ username });
-    if (!vaultData) throw new Error('Vault data not found');
-
-    const identityData = await this.getCurrentIdentity(username);
-    if (!identityData) throw new Error('No current identity');
-
-    const { identity, index } = identityData;
-    
-    // Initialize app permissions for identity if needed
-    if (!identity.appPermissions) {
-      identity.appPermissions = {};
-    }
-
-    const existingPerms = identity.appPermissions[origin];
-    
-    const updatedPermissions: AppPermissions = {
-      appId: origin,
-      appName: appName || existingPerms?.appName,
-      grantedAt: existingPerms?.grantedAt || Date.now(),
-      lastUsedAt: Date.now(),
-      kinds: permissions.kinds || existingPerms?.kinds || {},
-      signData: permissions.signData || existingPerms?.signData || 'DENY',
-      getPublicKey: permissions.getPublicKey || existingPerms?.getPublicKey,
-      nip04: permissions.nip04 || existingPerms?.nip04,
-      getRelays: permissions.getRelays || existingPerms?.getRelays,
-      sessionPermissions: permissions.sessionPermissions || existingPerms?.sessionPermissions
-    };
-
-    // Update the identity's permissions
-    identity.appPermissions[origin] = updatedPermissions;
-    
-    // Update the identity in vault data
-    vaultData.identities[index] = identity;
-    vaultData.updatedAt = Date.now();
-
-    await cryptoWorker.updateVaultData({ username, vaultData });
-
-    try {
-      const vaultEvent = await cryptoWorker.saveVaultToNostr({ username });
-      const { publishEvent } = await import('@nostrpass/nostrHelpers');
-      const { getRelays } = await import('../providers/EnvironmentProvider');
-      await publishEvent(vaultEvent.event, getRelays());
-    } catch (error) {
-      console.error('Failed to sync permissions to Nostr:', error);
-    }
+    await vaultDataService.saveAppPermissions(username, origin, permissions, appName);
   }
 
   async grantSessionPermission(
@@ -169,107 +62,55 @@ export class PermissionService {
     eventKind?: number,
     sessionDurationMinutes: number = 60
   ): Promise<void> {
-    const appPerms = await this.getAppPermissions(username, origin);
-    if (!appPerms) return;
-
-    const expiresAt = Date.now() + (sessionDurationMinutes * 60 * 1000);
-    
-    if (!appPerms.sessionPermissions) {
-      appPerms.sessionPermissions = {
-        kinds: {},
-        signData: false,
-        expiresAt
-      };
-    }
-
-    if (action === 'signEvent' && eventKind !== undefined) {
-      appPerms.sessionPermissions.kinds[eventKind] = true;
-    } else if (action === 'signData') {
-      appPerms.sessionPermissions.signData = true;
-    }
-
-    appPerms.sessionPermissions.expiresAt = expiresAt;
-
-    await this.saveAppPermissions(username, origin, appPerms);
+    await vaultDataService.grantSessionPermission(username, origin, action, eventKind, sessionDurationMinutes);
   }
 
   async updateLastUsed(username: string, origin: string): Promise<void> {
-    const cryptoWorker = getCryptoWorker();
-    if (!cryptoWorker) throw new Error('Crypto worker not ready');
+    const appPerms = await this.getAppPermissions(username, origin);
+    if (!appPerms) return;
 
-    const identityData = await this.getCurrentIdentity(username);
-    if (!identityData) return;
+    // Update last used timestamp
+    const updatedPerms = {
+      ...appPerms,
+      lastUsedAt: Date.now()
+    };
 
-    const { identity } = identityData;
-    
-    if (!identity.appPermissions?.[origin]) return;
-
-    identity.appPermissions[origin].lastUsedAt = Date.now();
-    
-    const vaultData = await cryptoWorker.getVaultData({ username });
-    if (!vaultData) return;
-    
-    vaultData.identities[identityData.index] = identity;
-    vaultData.updatedAt = Date.now();
-
-    await cryptoWorker.updateVaultData({ username, vaultData });
+    await vaultDataService.saveAppPermissions(username, origin, updatedPerms);
   }
 
   async revokeAppPermissions(username: string, origin: string): Promise<void> {
-    const cryptoWorker = getCryptoWorker();
-    if (!cryptoWorker) throw new Error('Crypto worker not ready');
+    // Get current permissions and remove the origin
+    const vaultData = await vaultDataService.getVaultData(username);
+    if (!vaultData?.identities) return;
 
-    const vaultData = await cryptoWorker.getVaultData({ username });
-    if (!vaultData) return;
-
-    const identityData = await this.getCurrentIdentity(username);
-    if (!identityData) return;
-
-    const { identity, index } = identityData;
+    const currentIndex = vaultData.currentIdentityIndex ?? 0;
+    const identity = vaultData.identities[currentIndex];
     
-    if (identity.appPermissions?.[origin]) {
+    if (identity?.appPermissions?.[origin]) {
       delete identity.appPermissions[origin];
-      vaultData.identities[index] = identity;
-      vaultData.updatedAt = Date.now();
-      await cryptoWorker.updateVaultData({ username, vaultData });
-    }
-
-    try {
-      const vaultEvent = await cryptoWorker.saveVaultToNostr({ username });
-      const { publishEvent } = await import('@nostrpass/nostrHelpers');
-      const { getRelays } = await import('../providers/EnvironmentProvider');
-      await publishEvent(vaultEvent.event, getRelays());
-    } catch (error) {
-      console.error('Failed to sync permission revocation to Nostr:', error);
+      
+      // Update the identity using VaultDataService
+      await vaultDataService.updateIdentity(username, currentIndex, { appPermissions: identity.appPermissions });
+      
+      // Sync to Nostr
+      await vaultDataService.syncToNostr(username);
     }
   }
 
   async getAllAppPermissions(username: string): Promise<AppPermissions[]> {
-    const identityData = await this.getCurrentIdentity(username);
-    if (!identityData) return [];
+    const vaultData = await vaultDataService.getVaultData(username);
+    if (!vaultData?.identities) return [];
 
-    const { identity } = identityData;
+    const currentIndex = vaultData.currentIdentityIndex ?? 0;
+    const identity = vaultData.identities[currentIndex];
     
-    if (!identity.appPermissions) return [];
+    if (!identity?.appPermissions) return [];
 
     return Object.values(identity.appPermissions);
   }
 
   async switchIdentity(username: string, newIdentityIndex: number): Promise<void> {
-    const cryptoWorker = getCryptoWorker();
-    if (!cryptoWorker) throw new Error('Crypto worker not ready');
-
-    const vaultData = await cryptoWorker.getVaultData({ username });
-    if (!vaultData) throw new Error('Vault data not found');
-
-    if (!vaultData.identities[newIdentityIndex]) {
-      throw new Error('Identity not found');
-    }
-
-    vaultData.currentIdentityIndex = newIdentityIndex;
-    vaultData.updatedAt = Date.now();
-
-    await cryptoWorker.updateVaultData({ username, vaultData });
+    await vaultDataService.switchIdentity(username, newIdentityIndex);
   }
 
   isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {

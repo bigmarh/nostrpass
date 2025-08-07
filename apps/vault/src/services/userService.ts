@@ -55,7 +55,6 @@ export async function createIdentity(xpriv: string, nickname: string, index: num
   // Derive the keypair for this identity
   const derived = await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index });
   
-  console.log('Derived identity:', derived);
   
   // Handle if result is a Map (in case it wasn't converted in worker)
   let path: string;

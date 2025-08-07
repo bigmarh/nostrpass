@@ -6,7 +6,6 @@ const TestPinDerivation: Component = () => {
   const [testing, setTesting] = createSignal(false);
   
   const addResult = (msg: string) => {
-    console.log(msg);
     setResults(prev => [...prev, msg]);
   };
   

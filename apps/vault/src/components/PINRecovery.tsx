@@ -23,8 +23,6 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
 
   const handleRecover = async () => {
     const recovery = props.vaultData.recovery;
-    console.log('VaultData in PINRecovery:', props.vaultData);
-    console.log('Recovery data:', recovery);
     
     if (!recovery) {
       setError('No recovery data found');
@@ -49,15 +47,12 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
           .replace(/^["']|["']$/g, '') // Remove quotes from start/end
           .trim() // Trim again after removing quotes
       );
-      console.log('PINRecovery - Raw answers from form:', orderedAnswers);
-      console.log('PINRecovery - Answer values:', orderedAnswers.map((a, i) => `[${i}]: "${a}" (length: ${a.length})`));
 
       // Check if crypto worker is available
       if (!cryptoWorker) {
         throw new Error('Crypto worker not initialized');
       }
 
-      console.log('🔐 Starting secure PIN recovery...');
       
       // Start recovery session in worker
       const result = await cryptoWorker.startPinRecovery({
@@ -68,7 +63,6 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
 
       if (result.success && result.sessionToken) {
         // Success!
-        console.log('✅ Recovery successful! PIN can now be reset.');
         props.onSuccess(result.sessionToken);
       } else {
         // Wrong answers
@@ -82,7 +76,6 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
         }
       }
     } catch (error) {
-      console.error('Recovery error:', error);
       setError('Recovery failed. Please try again.');
     } finally {
       setIsLoading(false);

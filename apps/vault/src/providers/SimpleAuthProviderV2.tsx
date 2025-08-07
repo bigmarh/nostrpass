@@ -140,7 +140,6 @@ export const SimpleAuthProviderV2: ParentComponent = (props) => {
 
     } catch (error) {
       // Messaging not ready yet, will retry on next effect run
-      console.debug('Messaging not ready, will retry...');
     }
   });
 
@@ -157,7 +156,6 @@ export const SimpleAuthProviderV2: ParentComponent = (props) => {
         }
       }
     } catch (error) {
-      console.error('Failed to restore session:', error);
     }
   });
 

@@ -6,18 +6,16 @@ let workerClient: any | null = null;
 
 export function getCryptoWorker(): any {
   if (!workerClient) {
-    console.log('🔧 Creating singleton crypto worker instance');
     workerInstance = new Worker(
       new URL('../workers/crypto.worker.ts', import.meta.url), 
       { type: 'module' }
     );
     workerClient = createWorkerClient(workerInstance, {
-      timeout: 30000, // Increased to 30 seconds
+      timeout: 60000, // Increased to 60 seconds for large vault operations
       onError: (error) => {
-        console.error('❌ CryptoWorker error:', error);
+        console.error('Crypto worker error:', error);
       },
     });
-    console.log('✅ Singleton crypto worker created');
   }
   return workerClient;
 }

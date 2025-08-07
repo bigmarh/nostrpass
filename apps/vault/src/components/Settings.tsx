@@ -22,7 +22,7 @@ export const Settings: Component = () => {
   // Load specific identity from URL
   createEffect(async () => {
     const currentUser = user();
-    const identityPubkey = params.identityPubkey;
+    const identityPubkey = currentIdentity()?.publicKey;
     if (!currentUser || !cryptoWorker || !identityPubkey) return;
 
     try {
@@ -64,7 +64,6 @@ export const Settings: Component = () => {
         }
       }
     } catch (error) {
-      console.error('Failed to load identity:', error);
     }
   });
 
@@ -104,11 +103,9 @@ export const Settings: Component = () => {
           const { publishEvent } = await import('@nostrpass/nostrHelpers');
           await publishEvent(vaultEvent.event, env.getRelays());
         } catch (error) {
-          console.error('Failed to sync to Nostr:', error);
         }
       }
     } catch (error) {
-      console.error('Failed to save identity nickname:', error);
     }
   };
 

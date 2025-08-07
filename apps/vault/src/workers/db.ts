@@ -51,10 +51,15 @@ class VaultDB {
   async saveVault(vaultData: VaultData): Promise<void> {
     if (!this.db) await this.init();
     
+    const startTime = Date.now();
+    const dataSize = JSON.stringify(vaultData).length;
+    
     console.log('💾 Saving vault to IndexedDB:', {
       username: vaultData.username,
       hasXprivEncryptedForPin: !!vaultData.xprivEncryptedForPin,
-      xprivEncryptedForPinLength: vaultData.xprivEncryptedForPin?.length
+      xprivEncryptedForPinLength: vaultData.xprivEncryptedForPin?.length,
+      dataSize: `${(dataSize / 1024).toFixed(2)} KB`,
+      identitiesCount: vaultData.identities?.length || 0
     });
     
     return new Promise((resolve, reject) => {
@@ -62,8 +67,14 @@ class VaultDB {
       const store = transaction.objectStore('vaults');
       const request = store.put(vaultData);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        console.log(`💾 Vault saved successfully in ${Date.now() - startTime}ms`);
+        resolve();
+      };
+      request.onerror = () => {
+        console.error('💾 Failed to save vault:', request.error);
+        reject(request.error);
+      };
     });
   }
 

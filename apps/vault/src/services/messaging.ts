@@ -194,7 +194,7 @@ export const rateLimit = (maxRequests: number, windowMs: number) => {
  * msg.on('ANY_ACTION', logger(), async (data) => { ... });
  */
 export const logger = (logFn?: (message: string) => void) => {
-  const log = logFn || console.log;
+  const log = logFn || (() => {});
   
   return async (data: any, context: MessageContext, next: () => Promise<any>) => {
     const start = Date.now();

@@ -69,10 +69,7 @@ export const NostrCommsProvider: ParentComponent = (props) => {
       await testConnections();
       
       if (isDebugMode()) {
-        console.log('✅ NostrComms initialized for environment:', environmentName(), {
-          relays: envRelays.length,
-          registry: !!registry
-        });
+      
       }
     } catch (error) {
       console.error('❌ Failed to initialize NostrComms:', error);

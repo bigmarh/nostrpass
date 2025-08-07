@@ -1,7 +1,7 @@
 import { Component, Show, createSignal, For, createMemo, onMount, createEffect } from 'solid-js';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 
-import { useAuth, useMessenger, useCryptoWorker, useEnvironment } from '../providers';
+import { useAuth, useMessenger, useCryptoWorker } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
 import { nip19 } from 'nostr-tools';
 import { VaultTestConsole } from './VaultTestConsole';
@@ -9,6 +9,7 @@ import PinPad from './PinPad';
 import PINRecovery from './PINRecovery';
 import PinSetup from './PinSetup';
 import { PermissionService } from '../services/permissionService';
+import { useVaultData } from '../hooks/useVaultData';
 import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
 
 export const Dashboard: Component = () => {
@@ -25,7 +26,6 @@ export const Dashboard: Component = () => {
     const [showRecovery, setShowRecovery] = createSignal(false);
     const [showPinReset, setShowPinReset] = createSignal(false);
     const [recoverySessionToken, setRecoverySessionToken] = createSignal<string | null>(null);
-    const [vaultData, setVaultData] = createSignal<any>(null);
     const [tempNewPin, setTempNewPin] = createSignal<string>('');
     const [showPasswordPrompt, setShowPasswordPrompt] = createSignal(false);
     const [passwordForReset, setPasswordForReset] = createSignal('');
@@ -34,34 +34,79 @@ export const Dashboard: Component = () => {
     const [appPermissions, setAppPermissions] = createSignal<AppPermissions | null>(null);
     const [isSavingPermission, setIsSavingPermission] = createSignal(false);
     const [permissionSaveError, setPermissionSaveError] = createSignal<string | null>(null);
+    const [showIdentitySelection, setShowIdentitySelection] = createSignal(false);
+    const [identitySelectionCallback, setIdentitySelectionCallback] = createSignal<((identityIndex: number) => void) | null>(null);
     const cryptoWorker = useCryptoWorker();
-    const env = useEnvironment();
     const permissionService = PermissionService.getInstance();
+    
+    // Use the vault data hook
+    const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
     
     // Debounced sync to Nostr
     let syncTimeout: NodeJS.Timeout | null = null;
     const SYNC_DELAY = 3000; // 3 seconds
-    // For now, we'll create a single identity from the user's data
-    // In the future, this can be expanded to support multiple identities
+
+    // Load vault data when user changes
+    createEffect(() => {
+        if (user()) {
+            loadVaultData();
+        }
+    });
+
+    // Create identities from vault data with proper app permission checking
     const identities = createMemo(() => {
         const currentUser = user();
-        if (!currentUser) return [];
+        const vault = vaultData();
+        
+        if (!currentUser || !vault?.identities) {
+            // Fallback to basic identity from user data
+            let npub = '';
+            try {
+                npub = nip19.npubEncode(currentUser?.publicKey || '');
+            } catch (e) {
+                npub = currentUser?.publicKey || '';
+            }
 
-        // Get npub from public key
-        let npub = '';
-        try {
-            npub = nip19.npubEncode(currentUser.publicKey);
-        } catch (e) {
-            npub = currentUser.publicKey;
+            return currentUser ? [{
+                nickname: 'Personal',
+                publicKey: currentUser.publicKey,
+                npub: npub,
+                createdAt: new Date(currentUser.profile.createdAt).toISOString(),
+                isActive: true,
+                hasAppPermissions: false,
+                connectedApps: [],
+                otherConnectedApps: [],
+                index: 0
+            }] : [];
         }
 
-        return [{
-            nickname: 'Personal',
-            publicKey: currentUser.publicKey,
-            npub: npub,
-            createdAt: new Date(currentUser.profile.createdAt).toISOString(),
-            isActive: true
-        }];
+        // Use real vault identities - this will now be reactive to vault data changes
+        return vault.identities.map((identity: any, index: number) => {
+            // Get npub from public key
+            let npub = '';
+            try {
+                npub = nip19.npubEncode(identity.publicKey);
+            } catch (e) {
+                npub = identity.publicKey;
+            }
+
+            // Check if this identity has permissions for the current app
+            const hasAppPermissions = params.app && identity.appPermissions?.[params.app];
+            const connectedApps = identity.appPermissions ? Object.keys(identity.appPermissions) : [];
+            const otherConnectedApps = connectedApps.filter(app => app !== params.app);
+
+            return {
+                nickname: identity.nickname || 'Personal',
+                publicKey: identity.publicKey,
+                npub: npub,
+                createdAt: identity.createdAt || new Date().toISOString(),
+                isActive: index === (vault.currentIdentityIndex || 0),
+                hasAppPermissions,
+                connectedApps,
+                otherConnectedApps,
+                index
+            };
+        });
     });
 
     const filteredIdentities = createMemo(() => {
@@ -69,7 +114,7 @@ export const Dashboard: Component = () => {
         let results = identities();
 
         if (query) {
-            results = results.filter(identity => {
+            results = results.filter((identity: any) => {
                 if (identity.nickname?.toLowerCase().includes(query)) return true;
                 if (identity.publicKey?.toLowerCase().includes(query)) return true;
                 if (identity.npub?.toLowerCase().includes(query)) return true;
@@ -90,32 +135,17 @@ export const Dashboard: Component = () => {
     };
 
     const toggleVaultLock = async () => {
-        console.log('🔄 toggleVaultLock called, current lock state:', isVaultLocked());
-        
         if (isVaultLocked()) {
             // If locked, show PIN unlock modal
-            console.log('🔓 Vault is locked, showing unlock modal');
             
             // Load vault data for recovery
-            const currentUser = user();
-            if (currentUser?.profile?.username && cryptoWorker) {
-                try {
-                    const data = await cryptoWorker.getVaultData({ 
-                        username: currentUser.profile.username 
-                    });
-                    setVaultData(data);
-                } catch (err) {
-                    console.error('Failed to load vault data:', err);
-                }
-            }
+            await loadVaultData();
             
             setShowPinUnlock(true);
             setPinUnlockError('');
         } else {
             // If unlocked, lock the vault
-            console.log('🔒 Vault is unlocked, attempting to lock...');
             await lockVault();
-            console.log('✅ Lock vault completed');
         }
     };
 
@@ -138,12 +168,10 @@ export const Dashboard: Component = () => {
             const success = await unlockVault(pin);
             if (success) {
                 setShowPinUnlock(false);
-                console.log('✅ Vault unlocked successfully');
             } else {
                 setPinUnlockError('Incorrect PIN. Please try again.');
             }
         } catch (error) {
-            console.error('Failed to unlock vault:', error);
             
             // Check if the error indicates we need to login again
             if (error instanceof Error && error.message.includes('login with password')) {
@@ -161,77 +189,51 @@ export const Dashboard: Component = () => {
         }
     };
 
+    // Create default permissions for a new app
+    const createDefaultPermissions = (appId: string): AppPermissions => ({
+        appId,
+        appName: desanitizeDomain(appId),
+        permissions: {
+            social: 'ALLOW',
+            messaging: 'ASK_EVERYTIME',
+            signData: 'ASK_EVERYTIME',
+            financial: 'ASK_EVERYTIME'
+        },
+        getPublicKey: 'ALLOW',
+        grantedAt: Date.now(),
+        lastUsedAt: Date.now()
+    });
+
     // Load permissions for the current app
     const loadAppPermissions = async () => {
         const currentUser = user();
         if (!currentUser || !params.app) return;
         
-        console.log('Loading permissions for app:', params.app);
-        
         try {
             const permissions = await permissionService.getAllAppPermissions(currentUser.profile.username);
-            console.log('All permissions loaded:', permissions);
-            
             const appPerm = permissions.find(p => p.appId === params.app);
-            console.log('App permissions found:', appPerm);
             
-            if (!appPerm) {
-                // Initialize default permissions for new app
-                const defaultPermissions: AppPermissions = {
-                    appId: params.app,
-                    appName: desanitizeDomain(params.app),
-                    getPublicKey: 'ASK_EVERYTIME',
-                    signData: 'ASK_EVERYTIME',
-                    nip04: 'ASK_EVERYTIME',
-                    getRelays: 'ASK_EVERYTIME',
-                    kinds: {},
-                    grantedAt: Date.now(),
-                    lastUsedAt: Date.now()
-                };
-                setAppPermissions(defaultPermissions);
-            } else {
-                setAppPermissions(appPerm);
-            }
+            setAppPermissions(appPerm || createDefaultPermissions(params.app));
         } catch (error) {
-            console.error('Failed to load permissions:', error);
-            // Set default permissions on error
-            const defaultPermissions: AppPermissions = {
-                appId: params.app,
-                appName: desanitizeDomain(params.app),
-                getPublicKey: 'ASK_EVERYTIME',
-                signData: 'ASK_EVERYTIME',
-                nip04: 'ASK_EVERYTIME',
-                getRelays: 'ASK_EVERYTIME',
-                kinds: {},
-                grantedAt: Date.now(),
-                lastUsedAt: Date.now()
-            };
-            setAppPermissions(defaultPermissions);
+            setAppPermissions(createDefaultPermissions(params.app));
         }
     };
     
     // Sync permissions to Nostr (debounced)
     const syncPermissionsToNostr = async () => {
         const currentUser = user();
-        if (!currentUser || !cryptoWorker) return;
+        if (!currentUser) return;
         
         setIsSavingPermission(true);
         setPermissionSaveError(null);
         
         try {
-            console.log('Syncing permissions to Nostr...');
-            const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
-                username: currentUser.profile.username 
-            });
-            const { publishEvent } = await import('@nostrpass/nostrHelpers');
-            await publishEvent(vaultEvent.event, env.getRelays());
-            console.log('✅ Permissions synced to Nostr');
+            await syncToNostr();
             
             // Show success message briefly  
             setPermissionSaveError('✅ Successfully encrypted and saved to Nostr!');
             setTimeout(() => setPermissionSaveError(null), 3000);
         } catch (error: any) {
-            console.error('Failed to sync to Nostr:', error);
             if (error.message?.includes('Vault is locked')) {
                 setPermissionSaveError('Please unlock your vault with PIN first');
             } else if (error.message?.includes('no xpriv')) {
@@ -241,6 +243,47 @@ export const Dashboard: Component = () => {
             }
         } finally {
             setIsSavingPermission(false);
+        }
+    };
+    
+    // Manual sync function for user-triggered sync
+    const handleManualSync = async () => {
+        const currentUser = user();
+        if (!currentUser) return;
+        
+        try {
+            console.log('🔄 Manual sync triggered...');
+            await syncToNostr();
+            console.log('✅ Manual sync completed successfully');
+            // Could show a success toast here
+        } catch (error: any) {
+            console.error('❌ Manual sync failed:', error);
+            // Could show an error toast here
+        }
+    };
+
+    // Get vault from Nostr function
+    const handleGetFromNostr = async () => {
+        const currentUser = user();
+        if (!currentUser) return;
+        
+        try {
+            console.log('🔄 Getting vault from Nostr...');
+            const result = await getVaultFromNostr();
+            if (result) {
+                console.log('✅ Vault retrieved from Nostr:', {
+                    eventId: result.eventId,
+                    timestamp: new Date(result.timestamp).toISOString(),
+                    identitiesCount: result.vaultData.identities?.length || 0
+                });
+                // Could show a success toast here
+            } else {
+                console.log('ℹ️ No vault found on Nostr');
+                // Could show an info toast here
+            }
+        } catch (error: any) {
+            console.error('❌ Failed to get vault from Nostr:', error);
+            // Could show an error toast here
         }
     };
     
@@ -258,16 +301,26 @@ export const Dashboard: Component = () => {
             
             if (permissionType === 'getPublicKey') {
                 updates.getPublicKey = newLevel;
-            } else if (permissionType === 'signEvent') {
-                updates.kinds = { ...appPermissions()!.kinds, 1: newLevel }; // Default to kind 1
+            } else if (permissionType === 'social') {
+                updates.permissions = { 
+                    ...appPermissions()!.permissions, 
+                    social: newLevel 
+                };
+            } else if (permissionType === 'messaging') {
+                updates.permissions = { 
+                    ...appPermissions()!.permissions, 
+                    messaging: newLevel 
+                };
             } else if (permissionType === 'signData') {
-                updates.signData = newLevel;
-            } else if (permissionType === 'nip04_encrypt') {
-                updates.nip04 = newLevel;
-            } else if (permissionType === 'nip04_decrypt') {
-                updates.nip04 = newLevel;
-            } else if (permissionType === 'getRelays') {
-                updates.getRelays = newLevel;
+                updates.permissions = { 
+                    ...appPermissions()!.permissions, 
+                    signData: newLevel 
+                };
+            } else if (permissionType === 'financial') {
+                updates.permissions = { 
+                    ...appPermissions()!.permissions, 
+                    financial: newLevel 
+                };
             }
             
             await permissionService.saveAppPermissions(
@@ -291,7 +344,6 @@ export const Dashboard: Component = () => {
             }, SYNC_DELAY);
             
         } catch (error) {
-            console.error('Failed to update permission:', error);
             setPermissionSaveError('Failed to save permission');
         } finally {
             setIsSavingPermission(false);
@@ -300,7 +352,6 @@ export const Dashboard: Component = () => {
     
     const handlePasswordVerification = async () => {
         if (!cryptoWorker || !recoverySessionToken() || !tempNewPin() || !passwordForReset()) {
-            console.error('Missing required data for password verification');
             return;
         }
         
@@ -333,6 +384,91 @@ export const Dashboard: Component = () => {
         } finally {
             setIsUnlocking(false);
             setPasswordForReset('');
+        }
+    };
+
+    // Show identity selection modal
+    const showIdentitySelectionModal = (callback: (identityIndex: number) => void) => {
+        setIdentitySelectionCallback(() => callback);
+        setShowIdentitySelection(true);
+    };
+
+    // Handle identity selection
+    const handleIdentitySelection = (identityIndex: number) => {
+        const callback = identitySelectionCallback();
+        if (callback) {
+            callback(identityIndex);
+        }
+        setShowIdentitySelection(false);
+        setIdentitySelectionCallback(null);
+    };
+
+    // Handle identity switching
+    const handleIdentitySwitch = async (identityIndex: number) => {
+        const currentUser = user();
+        if (!currentUser) return;
+        
+        try {
+            // Update the current identity index in the vault
+            await updateVaultData({
+                currentIdentityIndex: identityIndex
+            });
+        } catch (error) {
+            console.error('Failed to switch identity:', error);
+        }
+    };
+
+    // Handle connecting an identity to the current app
+    const handleConnectIdentity = async (identityIndex: number) => {
+        const currentUser = user();
+        if (!currentUser || !params.app) return;
+        
+        try {
+            // Create default permissions for the new connection
+            const defaultPermissions = createDefaultPermissions(params.app);
+            
+            // Get current vault data
+            const currentVault = vaultData();
+            if (!currentVault) return;
+            
+            // Create updated identities array
+            const updatedIdentities = [...currentVault.identities];
+            if (!updatedIdentities[identityIndex].appPermissions) {
+                updatedIdentities[identityIndex].appPermissions = {};
+            }
+            updatedIdentities[identityIndex].appPermissions[params.app] = defaultPermissions;
+            
+            // Update vault data with the new identities
+            await updateVaultData({
+                identities: updatedIdentities
+            });
+        } catch (error) {
+            console.error('Failed to connect identity:', error);
+        }
+    };
+
+    // Handle disconnecting an identity from an app
+    const handleDisconnectIdentity = async (identityIndex: number, appId: string) => {
+        const currentUser = user();
+        if (!currentUser) return;
+        
+        try {
+            // Get current vault data
+            const currentVault = vaultData();
+            if (!currentVault) return;
+            
+            // Create updated identities array
+            const updatedIdentities = [...currentVault.identities];
+            if (updatedIdentities[identityIndex].appPermissions) {
+                delete updatedIdentities[identityIndex].appPermissions[appId];
+            }
+            
+            // Update vault data with the new identities
+            await updateVaultData({
+                identities: updatedIdentities
+            });
+        } catch (error) {
+            console.error('Failed to disconnect identity:', error);
         }
     };
 
@@ -390,6 +526,29 @@ export const Dashboard: Component = () => {
                                 <span class={`text-sm hidden md:block ${isVaultLocked() ? 'text-orange-700' : 'text-green-700'}`}>Unlock</span>
                             </div>
                             <div class="flex items-center gap-2">
+                                {/* Manual sync buttons - only show in development */}
+                                <Show when={import.meta.env.DEV}>
+                                    <button
+                                        onClick={handleManualSync}
+                                        class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
+                                        title="Sync to Nostr (Dev only)"
+                                    >
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        <span class="text-sm">Sync</span>
+                                    </button>
+                                    <button
+                                        onClick={handleGetFromNostr}
+                                        class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
+                                        title="Get from Nostr (Dev only)"
+                                    >
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                        </svg>
+                                        <span class="text-sm">Get</span>
+                                    </button>
+                                </Show>
                                 <button
                                     onClick={handleLogout}
                                     class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
@@ -484,10 +643,10 @@ export const Dashboard: Component = () => {
                                             <div class="flex items-center gap-2">
                                                 {/* Slide switch */}
                                                 <button
+                                                    onClick={() => handleIdentitySwitch(identity.index)}
                                                     class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700' : 'bg-gray-300'
                                                         } hover:opacity-80`}
                                                     title={identity.isActive ? 'Active identity' : 'Click to activate'}
-                                                    disabled
                                                 >
                                                     <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
                                                         }`} />
@@ -509,11 +668,33 @@ export const Dashboard: Component = () => {
                                                 </button>
                                             </div>
                                             <div class="flex gap-2 items-center">
-                                                {params.app && (
-                                                    <span class="text-gray-800 text-xs font-medium">
+                                                <Show when={identity.hasAppPermissions}>
+                                                    <span class="text-green-600 text-xs font-medium">
                                                         Connected to {desanitizeDomain(params.app)}
                                                     </span>
-                                                )}
+                                                </Show>
+                                                <Show when={identity.otherConnectedApps.length > 0}>
+                                                    <span class="text-gray-500 text-xs">
+                                                        {identity.otherConnectedApps.length} other app{identity.otherConnectedApps.length !== 1 ? 's' : ''} connected
+                                                    </span>
+                                                </Show>
+                                                <Show when={!identity.hasAppPermissions && identity.connectedApps.length === 0}>
+                                                    <span class="text-gray-400 text-xs">
+                                                        Not connected
+                                                    </span>
+                                                </Show>
+                                                <Show when={!identity.hasAppPermissions && params.app}>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleConnectIdentity(identity.index);
+                                                        }}
+                                                        class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                                        title={`Connect ${identity.nickname} to ${desanitizeDomain(params.app)}`}
+                                                    >
+                                                        Connect
+                                                    </button>
+                                                </Show>
                                             </div>
                                         </div>
                                     </div>
@@ -534,11 +715,12 @@ export const Dashboard: Component = () => {
 
 
                         {/* Test Console for Development */}
-                        <Show when={import.meta.env.DEV}>
+                        <Show when={import.meta.env.DEV}>   
                             <VaultTestConsole />
                         </Show>
                         {/* Results count */}
 
+        
                     </main>
 
                     {searchQuery() && (
@@ -597,9 +779,9 @@ export const Dashboard: Component = () => {
                             </div>
                         </Show>
 
-                        <Show when={showRecovery()}>
+                        <Show when={showRecovery() && vaultData()}>
                             <PINRecovery
-                                vaultData={vaultData() || {}}
+                                vaultData={vaultData()!}
                                 onSuccess={(sessionToken: string) => {
                                     setRecoverySessionToken(sessionToken);
                                     setShowRecovery(false);
@@ -665,6 +847,65 @@ export const Dashboard: Component = () => {
                 </div>
             </Show>
 
+            {/* Identity Selection Modal */}
+            <Show when={showIdentitySelection()}>
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div class="bg-white rounded-lg shadow-xl border-2 border-gray-300 p-6 text-center relative max-w-md w-full mx-4">
+                        {/* Header */}
+                        <div class="text-center mb-6">
+                            <h2 class="text-xl font-semibold mb-2">Choose Identity</h2>
+                            <p class="text-gray-600">Select which identity to connect to {params.app ? desanitizeDomain(params.app) : 'this app'}</p>
+                        </div>
+
+                        {/* Identity List */}
+                        <div class="space-y-3 mb-6">
+                            <For each={identities()}>
+                                {(identity) => (
+                                    <button
+                                        onClick={() => handleIdentitySelection(identity.index)}
+                                        class="w-full p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-left"
+                                    >
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col items-start">
+                                                <span class="font-medium text-gray-900">{identity.nickname}</span>
+                                                <span class="text-gray-500 text-xs font-mono">
+                                                    ({identity.npub.substring(0, 8)}...)
+                                                </span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <Show when={identity.hasAppPermissions}>
+                                                    <span class="text-green-600 text-xs font-medium">
+                                                        Already connected
+                                                    </span>
+                                                </Show>
+                                                <Show when={identity.isActive}>
+                                                    <span class="text-blue-600 text-xs font-medium">
+                                                        Active
+                                                    </span>
+                                                </Show>
+                                            </div>
+                                        </div>
+                                    </button>
+                                )}
+                            </For>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div class="flex gap-3">
+                            <button
+                                onClick={() => {
+                                    setShowIdentitySelection(false);
+                                    setIdentitySelectionCallback(null);
+                                }}
+                                class="flex-1 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </Show>
+
             {/* Settings Side Panel */}
             <Show when={showSettingsPanel()}>
                 <div class="fixed inset-0 z-50 overflow-hidden">
@@ -692,7 +933,7 @@ export const Dashboard: Component = () => {
                         {/* Panel Content */}
                         <div class="p-6">
                             <Show when={(() => {
-                                const identity = identities().find(id => id.publicKey === selectedIdentityKey());
+                                const identity = identities().find((id: any) => id.publicKey === selectedIdentityKey());
                                 return identity;
                             })()}>
                                 {(identity) => (
@@ -740,6 +981,61 @@ export const Dashboard: Component = () => {
                                             </div>
                                         </div>
 
+                                        {/* App Connections Section */}
+                                        <div class="border-t pt-6">
+                                            <h3 class="text-lg font-medium text-gray-900 mb-2">App Connections</h3>
+                                            <div class="space-y-3">
+                                                <Show when={identity().connectedApps.length > 0} fallback={
+                                                    <p class="text-sm text-gray-500">
+                                                        This identity is not connected to any apps yet.
+                                                    </p>
+                                                }>
+                                                    <div class="space-y-2">
+                                                        <Show when={identity().hasAppPermissions}>
+                                                            <div class="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                                                                <div class="flex items-center gap-3">
+                                                                    <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                                                                    <div>
+                                                                        <span class="text-sm font-medium text-green-800">
+                                                                            {desanitizeDomain(params.app!)}
+                                                                        </span>
+                                                                        <p class="text-xs text-green-600">Currently connected</p>
+                                                                    </div>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => handleDisconnectIdentity(identity().index, params.app!)}
+                                                                    class="text-xs text-red-600 hover:text-red-800"
+                                                                >
+                                                                    Disconnect
+                                                                </button>
+                                                            </div>
+                                                        </Show>
+                                                        
+                                                        <Show when={identity().otherConnectedApps.length > 0}>
+                                                            <div class="space-y-2">
+                                                                <p class="text-xs text-gray-600 font-medium">Other connected apps:</p>
+                                                                <For each={identity().otherConnectedApps}>
+                                                                    {(appId) => (
+                                                                        <div class="flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded">
+                                                                            <span class="text-sm text-gray-700">
+                                                                                {desanitizeDomain(appId)}
+                                                                            </span>
+                                                                            <button
+                                                                                onClick={() => handleDisconnectIdentity(identity().index, appId)}
+                                                                                class="text-xs text-red-600 hover:text-red-800"
+                                                                            >
+                                                                                Disconnect
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </For>
+                                                            </div>
+                                                        </Show>
+                                                    </div>
+                                                </Show>
+                                            </div>
+                                        </div>
+
                                         {/* App Permissions Section */}
                                         <div class="border-t pt-6">
                                             <h3 class="text-lg font-medium text-gray-900 mb-2">Permissions</h3>
@@ -765,7 +1061,7 @@ export const Dashboard: Component = () => {
                                                                 <span class="text-sm text-gray-700">Read Public Key</span>
                                                                 <select 
                                                                     class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
-                                                                    value={appPermissions()?.getPublicKey || 'ASK_EVERYTIME'}
+                                                                    value={appPermissions()?.getPublicKey || 'ALLOW'}
                                                                     onChange={(e) => handlePermissionChange('getPublicKey', e.currentTarget.value as PermissionLevel)}
                                                                     disabled={isSavingPermission()}
                                                                 >
@@ -776,11 +1072,11 @@ export const Dashboard: Component = () => {
                                                             </div>
 
                                                             <div class="flex items-center justify-between py-2.5 px-3 -mx-3 bg-gray-50 hover:bg-gray-100 transition-colors">
-                                                                <span class="text-sm text-gray-700">Sign Events</span>
+                                                                <span class="text-sm text-gray-700">Social (Posts, follows, reactions, communities, etc.)</span>
                                                                 <select 
                                                                     class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
-                                                                    value={appPermissions()?.kinds?.[1] || 'ASK_EVERYTIME'}
-                                                                    onChange={(e) => handlePermissionChange('signEvent', e.currentTarget.value as PermissionLevel)}
+                                                                    value={appPermissions()?.permissions?.social || 'ALLOW'}
+                                                                    onChange={(e) => handlePermissionChange('social', e.currentTarget.value as PermissionLevel)}
                                                                     disabled={isSavingPermission()}
                                                                 >
                                                                     <option value="ALLOW">Allowed</option>
@@ -790,10 +1086,24 @@ export const Dashboard: Component = () => {
                                                             </div>
 
                                                             <div class="flex items-center justify-between py-2.5 px-3 -mx-3 hover:bg-gray-50 transition-colors">
-                                                                <span class="text-sm text-gray-700">Sign Data</span>
+                                                                <span class="text-sm text-gray-700">Messaging (Private communications)</span>
                                                                 <select 
                                                                     class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
-                                                                    value={appPermissions()?.signData || 'ASK_EVERYTIME'}
+                                                                    value={appPermissions()?.permissions?.messaging || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('messaging', e.currentTarget.value as PermissionLevel)}
+                                                                    disabled={isSavingPermission()}
+                                                                >
+                                                                    <option value="ALLOW">Allowed</option>
+                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                                                    <option value="DENY">Blocked</option>
+                                                                </select>
+                                                            </div>
+
+                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 hover:bg-gray-50 transition-colors">
+                                                                <span class="text-sm text-gray-700">General Data Signing (Authentication, arbitrary data)</span>
+                                                                <select 
+                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+                                                                    value={appPermissions()?.permissions?.signData || 'ASK_EVERYTIME'}
                                                                     onChange={(e) => handlePermissionChange('signData', e.currentTarget.value as PermissionLevel)}
                                                                     disabled={isSavingPermission()}
                                                                 >
@@ -804,39 +1114,11 @@ export const Dashboard: Component = () => {
                                                             </div>
 
                                                             <div class="flex items-center justify-between py-2.5 px-3 -mx-3 bg-gray-50 hover:bg-gray-100 transition-colors">
-                                                                <span class="text-sm text-gray-700">Encrypt Messages (NIP-04)</span>
+                                                                <span class="text-sm text-gray-700">Financial Operations (Payments, zaps)</span>
                                                                 <select 
                                                                     class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
-                                                                    value={appPermissions()?.nip04 || 'ASK_EVERYTIME'}
-                                                                    onChange={(e) => handlePermissionChange('nip04_encrypt', e.currentTarget.value as PermissionLevel)}
-                                                                    disabled={isSavingPermission()}
-                                                                >
-                                                                    <option value="ALLOW">Allowed</option>
-                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
-                                                                    <option value="DENY">Blocked</option>
-                                                                </select>
-                                                            </div>
-
-                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 hover:bg-gray-50 transition-colors">
-                                                                <span class="text-sm text-gray-700">Decrypt Messages (NIP-04)</span>
-                                                                <select 
-                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
-                                                                    value={appPermissions()?.nip04 || 'ASK_EVERYTIME'}
-                                                                    onChange={(e) => handlePermissionChange('nip04_decrypt', e.currentTarget.value as PermissionLevel)}
-                                                                    disabled={isSavingPermission()}
-                                                                >
-                                                                    <option value="ALLOW">Allowed</option>
-                                                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
-                                                                    <option value="DENY">Blocked</option>
-                                                                </select>
-                                                            </div>
-
-                                                            <div class="flex items-center justify-between py-2.5 px-3 -mx-3 bg-gray-50 hover:bg-gray-100 transition-colors">
-                                                                <span class="text-sm text-gray-700">Access Relay List</span>
-                                                                <select 
-                                                                    class="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
-                                                                    value={appPermissions()?.getRelays || 'ASK_EVERYTIME'}
-                                                                    onChange={(e) => handlePermissionChange('getRelays', e.currentTarget.value as PermissionLevel)}
+                                                                    value={appPermissions()?.permissions?.financial || 'ASK_EVERYTIME'}
+                                                                    onChange={(e) => handlePermissionChange('financial', e.currentTarget.value as PermissionLevel)}
                                                                     disabled={isSavingPermission()}
                                                                 >
                                                                     <option value="ALLOW">Allowed</option>
@@ -880,6 +1162,7 @@ export const Dashboard: Component = () => {
                     </div>
                 </div>
             </Show>
+           
         </div>
     );
 };

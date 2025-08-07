@@ -48,18 +48,10 @@ const PinSetup: Component<PinSetupProps> = (props) => {
   };
 
   const handleRecoveryComplete = (questions: string[], answers: string[]) => {
-    console.log('🔄 PinSetup handleRecoveryComplete received:');
-    console.log('Questions:', questions);
-    console.log('Answers:', answers);
-    answers.forEach((answer, index) => {
-        console.log(`PinSetup Answer ${index}:`, answer);
-        console.log(`PinSetup Answer ${index} JSON:`, JSON.stringify(answer));
-    });
     
     setRecoveryData({ questions, answers });
     // Complete PIN setup with recovery data
     if (props.onPinSetWithRecovery) {
-      console.log('🔄 Calling onPinSetWithRecovery with PIN:', firstPin());
       props.onPinSetWithRecovery(firstPin(), questions, answers);
     } else {
       props.onPinSet(firstPin());

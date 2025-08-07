@@ -4,7 +4,6 @@ export const vaultHandlers: MessageHandler[] = [
   {
     route: 'SHOW_VAULT',
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
-      console.log('Show vault request received');
       // This would be handled by the UI layer
       return { acknowledged: true };
     }
@@ -13,7 +12,6 @@ export const vaultHandlers: MessageHandler[] = [
   {
     route: 'HIDE_VAULT',
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
-      console.log('Hide vault request received');
       // This would be handled by the UI layer
       return { acknowledged: true };
     }
