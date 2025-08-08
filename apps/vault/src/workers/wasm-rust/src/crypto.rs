@@ -24,7 +24,12 @@ pub fn nip04_encrypt(
     let secret_key = SecretKey::from_bytes(&key_bytes.into())
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
     
-    let public_key_bytes = hex::decode(recipient_public_key)
+    // Accept x-only (32-byte) hex by defaulting to even Y (prefix 0x02)
+    let mut recipient_hex = recipient_public_key.to_string();
+    if recipient_hex.len() == 64 {
+        recipient_hex = format!("02{}", recipient_hex);
+    }
+    let public_key_bytes = hex::decode(&recipient_hex)
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
     let _public_key = PublicKey::from_sec1_bytes(&public_key_bytes)
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
@@ -87,7 +92,12 @@ pub fn nip04_decrypt(
     let secret_key = SecretKey::from_bytes(&key_bytes.into())
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
     
-    let public_key_bytes = hex::decode(sender_public_key)
+    // Accept x-only (32-byte) hex by defaulting to even Y (prefix 0x02)
+    let mut sender_hex = sender_public_key.to_string();
+    if sender_hex.len() == 64 {
+        sender_hex = format!("02{}", sender_hex);
+    }
+    let public_key_bytes = hex::decode(&sender_hex)
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
     let _public_key = PublicKey::from_sec1_bytes(&public_key_bytes)
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;

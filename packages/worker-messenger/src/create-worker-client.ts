@@ -8,11 +8,16 @@ type ExtractMethods<T> = {
 };
 
 export function createWorkerClient<T extends Record<string, WorkerMethod>>(
-  worker: Worker,
+  workerOrPort: Worker | MessagePort,
   options?: { timeout?: number; onError?: (error: Error) => void }
 ): ExtractMethods<T> {
   const messenger = new WorkerMessenger(options);
-  messenger.setWorker(worker);
+
+  if (typeof Worker !== 'undefined' && workerOrPort instanceof Worker) {
+    messenger.setWorker(workerOrPort);
+  } else {
+    messenger.setPort(workerOrPort as MessagePort);
+  }
 
   return new Proxy({} as ExtractMethods<T>, {
     get: (_, method: string) => {

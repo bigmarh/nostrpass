@@ -137,14 +137,9 @@ export class VaultDataService {
    */
   async getCurrentIdentity(username: string): Promise<{ identity: Identity; index: number } | null> {
     const vaultData = await this.getVaultData(username);
-    if (!vaultData?.identities) return null;
-
-    const index = vaultData.currentIdentityIndex ?? 0;
-    const identity = vaultData.identities[index];
-    
-    if (!identity) return null;
-    
-    return { identity, index };
+    if (!vaultData?.identities || vaultData.identities.length === 0) return null;
+    const identity = vaultData.identities[0];
+    return { identity, index: 0 };
   }
 
   /**
@@ -168,8 +163,9 @@ export class VaultDataService {
   /**
    * Switch to a different identity
    */
-  async switchIdentity(username: string, newIdentityIndex: number): Promise<void> {
-    await this.updateVaultData(username, { currentIdentityIndex: newIdentityIndex });
+  async switchIdentity(_username: string, _newIdentityIndex: number): Promise<void> {
+    // No-op: identity selection is now per-app/tab and not persisted
+    return;
   }
 
   /**
@@ -190,15 +186,8 @@ export class VaultDataService {
       const updatedIdentities = [...(current.identities || [])];
       updatedIdentities.splice(identityIndex, 1);
       
-      // Adjust current identity index if needed
-      let currentIndex = current.currentIdentityIndex ?? 0;
-      if (identityIndex <= currentIndex && currentIndex > 0) {
-        currentIndex--;
-      }
-      
       return { 
-        identities: updatedIdentities,
-        currentIdentityIndex: currentIndex
+        identities: updatedIdentities
       };
     });
   }

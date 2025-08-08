@@ -1,4 +1,4 @@
-import type { AppPermissions, PermissionLevel, Identity } from '@nostrpass/types';
+import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
 import { vaultDataService } from './vaultDataService';
 
 export interface PermissionRequest {
@@ -82,35 +82,34 @@ export class PermissionService {
     // Get current permissions and remove the origin
     const vaultData = await vaultDataService.getVaultData(username);
     if (!vaultData?.identities) return;
-
-    const currentIndex = vaultData.currentIdentityIndex ?? 0;
-    const identity = vaultData.identities[currentIndex];
+    const identity = vaultData.identities.find((id: any) => id?.appPermissions && id.appPermissions[origin]);
     
     if (identity?.appPermissions?.[origin]) {
       delete identity.appPermissions[origin];
-      
-      // Update the identity using VaultDataService
-      await vaultDataService.updateIdentity(username, currentIndex, { appPermissions: identity.appPermissions });
-      
-      // Sync to Nostr
-      await vaultDataService.syncToNostr(username);
+      // Update the first matching identity
+      const index = vaultData.identities.findIndex((id: any) => id === identity);
+      if (index >= 0) {
+        await vaultDataService.updateIdentity(username, index, { appPermissions: identity.appPermissions });
+        await vaultDataService.syncToNostr(username);
+      }
     }
   }
 
   async getAllAppPermissions(username: string): Promise<AppPermissions[]> {
     const vaultData = await vaultDataService.getVaultData(username, { forceRefresh: true });
-    if (!vaultData?.identities) return [];
+    if (!vaultData?.identities || vaultData.identities.length === 0) return [];
 
-    const currentIndex = vaultData.currentIdentityIndex ?? 0;
-    const identity = vaultData.identities[currentIndex];
-    
+    // Use the first identity (identity selection is per-tab and not persisted)
+    const identity = vaultData.identities[0];
+
     if (!identity?.appPermissions) return [];
 
     return Object.values(identity.appPermissions);
   }
 
-  async switchIdentity(username: string, newIdentityIndex: number): Promise<void> {
-    await vaultDataService.switchIdentity(username, newIdentityIndex);
+  async switchIdentity(_username: string, _newIdentityIndex: number): Promise<void> {
+    // No-op; identity is per-app/tab now
+    return;
   }
 
   isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {

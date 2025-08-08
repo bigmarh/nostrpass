@@ -39,12 +39,12 @@ export const Settings: Component = () => {
         // In the future, we'll need to derive public keys for each identity
         // and match against the URL parameter
         if (identityPubkey === currentUser.publicKey) {
-          foundIndex = vaultData.currentIdentityIndex || 0;
+          foundIndex = 0;
           foundIdentity = vaultData.identities[foundIndex];
         } else {
           // Try to find by matching against stored identities
           // This will need to be enhanced when we have multiple identities with different keys
-          vaultData.identities.forEach((identity, index) => {
+          vaultData.identities.forEach((identity: any, index: number) => {
             // TODO: Derive public key for each identity and compare
             if (index === 0 && identityPubkey === currentUser.publicKey) {
               foundIndex = index;

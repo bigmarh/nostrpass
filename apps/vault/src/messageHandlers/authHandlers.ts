@@ -1,4 +1,15 @@
 import { MessageHandler, MessageHandlerDependencies } from './index';
+import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+
+function originToAppKey(origin: string): string {
+  try {
+    const u = new URL(origin);
+    return sanitizeDomain(u.host);
+  } catch {
+    // Fallback: if origin is already a sanitized key
+    return sanitizeDomain(origin);
+  }
+}
 
 export const authHandlers: MessageHandler[] = [
   {
@@ -13,13 +24,12 @@ export const authHandlers: MessageHandler[] = [
       // Get origin from context
       const origin = context?.origin || 'unknown';
       
-      // Check permission
       const hasPermission = await deps.checkPermission('getPublicKey', origin);
       if (!hasPermission) {
         throw new Error('Permission denied');
       }
 
-      // Get the identity associated with this app
+      // Get the identity associated with this app: use activeIdentityByApp
       const cryptoWorker = deps.getCryptoWorker();
       if (cryptoWorker && currentUser.profile?.username) {
         try {
@@ -27,27 +37,17 @@ export const authHandlers: MessageHandler[] = [
             username: currentUser.profile.username 
           });
           
-          if (vaultData?.identities) {
-            // Find the identity that's assigned to this app/origin
-            let appIdentity = null;
-            
-            // Check each identity for app permissions matching this origin
-            for (let i = 0; i < vaultData.identities.length; i++) {
-              const identity = vaultData.identities[i];
-              if (identity.appPermissions && identity.appPermissions[origin]) {
-                appIdentity = identity;
-                break;
-              }
+          if (vaultData?.identities && vaultData.identities.length > 0) {
+            const appKey = originToAppKey(origin);
+            const activeIndex = vaultData.activeIdentityByApp?.[appKey];
+            if (activeIndex === undefined || activeIndex === null) {
+              throw new Error('No active identity selected for this application');
             }
-            
-            // If no identity is assigned to this app yet, use the current identity
-            if (!appIdentity) {
-              appIdentity = vaultData.identities[vaultData.currentIdentityIndex || 0];
+            const appIdentity = vaultData.identities[activeIndex];
+            if (!appIdentity?.appPermissions || !appIdentity.appPermissions[appKey]) {
+              throw new Error('Selected identity is not authorized for this application');
             }
-            
-            if (appIdentity?.publicKey) {
-              return appIdentity.publicKey;
-            }
+            if (appIdentity?.publicKey) return appIdentity.publicKey;
           }
         } catch (error) {
         }
@@ -67,11 +67,16 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('User not authenticated or crypto not ready');
       }
 
+      // Preflight: ensure keys in session; if not, instruct UI to prompt PIN
+      const keyStatus = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
+      if (!keyStatus?.hasPrivateKey && !keyStatus?.hasXpriv) {
+        throw new Error('Session rehydrated without keys; unlock with PIN');
+      }
+
 
       // Get origin from context
       const origin = context?.origin || 'unknown';
       
-      // Check permission for signing events
       const eventKind = data.event?.kind;
       const hasPermission = await deps.checkPermission('signEvent', origin, eventKind);
       if (!hasPermission) {
@@ -108,12 +113,17 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('User not authenticated or crypto not ready');
       }
 
+      // Preflight: ensure keys in session; if not, instruct UI to prompt PIN
+      const keyStatus2 = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
+      if (!keyStatus2?.hasPrivateKey && !keyStatus2?.hasXpriv) {
+        throw new Error('Session rehydrated without keys; unlock with PIN');
+      }
+
       // Get origin from context
       const origin = context?.origin || 'unknown';
       
-      // Check permission for signing data
-      const hasPermission = await deps.checkPermission('signData', origin);
-      if (!hasPermission) {
+      const hasPermission2 = await deps.checkPermission('signData', origin);
+      if (!hasPermission2) {
         throw new Error('Permission denied');
       }
 
@@ -122,17 +132,18 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Vault is locked. Please unlock with PIN.');
       }
 
-      // Use session-based signing
+      // Get the identity associated with this app
+      const identityIndex = await deps.getAppIdentityIndex(origin);
+
+      // Use session-based signing with correct identity
       const signature = await cryptoWorker.signMessageWithSession({
         username: currentUser.profile.username,
-        message: data.data
+        message: data.data,
+        identityIndex
       });
 
-      // Return signature in expected format
-      return {
-        signature,
-        publicKey: currentUser.publicKey
-      };
+      // Return just the signature string (NIP-07 format)
+      return signature;
     }
   },
 
@@ -146,12 +157,17 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('User not authenticated or crypto not ready');
       }
 
+      // Preflight: ensure keys in session; if not, instruct UI to prompt PIN
+      const keyStatus3 = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
+      if (!keyStatus3?.hasPrivateKey && !keyStatus3?.hasXpriv) {
+        throw new Error('Session rehydrated without keys; unlock with PIN');
+      }
+
       // Get origin from context
       const origin = context?.origin || 'unknown';
       
-      // Check permission
-      const hasPermission = await deps.checkPermission('nip04', origin);
-      if (!hasPermission) {
+      const hasPermission3 = await deps.checkPermission('nip04', origin);
+      if (!hasPermission3) {
         throw new Error('Permission denied');
       }
 
@@ -160,11 +176,15 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Vault is locked. Please unlock with PIN.');
       }
 
-      // TODO: Use app-specific identity for encryption
+      // Get the identity associated with this app
+      const identityIndex = await deps.getAppIdentityIndex(origin);
+
+      // Use app-specific identity for encryption
       const encrypted = await cryptoWorker.encryptWithSession({
         username: currentUser.profile.username,
         plaintext: data.plaintext,
-        recipientPubkey: data.recipientPubkey
+        recipientPubkey: data.recipientPubkey,
+        identityIndex
       });
 
       return encrypted;
@@ -184,9 +204,8 @@ export const authHandlers: MessageHandler[] = [
       // Get origin from context
       const origin = context?.origin || 'unknown';
       
-      // Check permission
-      const hasPermission = await deps.checkPermission('nip04', origin);
-      if (!hasPermission) {
+      const hasPermission4 = await deps.checkPermission('nip04', origin);
+      if (!hasPermission4) {
         throw new Error('Permission denied');
       }
 
@@ -195,11 +214,15 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Vault is locked. Please unlock with PIN.');
       }
 
-      // TODO: Use app-specific identity for decryption
+      // Get the identity associated with this app
+      const identityIndex = await deps.getAppIdentityIndex(origin);
+
+      // Use app-specific identity for decryption
       const decrypted = await cryptoWorker.decryptWithSession({
         username: currentUser.profile.username,
         ciphertext: data.ciphertext,
-        senderPubkey: data.senderPubkey
+        senderPubkey: data.senderPubkey,
+        identityIndex
       });
 
       return decrypted;

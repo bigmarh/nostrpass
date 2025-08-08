@@ -15,8 +15,9 @@ export interface VaultData {
   
   // Identity management
   identities: any[];
-  currentIdentityIndex: number;
   storagePublicKey?: string; // Explicit storage public key (same as publicKey)
+  // Active identity per app (persistent selection separate from authorization)
+  activeIdentityByApp?: Record<string, number | null>;
   
   // Recovery system
   recovery?: {

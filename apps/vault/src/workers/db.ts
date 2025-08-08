@@ -147,7 +147,11 @@ class VaultDB {
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(['sessions'], 'readwrite');
       const store = transaction.objectStore('sessions');
-      const request = store.put(session);
+      const request = store.put({
+        ...session,
+        // Normalize to undefined for no auto-expiry
+        expiresAt: undefined
+      } as any);
 
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);

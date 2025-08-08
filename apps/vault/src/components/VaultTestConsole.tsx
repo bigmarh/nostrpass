@@ -74,9 +74,8 @@ export const VaultTestConsole: Component = () => {
               username: currentUser.profile.username 
             });
             
-            if (vaultData?.identities) {
-              const currentIndex = vaultData.currentIdentityIndex || 0;
-              const currentIdentity = vaultData.identities[currentIndex];
+      if (vaultData?.identities) {
+        const currentIdentity = vaultData.identities[0];
               if (currentIdentity) {
                 identityInfo = {
                   nickname: currentIdentity.nickname || 'Personal',
@@ -148,6 +147,7 @@ export const VaultTestConsole: Component = () => {
     }
   };
 
+  const [signDataMsg, setSignDataMsg] = createSignal('Hello from VaultTestConsole! This is test data to sign.');
   const testSignData = async () => {
     addLog('request', `Testing SIGN_DATA from origin: ${currentAppOrigin()}`);
     
@@ -167,7 +167,7 @@ export const VaultTestConsole: Component = () => {
       addLog('info', 'Permission check result:', permissionCheck);
 
       if (permissionCheck.allowed) {
-        const testMessage = 'Hello from VaultTestConsole! This is test data to sign.';
+        const testMessage = signDataMsg();
         
         // Sign with worker
         const result = await cryptoWorker.signMessageWithSession({
@@ -188,6 +188,9 @@ export const VaultTestConsole: Component = () => {
     }
   };
 
+  const [nip04Peer, setNip04Peer] = createSignal('');
+  const [nip04Plain, setNip04Plain] = createSignal('Hello from test console!');
+  const [nip04Cipher, setNip04Cipher] = createSignal('');
   const testEncrypt = async () => {
     addLog('request', `Testing ENCRYPT (NIP-04) from origin: ${currentAppOrigin()}`);
     
@@ -207,8 +210,8 @@ export const VaultTestConsole: Component = () => {
       addLog('info', 'Permission check result:', permissionCheck);
 
       if (permissionCheck.allowed) {
-        const plaintext = 'Hello from test console!';
-        const recipientPubkey = currentUser.publicKey; // Encrypt to self for testing
+        const plaintext = nip04Plain();
+        const recipientPubkey = nip04Peer() || currentUser.publicKey; // Encrypt to self if blank
         
         // Encrypt with worker
         const ciphertext = await cryptoWorker.encryptWithSession({
@@ -222,6 +225,7 @@ export const VaultTestConsole: Component = () => {
           ciphertext,
           recipientPubkey
         });
+        setNip04Cipher(ciphertext);
         
         // Test decrypt immediately
         addLog('info', 'Testing decrypt with the encrypted result...');
@@ -452,6 +456,12 @@ export const VaultTestConsole: Component = () => {
               >
                 Sign Data
               </button>
+              <input
+                value={signDataMsg()}
+                onInput={(e) => setSignDataMsg(e.currentTarget.value)}
+                placeholder="Message to sign"
+                class="px-2 py-1 rounded bg-gray-700 text-white text-sm"
+              />
               <button
                 onClick={testEncrypt}
                 class="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm transition-colors"
@@ -459,6 +469,24 @@ export const VaultTestConsole: Component = () => {
               >
                 Encrypt/Decrypt
               </button>
+              <input
+                value={nip04Peer()}
+                onInput={(e) => setNip04Peer(e.currentTarget.value)}
+                placeholder="Peer pubkey (hex). Blank = self"
+                class="px-2 py-1 rounded bg-gray-700 text-white text-sm"
+              />
+              <input
+                value={nip04Plain()}
+                onInput={(e) => setNip04Plain(e.currentTarget.value)}
+                placeholder="Plaintext"
+                class="px-2 py-1 rounded bg-gray-700 text-white text-sm"
+              />
+              <input
+                value={nip04Cipher()}
+                onInput={(e) => setNip04Cipher(e.currentTarget.value)}
+                placeholder="Ciphertext (for manual decrypt)"
+                class="px-2 py-1 rounded bg-gray-700 text-white text-sm col-span-2"
+              />
               <button
                 onClick={testGetAuthStatus}
                 class="px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm transition-colors"

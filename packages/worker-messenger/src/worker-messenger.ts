@@ -14,9 +14,13 @@ export class WorkerMessenger {
   }>();
 
   private worker: Worker | null = null;
+  private port: MessagePort | null = null;
+  private ports: Set<MessagePort> = new Set();
+  private requestPortMap: Map<string, MessagePort> = new Map();
   private handlers: WorkerMessageHandlers = {};
   private options: Required<WorkerMessengerOptions>;
   private isWorkerContext: boolean;
+  private isSharedWorkerContext: boolean;
 
   constructor(options: WorkerMessengerOptions = {}) {
     this.options = {
@@ -25,13 +29,27 @@ export class WorkerMessenger {
     };
 
     // Check if we're in a worker context
-    this.isWorkerContext = typeof self !== 'undefined' && 
-                                                       typeof (globalThis as any).WorkerGlobalScope !== 'undefined' && 
-                            self instanceof (globalThis as any).WorkerGlobalScope;
+    const hasWorkerGlobal = typeof self !== 'undefined' && typeof (globalThis as any).WorkerGlobalScope !== 'undefined';
+    this.isWorkerContext = hasWorkerGlobal && self instanceof (globalThis as any).WorkerGlobalScope;
+    this.isSharedWorkerContext = typeof (globalThis as any).SharedWorkerGlobalScope !== 'undefined' &&
+      (typeof self !== 'undefined') && (self instanceof (globalThis as any).SharedWorkerGlobalScope);
 
-    if (this.isWorkerContext) {
+    if (this.isWorkerContext && !this.isSharedWorkerContext) {
+      // Dedicated worker
       self.addEventListener('message', this.handleMessage);
       self.addEventListener('error', this.handleError);
+    }
+    
+    if (this.isSharedWorkerContext) {
+      // Shared worker: listen for connections, attach per-port listeners
+      (self as any).addEventListener('connect', (event: MessageEvent) => {
+        const port: MessagePort = (event as any).ports[0];
+        try { port.start(); } catch {}
+        this.ports.add(port);
+        const boundHandler = (ev: MessageEvent) => this.handleMessage(ev, port);
+        port.addEventListener('message', boundHandler as any);
+        // No explicit error API for MessagePort; rely on call timeouts
+      });
     }
   }
 
@@ -46,6 +64,17 @@ export class WorkerMessenger {
     this.worker.addEventListener('error', this.handleError);
   }
 
+  // For SharedWorker clients
+  public setPort(port: MessagePort) {
+    if (this.port) {
+      this.port.removeEventListener('message', this.handleMessage as any);
+    }
+    this.port = port;
+    // MessagePort requires start() before receiving messages in some browsers
+    try { this.port.start(); } catch {}
+    this.port.addEventListener('message', this.handleMessage as any);
+  }
+
   public registerHandlers(handlers: WorkerMessageHandlers) {
     this.handlers = { ...this.handlers, ...handlers };
   }
@@ -54,8 +83,8 @@ export class WorkerMessenger {
     method: string,
     params?: TParams
   ): Promise<TResult> {
-    if (!this.worker) {
-      throw new Error('Worker not initialized. Call setWorker() first.');
+    if (!this.worker && !this.port) {
+      throw new Error('Worker/Port not initialized. Call setWorker() or setPort() first.');
     }
 
     const id = crypto.randomUUID();
@@ -73,16 +102,24 @@ export class WorkerMessenger {
       }, this.options.timeout);
 
       this.pendingRequests.set(id, { resolve, reject, timeout });
-      this.worker!.postMessage(request);
+      if (this.worker) {
+        this.worker.postMessage(request);
+      } else if (this.port) {
+        this.port.postMessage(request);
+      }
     });
   }
 
-  private handleMessage = async (event: MessageEvent) => {
+  private handleMessage = async (event: MessageEvent, sourcePort?: MessagePort) => {
     console.log('[WorkerMessenger] Received message:', event.data);
     const data = event.data;
 
     if (this.isRequest(data)) {
       console.log('[WorkerMessenger] Processing as request');
+      // Track which port this request came from (SharedWorker)
+      if (sourcePort && data && typeof data.id === 'string') {
+        this.requestPortMap.set(data.id, sourcePort);
+      }
       await this.handleRequest(data);
     } else if (this.isResponse(data)) {
       console.log('[WorkerMessenger] Processing as response');
@@ -116,9 +153,10 @@ export class WorkerMessenger {
       this.sendResponse(request.id, result);
     } catch (error) {
       console.error('[WorkerMessenger] Handler error for method:', request.method, error);
+      const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
       this.sendResponse(request.id, null, {
         code: 'HANDLER_ERROR',
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message,
         data: error,
       });
     }
@@ -156,10 +194,21 @@ export class WorkerMessenger {
 
     console.log('[WorkerMessenger] Sending response for request:', id, 'error:', !!error);
 
-    if (this.isWorkerContext) {
-      self.postMessage(response);
+    if (this.isSharedWorkerContext) {
+      const targetPort = this.requestPortMap.get(id);
+      if (targetPort) {
+        targetPort.postMessage(response);
+        this.requestPortMap.delete(id);
+        return;
+      }
+      // Fallback: broadcast to all ports (shouldn't happen if request id mapping exists)
+      this.ports.forEach((p) => p.postMessage(response));
+    } else if (this.isWorkerContext) {
+      (self as any).postMessage(response);
     } else if (this.worker) {
       this.worker.postMessage(response);
+    } else if (this.port) {
+      this.port.postMessage(response);
     }
   }
 

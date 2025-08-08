@@ -20,6 +20,7 @@ export const Dashboard: Component = () => {
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = createSignal('');
     const [showAddIdentityModal, setShowAddIdentityModal] = createSignal(false);
+  const [newIdentityNickname, setNewIdentityNickname] = createSignal('');
     const [showSearch, setShowSearch] = createSignal(false);
     const [showPinUnlock, setShowPinUnlock] = createSignal(false);
     const [pinUnlockError, setPinUnlockError] = createSignal('');
@@ -46,10 +47,33 @@ export const Dashboard: Component = () => {
     const permissionService = PermissionService.getInstance();
 
     // Use the vault data hook
-    const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
+    const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData, switchIdentity } = useVaultData({ autoLoad: true });
+
+    // Active identity is now tracked separately per app via vaultData.activeIdentityByApp.
+    // We no longer prune permissions to enforce exclusivity.
 
     // Listen for vault data refresh events
     onMount(() => {
+        // Broadcast a session refresh so other tabs can restore state
+        try {
+            const current = user();
+            if (current?.profile.username && typeof BroadcastChannel !== 'undefined') {
+                const bc = new BroadcastChannel('nostrpass-vault');
+                bc.postMessage({
+                    type: 'VAULT_BROADCAST',
+                    data: {
+                        broadcastType: 'SESSION_REFRESH',
+                        username: current.profile.username,
+                        timestamp: Date.now()
+                    }
+                });
+                // Close the channel instance promptly to avoid leaks
+                setTimeout(() => bc.close(), 0);
+            }
+        } catch (e) {
+            console.warn('Failed to broadcast SESSION_REFRESH from dashboard:', e);
+        }
+
         const handleVaultDataRefresh = () => {
             setIsRefreshing(true);
             // Show refresh indicator for 2 seconds
@@ -191,7 +215,8 @@ export const Dashboard: Component = () => {
         }
 
         // Use real vault identities - this will now be reactive to vault data changes
-        return vault.identities.map((identity: any, index: number) => {
+            const activeIndex = params.app ? (vault.activeIdentityByApp?.[params.app] ?? null) : null;
+            return vault.identities.map((identity: any, index: number) => {
             // Get npub from public key
             let npub = '';
             try {
@@ -200,7 +225,7 @@ export const Dashboard: Component = () => {
                 npub = identity.publicKey;
             }
 
-            // Check if this identity has permissions for the current app
+            // Check if this identity has permissions for the current app (authorization)
             const hasAppPermissions = params.app && identity.appPermissions?.[params.app];
             const connectedApps = identity.appPermissions ? Object.keys(identity.appPermissions) : [];
             const otherConnectedApps = connectedApps.filter(app => app !== params.app);
@@ -210,7 +235,7 @@ export const Dashboard: Component = () => {
                 publicKey: identity.publicKey,
                 npub: npub,
                 createdAt: identity.createdAt || new Date().toISOString(),
-                isActive: index === (vault.currentIdentityIndex || 0),
+                isActive: activeIndex === index,
                 hasAppPermissions,
                 connectedApps,
                 otherConnectedApps,
@@ -463,6 +488,21 @@ export const Dashboard: Component = () => {
         const currentUser = user();
         if (!currentUser || !params.app || !appPermissions()) return;
 
+        // Preflight: ensure worker has keys; if not, prompt for PIN and abort this attempt
+        try {
+            const crypto = cryptoWorker;
+            if (!crypto) throw new Error('Crypto worker not ready');
+            const status: any = await crypto.hasKeysInSession({ username: currentUser.profile.username });
+            const hasSigningKey = !!(status?.hasPrivateKey || status?.hasXpriv);
+            if (!hasSigningKey) {
+                setPermissionSaveError('Unlock required to continue');
+                setShowPinUnlock(true);
+                return;
+            }
+        } catch (e) {
+            console.warn('Preflight key check failed:', e);
+        }
+
         console.log('🔄 Starting permission change...');
         setIsSavingPermission(true);
         setPermissionSaveError(null);
@@ -527,16 +567,31 @@ export const Dashboard: Component = () => {
 
             // Sync to Nostr in background (don't await)
             console.log('🔄 Starting Nostr sync in background...');
-            syncToNostr().then(() => {
-                console.log('✅ Nostr sync completed successfully');
-                setPermissionSaveError('✅ Settings saved');
-                setTimeout(() => setPermissionSaveError(null), 3000);
-            }).catch((error: any) => {
+            const sync = async () => {
+                try {
+                    const status: any = await cryptoWorker!.hasKeysInSession({ username: currentUser.profile.username });
+                    const hasStorageSigning = !!(status?.hasXpriv || status?.hasStorageKeypair);
+                    if (!hasStorageSigning) {
+                        setPermissionSaveError('Unlock required to sync to Nostr');
+                        setShowPinUnlock(true);
+                        return;
+                    }
+                    await syncToNostr();
+                    console.log('✅ Nostr sync completed successfully');
+                    setPermissionSaveError('✅ Settings saved');
+                    setTimeout(() => setPermissionSaveError(null), 3000);
+                } catch (error: any) {
+                    throw error;
+                }
+            };
+            sync().catch((error: any) => {
                 console.error('❌ Nostr sync failed:', error);
                 if (error.message?.includes('Vault is locked')) {
                     setPermissionSaveError('Please unlock your vault with PIN first');
-                } else if (error.message?.includes('no xpriv')) {
+                    setShowPinUnlock(true);
+                } else if (error.message?.includes('no xpriv') || error.message?.includes('No xpriv access')) {
                     setPermissionSaveError('Session expired - please unlock with PIN');
+                    setShowPinUnlock(true);
                 } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
                     setPermissionSaveError('Nostr sync timed out - settings saved locally but may not be synced to all relays');
                 } else if (error.message?.includes('Failed to publish to any relay')) {
@@ -606,18 +661,71 @@ export const Dashboard: Component = () => {
         setIdentitySelectionCallback(null);
     };
 
-    // Handle identity switching
+    // Handle identity switching (local to this tab/app only)
     const handleIdentitySwitch = async (identityIndex: number) => {
-        const currentUser = user();
-        if (!currentUser) return;
-
         try {
-            // Update the current identity index in the vault
-            await updateVaultData({
-                currentIdentityIndex: identityIndex
-            });
+            await switchIdentity(identityIndex);
         } catch (error) {
             console.error('Failed to switch identity:', error);
+        }
+    };
+
+    // Set active identity for this app (does not change authorization)
+    const handleSetActiveIdentityForApp = async (identityIndex: number) => {
+        if (!params.app) return;
+        const currentVault = vaultData();
+        if (!currentVault) return;
+
+        try {
+            const updatedActive = {
+                ...(currentVault.activeIdentityByApp || {}),
+                [params.app]: identityIndex
+            };
+            await updateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: true });
+        } catch (error) {
+            console.error('Failed to set active identity for app:', error);
+        }
+    };
+
+    // Unset active identity for this app (keeps authorization intact)
+    const handleUnsetActiveIdentityForApp = async () => {
+        if (!params.app) return;
+        const currentVault = vaultData();
+        if (!currentVault) return;
+
+        try {
+            const updatedActive = {
+                ...(currentVault.activeIdentityByApp || {}),
+                [params.app]: null
+            };
+            await updateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: true });
+        } catch (error) {
+            console.error('Failed to unset active identity for app:', error);
+        }
+    };
+
+    // Explicitly authorize an identity for this app by creating default permissions, and set it active
+    const handleAuthorizeIdentityForApp = async (identityIndex: number) => {
+        if (!params.app) return;
+        const currentVault = vaultData();
+        if (!currentVault) return;
+
+        try {
+            const defaultPermissions = createDefaultPermissions(params.app);
+            const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
+                if (idx !== identityIndex) return id;
+                const updated = { ...id };
+                if (!updated.appPermissions) updated.appPermissions = {};
+                updated.appPermissions[params.app] = updated.appPermissions[params.app] || defaultPermissions;
+                return updated;
+            });
+            const updatedActive = {
+                ...(currentVault.activeIdentityByApp || {}),
+                [params.app]: identityIndex
+            };
+            await updateVaultData({ identities: updatedIdentities, activeIdentityByApp: updatedActive }, { syncToNostr: true });
+        } catch (error) {
+            console.error('Failed to authorize identity for app:', error);
         }
     };
 
@@ -775,28 +883,7 @@ export const Dashboard: Component = () => {
                                     </button>
                                 )}
 
-                                {/* Refresh indicator */}
-                                <Show when={isRefreshing()}>
-                                    <div class="flex items-center gap-2 text-blue-600 text-sm">
-                                        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                        </svg>
-                                        <span>Syncing...</span>
-                                    </div>
-                                </Show>
-
-                                {/* Sync Queue Status Indicator */}
-                                <Show when={syncQueueStatus().length > 0 || syncQueueStatus().isProcessing}>
-                                    <div class="flex items-center gap-2 text-blue-600 text-sm">
-                                        <Show when={syncQueueStatus().isProcessing}>
-                                            <div class="w-3 h-3 bg-blue-600 rounded-full animate-pulse"></div>
-                                        </Show>
-                                        <span>
-                                            {syncQueueStatus().isProcessing ? 'Syncing to Nostr...' : 'Queued for sync'}
-                                            {syncQueueStatus().length > 0 && ` (${syncQueueStatus().length})`}
-                                        </span>
-                                    </div>
-                                </Show>
+                                {/* Sync indicators removed from header */}
                             </div>
                             {/* Lock/Unlock vault slider toggle */}
                             <div class="flex items-center gap-2">
@@ -898,7 +985,7 @@ export const Dashboard: Component = () => {
                         <div class="flex flex-col gap-2 p-4">
                             <header class="flex justify-between items-center">
                                 <h4 class="text-gray-500 text-sm font-bold">Identities</h4>
-                                <button class="text-gray-500 text-sm font-bold">
+                                <button class="text-gray-500 text-sm font-bold" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
                                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                                         <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
                                     </svg>
@@ -931,10 +1018,22 @@ export const Dashboard: Component = () => {
                                                     {/* Slide switch */}
                                                     <Show when={!isVaultLocked()}>
                                                         <button
-                                                            onClick={() => handleIdentitySwitch(identity.index)}
+                                                            onClick={() => {
+                                                                if (identity.isActive) {
+                                                                    // Toggle off = just unset active; keep authorization
+                                                                    handleUnsetActiveIdentityForApp();
+                                                                } else if (identity.hasAppPermissions) {
+                                                                    // Toggle on = set as active if authorized
+                                                                    handleSetActiveIdentityForApp(identity.index);
+                                                                } else {
+                                                                    // Not authorized: open settings to authorize first
+                                                                    setSelectedIdentityKey(identity.publicKey);
+                                                                    setShowSettingsPanel(true);
+                                                                }
+                                                            }}
                                                             class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700' : 'bg-gray-300'
                                                                 } hover:opacity-80`}
-                                                            title={identity.isActive ? 'Active identity (local to this tab)' : 'Click to activate (local to this tab)'}
+                                                            title={identity.isActive ? 'Active identity for this app' : (identity.hasAppPermissions ? 'Make active for this app' : 'Authorize before making active')}
                                                         >
                                                             <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
                                                                 }`} />
@@ -956,24 +1055,26 @@ export const Dashboard: Component = () => {
                                             <div>
                                                 <Show when={identity.hasAppPermissions}>
                                                     <span class="text-green-600 text-xs font-medium">
-                                                        Connected to {desanitizeDomain(params.app)}
+                                                        Authorized for {desanitizeDomain(params.app)}
                                                     </span>
                                                 </Show>
                                                 <Show when={!identity.hasAppPermissions && params.app && !isVaultLocked()}>
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            handleConnectIdentity(identity.index);
+                                                            setSelectedIdentityKey(identity.publicKey);
+                                                            setShowSettingsPanel(true);
                                                         }}
                                                         class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                                                        title={`Connect ${identity.nickname} to ${desanitizeDomain(params.app)}`}
+                                                        title={`Authorize ${identity.nickname} for ${desanitizeDomain(params.app)}`}
                                                     >
-                                                        Connect
+                                                        Use this ID with {desanitizeDomain(params.app)}
+
                                                     </button>
                                                 </Show>
                                                 <Show when={!identity.hasAppPermissions && params.app && isVaultLocked()}>
                                                     <span class="text-gray-400 text-xs">
-                                                        Unlock vault to connect
+                                                        Unlock vault to authorize
                                                     </span>
                                                 </Show>
                                             </div>
@@ -1029,7 +1130,7 @@ export const Dashboard: Component = () => {
 
                     </main>
 
-                    <footer class="text-sm py-4 px-4 border-t border-gray-200 flex justify-between items-center">
+                    <footer class="text-sm py-4 px-4 border-t border-gray-200 flex justify-between items-center relative">
                         <div class="flex items-center gap-4">
                             {/* Manual sync buttons - only show in development */}
                             <Show when={import.meta.env.DEV}>
@@ -1056,6 +1157,14 @@ export const Dashboard: Component = () => {
                                 </span>
                             )}
                         </div>
+                        {/* Spinner-only sync indicator at bottom-right */}
+                        <Show when={isRefreshing() || syncQueueStatus().isProcessing}>
+                            <div class="absolute right-4 bottom-3">
+                                <svg class="w-4 h-4 animate-spin text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </div>
+                        </Show>
                     </footer>
                 </div>
             </div>
@@ -1246,6 +1355,76 @@ export const Dashboard: Component = () => {
                 </div>
             </Show>
 
+            {/* Add Identity Modal */}
+            <Show when={showAddIdentityModal()}>
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div class="bg-white rounded-lg shadow-xl border-2 border-gray-300 p-6 text-center relative max-w-md w-full mx-4">
+                        <h2 class="text-xl font-semibold mb-4">Add New Identity</h2>
+                        <div class="mb-4 text-left">
+                            <label class="block text-sm text-gray-600 mb-1">Nickname</label>
+                            <input
+                                type="text"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="e.g., Work, Social, Trading"
+                                value={newIdentityNickname()}
+                                onInput={(e) => setNewIdentityNickname(e.currentTarget.value)}
+                            />
+                        </div>
+                        <div class="flex gap-3">
+                            <button
+                                class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 disabled:bg-gray-400"
+                                disabled={!newIdentityNickname() || isVaultLocked()}
+                                onClick={async () => {
+                                    try {
+                                        const currentUser = user();
+                                        if (!currentUser) return;
+                                        if (isVaultLocked()) {
+                                            setShowPinUnlock(true);
+                                            return;
+                                        }
+                                        // Derive next identity index
+                                        const current = vaultData();
+                                        const nextIndex = (current?.identities?.length ?? 0);
+                                        // Ask worker to derive publicKey for this index using xpriv in session
+                                        if (!cryptoWorker) {
+                                            throw new Error('Crypto worker not ready');
+                                        }
+                                        const derived = await cryptoWorker!.deriveIdentityFromSession({ username: currentUser.profile.username, index: nextIndex });
+                                        // Build identity object
+                                        const identity = {
+                                            nickname: newIdentityNickname().trim(),
+                                            path: derived.path,
+                                            publicKey: derived.publicKey,
+                                            index: nextIndex,
+                                            createdAt: Date.now()
+                                        } as any;
+                                        await updateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: true });
+                                        setShowAddIdentityModal(false);
+                                        setNewIdentityNickname('');
+                                    } catch (e) {
+                                        console.error('Failed to add identity:', e);
+                                    }
+                                }}
+                            >
+                                Add Identity
+                            </button>
+                            <button
+                                class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                                onClick={() => {
+                                    setShowAddIdentityModal(false);
+                                    setNewIdentityNickname('');
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                        <Show when={isVaultLocked()}>
+                            <p class="text-xs text-gray-500 mt-3">Unlock your vault to add a new identity.</p>
+                        </Show>
+                    </div>
+                </div>
+            </Show>
+
             {/* Settings Side Panel */}
             <Show when={showSettingsPanel()}>
                 <div class="fixed inset-0 z-50 overflow-hidden">
@@ -1323,16 +1502,37 @@ export const Dashboard: Component = () => {
 
 
 
-                                        {/* App Permissions Section */}
-                                        <PermissionsSection
-                                            appId={params.app!}
-                                            appPermissions={appPermissions()}
-                                            isVaultLocked={isVaultLocked()}
-                                            isSavingPermission={isSavingPermission()}
-                                            permissionSaveError={permissionSaveError()}
-                                            onPermissionChange={handlePermissionChange}
-                                            onDisconnect={() => handleDisconnectIdentity(identity().index, params.app!)}
-                                        />
+                                        {/* App Permissions Section or Connect Prompt */}
+                                                <Show when={identity().hasAppPermissions} fallback={
+                                            <div class="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                                                <p class="text-sm text-gray-700 mb-2">
+                                                    This identity is not authorized for {desanitizeDomain(params.app!)}.
+                                                </p>
+                                                <Show when={!isVaultLocked()} fallback={
+                                                    <p class="text-xs text-gray-500">Unlock your vault to authorize.</p>
+                                                }>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                                handleAuthorizeIdentityForApp(identity().index);
+                                                        }}
+                                                        class="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                                    >
+                                                        Authorize app to use this identity
+                                                    </button>
+                                                </Show>
+                                            </div>
+                                        }>
+                                            <PermissionsSection
+                                                appId={params.app!}
+                                                appPermissions={appPermissions()}
+                                                isVaultLocked={isVaultLocked()}
+                                                isSavingPermission={isSavingPermission()}
+                                                permissionSaveError={permissionSaveError()}
+                                                onPermissionChange={handlePermissionChange}
+                                                onDisconnect={() => handleDisconnectIdentity(identity().index, params.app!)}
+                                            />
+                                        </Show>
 
                                         {/* Sync Queue Status Indicator */}
                                         <Show when={syncQueueStatus().length > 0 || syncQueueStatus().isProcessing}>

@@ -1,10 +1,13 @@
 import { Component, createSignal, onMount, For, Show } from 'solid-js';
+import { useParams } from '@solidjs/router';
 import { useAuth } from '../providers/AuthProvider';
 import { PermissionService } from '../services/permissionService';
+import { vaultDataService } from '../services/vaultDataService';
 import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
 
 export const PermissionsDashboard: Component = () => {
   const { user } = useAuth();
+  const params = useParams();
   const [permissions, setPermissions] = createSignal<AppPermissions[]>([]);
   const [isLoading, setIsLoading] = createSignal(false);
   const [editingApp, setEditingApp] = createSignal<string | null>(null);
@@ -20,10 +23,17 @@ export const PermissionsDashboard: Component = () => {
 
     setIsLoading(true);
     try {
-      const allPermissions = await permissionService.getAllAppPermissions(
-        currentUser.profile.username
+      const appId = params.app;
+      if (!appId) {
+        setPermissions([]);
+        return;
+      }
+      // Load only this app's permissions for the active identity
+      const appPerm = await permissionService.getAppPermissions(
+        currentUser.profile.username,
+        appId
       );
-      setPermissions(allPermissions);
+      setPermissions(appPerm ? [appPerm] : []);
     } catch (error) {
       console.error('Failed to load permissions:', error);
     } finally {
@@ -83,6 +93,11 @@ export const PermissionsDashboard: Component = () => {
       );
 
       await loadPermissions();
+
+      // Best-effort sync to Nostr in background
+      vaultDataService
+        .syncToNostr(currentUser.profile.username)
+        .catch((err) => console.error('Failed to sync permissions to Nostr:', err));
     } catch (error) {
       console.error('Failed to update permission:', error);
     }
@@ -161,8 +176,9 @@ export const PermissionsDashboard: Component = () => {
           <div class="text-center py-8">
             <div class="text-4xl mb-4">🔒</div>
             <p class="text-gray-600 dark:text-gray-400">
-              No apps have been granted permissions yet
+              This app is not authorized for the current identity.
             </p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">Authorize to set default permissions and make this identity active for this app.</p>
           </div>
         </Show>
 
