@@ -543,10 +543,13 @@
             <div class="form-section">
               <div class="form-section-title">Basic Operations</div>
               <div class="btn-group">
-                <button id="btn-get-pubkey" class="btn btn-success btn-block">
+                <button id="btn-get-pubkey" class="btn btn-success">
                   🔑 Get Public Key
                 </button>
-                <button id="btn-get-relays" class="btn btn-success btn-block">
+                <button id="btn-verify-pubkey" class="btn btn-secondary">
+                  ✅ Verify Pubkey
+                </button>
+                <button id="btn-get-relays" class="btn btn-success">
                   🌐 Get Relays
                 </button>
               </div>
@@ -574,9 +577,14 @@
                   <textarea id="content-input" placeholder="Enter event content..."></textarea>
                 </div>
               </div>
-              <button id="btn-sign-event" class="btn btn-primary btn-block">
-                ✍️ Sign Event
-              </button>
+              <div class="btn-group">
+                <button id="btn-sign-event" class="btn btn-primary">
+                  ✍️ Sign Event
+                </button>
+                <button id="btn-verify-event" class="btn btn-secondary">
+                  ✅ Verify Event
+                </button>
+              </div>
             </div>
           </div>
           
@@ -587,9 +595,14 @@
                 <label for="signdata-input" style="display: block; margin-bottom: 0.5rem;">Message to Sign</label>
                 <textarea id="signdata-input" placeholder="Enter message to sign..."></textarea>
               </div>
-              <button id="btn-sign-data" class="btn btn-primary btn-block">
-                ✍️ Sign Data
-              </button>
+              <div class="btn-group">
+                <button id="btn-sign-data" class="btn btn-primary">
+                  ✍️ Sign Data
+                </button>
+                <button id="btn-verify-signdata" class="btn btn-secondary">
+                  ✅ Verify Signature
+                </button>
+              </div>
             </div>
           </div>
           
@@ -682,6 +695,9 @@
         logEl.scrollTop = logEl.scrollHeight;
       }
 
+      let lastSignedEvent = null;
+      let lastSignedData = { message: null, signature: null, pubkey: null };
+
       function ensureProvider() {
         if (!window.nostr) {
           const vaultUrl = $('vault-url').value.trim();
@@ -732,6 +748,17 @@
         }
       });
 
+      $('btn-verify-pubkey').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const pk = await window.nostr.getPublicKey();
+          if (!/^([0-9a-f]{64})$/i.test(pk)) throw new Error('Invalid hex pubkey');
+          log('success', 'Pubkey format OK (hex 32-byte)', { publicKey: pk });
+        } catch (e) {
+          log('error', 'Pubkey verification failed', { error: String(e) });
+        }
+      });
+
       $('btn-sign-event').addEventListener('click', async () => {
         try {
           ensureProvider();
@@ -748,9 +775,37 @@
             throw new Error('Provider not ready');
           }
           const signed = await window.nostr.signEvent(evt);
+          lastSignedEvent = signed;
           log('response', 'Event signed successfully', signed);
         } catch (e) {
           log('error', 'Event signing failed', { error: String(e) });
+        }
+      });
+
+      $('btn-verify-event').addEventListener('click', async () => {
+        try {
+          if (!lastSignedEvent) throw new Error('No signed event available');
+          const { validateEvent, verifyEvent, getEventHash } = await import('nostr-tools');
+          const evt = lastSignedEvent;
+          const okStructure = validateEvent(evt);
+          const idCalc = getEventHash(evt);
+          const idOk = idCalc === evt.id;
+          const sigOk = await verifyEvent(evt);
+          console.log('[Embassy] Verify Event inputs:', {
+            id: evt.id,
+            idCalc,
+            pubkey: evt.pubkey,
+            sig: evt.sig,
+            okStructure,
+            idOk,
+            sigOk
+          });
+          if (!okStructure || !idOk || !sigOk) {
+            throw new Error(`Invalid event: structure=${okStructure}, id=${idOk}, sig=${sigOk}`);
+          }
+          log('success', 'Event signature verified', { idOk, sigOk });
+        } catch (e) {
+          log('error', 'Event verification failed', { error: String(e) });
         }
       });
 
@@ -773,10 +828,59 @@
           if (!window.nostr || typeof window.nostr.signData !== 'function') {
             throw new Error('signData not available in provider');
           }
+          const pk = await window.nostr.getPublicKey();
           const sig = await window.nostr.signData(msg);
+          lastSignedData = { message: msg, signature: sig, pubkey: pk };
           log('response', 'Data signed successfully', { message: msg, signature: sig });
         } catch (e) {
           log('error', 'Data signing failed', { error: String(e) });
+        }
+      });
+
+      $('btn-verify-signdata').addEventListener('click', async () => {
+        try {
+          const { message, signature, pubkey } = lastSignedData;
+          if (!message || !signature || !pubkey) throw new Error('No signed data available');
+          
+          // Import @noble/curves which is what nostr-tools uses internally
+          const { schnorr } = await import('@noble/curves/secp256k1');
+          
+          // Accept x-only 32-byte or compressed 33-byte SEC1 pubkey  
+          let usePubkey = pubkey.toLowerCase();
+          if (/^([0-9a-f]{66})$/i.test(usePubkey) && (usePubkey.startsWith('02') || usePubkey.startsWith('03'))) {
+            usePubkey = usePubkey.slice(2); // drop prefix → x-only
+          }
+          if (!/^([0-9a-f]{64})$/i.test(usePubkey)) throw new Error('Invalid hex pubkey');
+          if (!/^([0-9a-f]{128})$/i.test(signature)) throw new Error('Invalid signature format');
+          
+          // Hash the message the same way the signing function does
+          const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
+          const hex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+          const msgHashHex = hex(hashBuf);
+          
+          console.log('[Embassy] Verify Data inputs:', {
+            message,
+            msgHashHex: msgHashHex,
+            signature,
+            pubkeyOriginal: pubkey,
+            pubkeyXOnly: usePubkey
+          });
+          
+          // Use schnorr.verify from @noble/curves (same as nostr-tools uses)
+          let ok = false;
+          try {
+            // schnorr.verify expects (signature, messageHash, publicKey) as hex strings
+            ok = schnorr.verify(signature, msgHashHex, usePubkey);
+            console.log('[Embassy] Verification result:', ok);
+          } catch (err) {
+            console.error('[Embassy] Verification error:', err);
+            ok = false;
+          }
+          
+          if (!ok) throw new Error('Invalid signature');
+          log('success', 'Data signature verified', { ok: true });
+        } catch (e) {
+          log('error', 'Data signature verification failed', { error: String(e) });
         }
       });
 
