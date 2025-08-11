@@ -28,14 +28,18 @@ interface NostrEvent {
   sig?: string;
 }
 
+interface NostrOperationOptions {
+  identityIndex?: number;
+}
+
 interface NostrProvider {
-  getPublicKey(): Promise<string>;
-  signEvent(event: NostrEvent): Promise<NostrEvent>;
-  signData?(message: string): Promise<string>;
-  getRelays?(): Promise<Record<string, { read: boolean; write: boolean }>>;
+  getPublicKey(options?: NostrOperationOptions): Promise<string>;
+  signEvent(event: NostrEvent, options?: NostrOperationOptions): Promise<NostrEvent>;
+  signData?(message: string, options?: NostrOperationOptions): Promise<string>;
+  getRelays?(options?: NostrOperationOptions): Promise<Record<string, { read: boolean; write: boolean }>>;
   nip04?: {
-    encrypt(pubkey: string, plaintext: string): Promise<string>;
-    decrypt(pubkey: string, ciphertext: string): Promise<string>;
+    encrypt(pubkey: string, plaintext: string, options?: NostrOperationOptions): Promise<string>;
+    decrypt(pubkey: string, ciphertext: string, options?: NostrOperationOptions): Promise<string>;
   };
 }
 
@@ -481,7 +485,7 @@ class NostrPassEmbassy {
   }
 
   // Core Nostr methods
-  async getPublicKey(): Promise<string> {
+  async getPublicKey(options?: NostrOperationOptions): Promise<string> {
     // Ensure iframe and messenger exist
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -491,7 +495,8 @@ class NostrPassEmbassy {
     try {
       // Preflight: check if a prompt is needed
       const preflight = await this.messenger!.request('CHECK_PERMISSION', {
-        action: 'getPublicKey'
+        action: 'getPublicKey',
+        identityIndex: options?.identityIndex
       });
       const needsPin = preflight?.isLocked === true;
       if (needsPin) {
@@ -502,7 +507,8 @@ class NostrPassEmbassy {
       // Send request to vault using messenger
       const response = await this.messenger!.request('GET_PUBLIC_KEY', {
         appName: this.config.appName,
-        appDomain: this.config.appDomain
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
       });
 
       if (this.config.debug) console.log('Public key received:', response);
@@ -517,7 +523,7 @@ class NostrPassEmbassy {
     }
   }
 
-  async signEvent(event: NostrEvent): Promise<NostrEvent> {
+  async signEvent(event: NostrEvent, options?: NostrOperationOptions): Promise<NostrEvent> {
     // Ensure iframe and messenger exist
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -529,7 +535,8 @@ class NostrPassEmbassy {
       try {
         const pre = await this.messenger!.request('CHECK_PERMISSION', {
           action: 'signEvent',
-          eventKind: event?.kind
+          eventKind: event?.kind,
+          identityIndex: options?.identityIndex
         });
         const needsPin = pre?.isLocked === true || pre?.needsPrompt === true;
         if (needsPin) {
@@ -542,7 +549,8 @@ class NostrPassEmbassy {
       const send = async () => this.messenger!.request('SIGN_EVENT', {
         event,
         appName: this.config.appName,
-        appDomain: this.config.appDomain
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
       });
 
       try {
@@ -573,7 +581,7 @@ class NostrPassEmbassy {
     return {};
   }
 
-  async signData(message: string): Promise<string> {
+  async signData(message: string, options?: NostrOperationOptions): Promise<string> {
     // Ensure iframe and messenger exist
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -584,7 +592,8 @@ class NostrPassEmbassy {
       // Preflight: prompt for PIN first if needed so the op can proceed
       try {
         const pre = await this.messenger!.request('CHECK_PERMISSION', {
-          action: 'signData'
+          action: 'signData',
+          identityIndex: options?.identityIndex
         });
         const needsPin = pre?.isLocked === true;
         if (needsPin) {
@@ -596,7 +605,8 @@ class NostrPassEmbassy {
       const doSign = async () => this.messenger!.request('SIGN_DATA', {
         data: message,
         appName: this.config.appName,
-        appDomain: this.config.appDomain
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
       });
 
       try {
@@ -631,7 +641,7 @@ class NostrPassEmbassy {
     }
   }
 
-  async encrypt(pubkey: string, plaintext: string): Promise<string> {
+  async encrypt(pubkey: string, plaintext: string, options?: NostrOperationOptions): Promise<string> {
     // Ensure iframe and messenger exist
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -642,7 +652,8 @@ class NostrPassEmbassy {
       // Preflight: prompt for PIN first if needed
       try {
         const pre = await this.messenger!.request('CHECK_PERMISSION', {
-          action: 'nip04'
+          action: 'nip04',
+          identityIndex: options?.identityIndex
         });
         const needsPin = pre?.isLocked === true;
         if (needsPin) {
@@ -656,7 +667,8 @@ class NostrPassEmbassy {
         plaintext,
         recipientPubkey: pubkey,
         appName: this.config.appName,
-        appDomain: this.config.appDomain
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
       });
 
       try {
@@ -686,7 +698,7 @@ class NostrPassEmbassy {
     }
   }
 
-  async decrypt(pubkey: string, ciphertext: string): Promise<string> {
+  async decrypt(pubkey: string, ciphertext: string, options?: NostrOperationOptions): Promise<string> {
     // Ensure iframe and messenger exist
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -697,7 +709,8 @@ class NostrPassEmbassy {
       // Preflight: prompt for PIN first if needed
       try {
         const pre = await this.messenger!.request('CHECK_PERMISSION', {
-          action: 'nip04'
+          action: 'nip04',
+          identityIndex: options?.identityIndex
         });
         const needsPin = pre?.isLocked === true;
         if (needsPin) {
@@ -711,7 +724,8 @@ class NostrPassEmbassy {
         ciphertext,
         senderPubkey: pubkey,
         appName: this.config.appName,
-        appDomain: this.config.appDomain
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
       });
 
       try {
@@ -802,13 +816,13 @@ function initNostrPass(config: EmbassyConfig = {}): NostrProvider {
 
   // Create the nostr provider interface
   const nostrProvider: NostrProvider = {
-    getPublicKey: () => embassyInstance!.getPublicKey(),
-    signEvent: (event: NostrEvent) => embassyInstance!.signEvent(event),
-    signData: (message: string) => embassyInstance!.signData(message),
+    getPublicKey: (options?: NostrOperationOptions) => embassyInstance!.getPublicKey(options),
+    signEvent: (event: NostrEvent, options?: NostrOperationOptions) => embassyInstance!.signEvent(event, options),
+    signData: (message: string, options?: NostrOperationOptions) => embassyInstance!.signData(message, options),
     getRelays: () => embassyInstance!.getRelays(),
     nip04: {
-      encrypt: (pubkey: string, plaintext: string) => embassyInstance!.encrypt(pubkey, plaintext),
-      decrypt: (pubkey: string, ciphertext: string) => embassyInstance!.decrypt(pubkey, ciphertext)
+      encrypt: (pubkey: string, plaintext: string, options?: NostrOperationOptions) => embassyInstance!.encrypt(pubkey, plaintext, options),
+      decrypt: (pubkey: string, ciphertext: string, options?: NostrOperationOptions) => embassyInstance!.decrypt(pubkey, ciphertext, options)
     }
   };
 

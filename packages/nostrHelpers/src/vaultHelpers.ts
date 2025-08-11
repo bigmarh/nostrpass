@@ -298,10 +298,6 @@ export async function getVaultFromNostr(
 
     // Try to find a vault we can decrypt
     for (const event of sortedEvents) {
-      const versionTag = event.tags.find(t => t[0] === 'version')?.[1];
-      
-
-
       try {
         // First try to parse as plain JSON (base encryption)
         try {

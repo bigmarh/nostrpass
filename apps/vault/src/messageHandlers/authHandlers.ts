@@ -29,30 +29,26 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Permission denied');
       }
 
-      // Get the identity associated with this app: use activeIdentityByApp
-      const cryptoWorker = deps.getCryptoWorker();
-      if (cryptoWorker && currentUser.profile?.username) {
-        try {
-          const vaultData = await cryptoWorker.getVaultData({ 
-            username: currentUser.profile.username 
-          });
-          
-          if (vaultData?.identities && vaultData.identities.length > 0) {
-            const appKey = originToAppKey(origin);
-            const activeIndex = vaultData.activeIdentityByApp?.[appKey];
-            if (activeIndex === undefined || activeIndex === null) {
-              throw new Error('No active identity selected for this application');
-            }
-            const appIdentity = vaultData.identities[activeIndex];
-            if (!appIdentity?.appPermissions || !appIdentity.appPermissions[appKey]) {
-              throw new Error('Selected identity is not authorized for this application');
-            }
-            if (appIdentity?.publicKey) return appIdentity.publicKey;
-          }
-        } catch (error) {
-        }
+      // Require explicit identityIndex and validate authorization for this origin
+      const requestedIndex = data?.identityIndex;
+      if (requestedIndex === undefined || requestedIndex === null) {
+        throw new Error('Missing identity index');
       }
-
+      const cryptoWorker = deps.getCryptoWorker();
+      if (!cryptoWorker || !currentUser.profile?.username) {
+        throw new Error('Crypto not ready');
+      }
+      const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+      const appKey = originToAppKey(origin);
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (requestedIndex !== authorizedIndex) {
+        throw new Error('Requested identity not authorized for this application');
+      }
+      const appIdentity = vaultData?.identities?.[requestedIndex];
+      if (!appIdentity?.appPermissions || !appIdentity.appPermissions[appKey]) {
+        throw new Error('Selected identity is not authorized for this application');
+      }
+      if (appIdentity?.publicKey) return appIdentity.publicKey;
       throw new Error('No identity available');
     }
   },
@@ -88,8 +84,15 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Vault is locked. Please unlock with PIN.');
       }
 
-      // Get the identity associated with this app
-      const identityIndex = await deps.getAppIdentityIndex(origin);
+      // Require explicit identity and validate authorization
+      const identityIndex = data?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        throw new Error('Missing identity index');
+      }
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (identityIndex !== authorizedIndex) {
+        throw new Error('Requested identity not authorized for this application');
+      }
 
       // Use session-based signing in worker with the correct identity
       const result = await cryptoWorker.signEventWithSession({
@@ -105,7 +108,7 @@ export const authHandlers: MessageHandler[] = [
 
   {
     route: 'SIGN_DATA',
-    handler: async (data: { data: string }, context: any, deps: MessageHandlerDependencies) => {
+    handler: async (data: { data: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
       
@@ -132,8 +135,15 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Vault is locked. Please unlock with PIN.');
       }
 
-      // Get the identity associated with this app
-      const identityIndex = await deps.getAppIdentityIndex(origin);
+      // Require explicit identity and validate authorization
+      const identityIndex = data?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        throw new Error('Missing identity index');
+      }
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (identityIndex !== authorizedIndex) {
+        throw new Error('Requested identity not authorized for this application');
+      }
 
       // Use session-based signing with correct identity
       const signature = await cryptoWorker.signMessageWithSession({
@@ -149,7 +159,7 @@ export const authHandlers: MessageHandler[] = [
 
   {
     route: 'ENCRYPT',
-    handler: async (data: { plaintext: string; recipientPubkey: string }, context: any, deps: MessageHandlerDependencies) => {
+    handler: async (data: { plaintext: string; recipientPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
       
@@ -176,8 +186,15 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Vault is locked. Please unlock with PIN.');
       }
 
-      // Get the identity associated with this app
-      const identityIndex = await deps.getAppIdentityIndex(origin);
+      // Require explicit identity and validate authorization
+      const identityIndex = data?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        throw new Error('Missing identity index');
+      }
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (identityIndex !== authorizedIndex) {
+        throw new Error('Requested identity not authorized for this application');
+      }
 
       // Use app-specific identity for encryption
       const encrypted = await cryptoWorker.encryptWithSession({
@@ -193,7 +210,7 @@ export const authHandlers: MessageHandler[] = [
 
   {
     route: 'DECRYPT',
-    handler: async (data: { ciphertext: string; senderPubkey: string }, context: any, deps: MessageHandlerDependencies) => {
+    handler: async (data: { ciphertext: string; senderPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
       
@@ -214,8 +231,15 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Vault is locked. Please unlock with PIN.');
       }
 
-      // Get the identity associated with this app
-      const identityIndex = await deps.getAppIdentityIndex(origin);
+      // Require explicit identity and validate authorization
+      const identityIndex = data?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        throw new Error('Missing identity index');
+      }
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (identityIndex !== authorizedIndex) {
+        throw new Error('Requested identity not authorized for this application');
+      }
 
       // Use app-specific identity for decryption
       const decrypted = await cryptoWorker.decryptWithSession({

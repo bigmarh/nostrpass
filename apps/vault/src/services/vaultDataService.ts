@@ -358,7 +358,7 @@ export class VaultDataService {
   /**
    * Get app permissions (delegates to worker)
    */
-  async getAppPermissions(username: string, origin: string): Promise<any> {
+  async getAppPermissions(username: string, origin: string, identityIndex?: number): Promise<any> {
     const cryptoWorker = getCryptoWorker();
     if (!cryptoWorker) {
       throw new Error('Crypto worker not ready');
@@ -367,7 +367,7 @@ export class VaultDataService {
     // Clear cache to ensure we get fresh data
     this.clearCache(username);
 
-    return cryptoWorker.getAppPermissions({ username, origin });
+    return cryptoWorker.getAppPermissions({ username, origin, identityIndex });
   }
 
   /**
@@ -377,14 +377,15 @@ export class VaultDataService {
     username: string,
     origin: string,
     permissions: any,
-    appName?: string
+    appName?: string,
+    identityIndex?: number
   ): Promise<void> {
     const cryptoWorker = getCryptoWorker();
     if (!cryptoWorker) {
       throw new Error('Crypto worker not ready');
     }
 
-    await cryptoWorker.saveAppPermissions({ username, origin, permissions, appName });
+    await cryptoWorker.saveAppPermissions({ username, origin, permissions, appName, identityIndex });
     
     // Clear cache to ensure fresh data is loaded next time
     this.clearCache(username);

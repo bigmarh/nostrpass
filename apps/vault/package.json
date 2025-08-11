@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "npm run build:worker && vite",
+    "build": "npm run build:worker && vite build",
+    "build:worker": "vite build --config vite.worker.config.ts",
     "build:wasm": "cd src/workers/wasm-rust && ./build.sh",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",

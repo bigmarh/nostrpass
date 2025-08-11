@@ -21,12 +21,16 @@ export class WorkerMessenger {
   private options: Required<WorkerMessengerOptions>;
   private isWorkerContext: boolean;
   private isSharedWorkerContext: boolean;
+  private debugEnabled: boolean;
 
   constructor(options: WorkerMessengerOptions = {}) {
     this.options = {
       timeout: options.timeout ?? 30000,
       onError: options.onError ?? console.error,
-    };
+      debug: options.debug ?? false,
+    } as Required<WorkerMessengerOptions>;
+
+    this.debugEnabled = !!this.options.debug;
 
     // Check if we're in a worker context
     const hasWorkerGlobal = typeof self !== 'undefined' && typeof (globalThis as any).WorkerGlobalScope !== 'undefined';
@@ -111,21 +115,21 @@ export class WorkerMessenger {
   }
 
   private handleMessage = async (event: MessageEvent, sourcePort?: MessagePort) => {
-    console.log('[WorkerMessenger] Received message:', event.data);
+    if (this.debugEnabled) console.log('[WorkerMessenger] Received message:', event.data);
     const data = event.data;
 
     if (this.isRequest(data)) {
-      console.log('[WorkerMessenger] Processing as request');
+      if (this.debugEnabled) console.log('[WorkerMessenger] Processing as request');
       // Track which port this request came from (SharedWorker)
       if (sourcePort && data && typeof data.id === 'string') {
         this.requestPortMap.set(data.id, sourcePort);
       }
       await this.handleRequest(data);
     } else if (this.isResponse(data)) {
-      console.log('[WorkerMessenger] Processing as response');
+      if (this.debugEnabled) console.log('[WorkerMessenger] Processing as response');
       this.handleResponse(data);
     } else {
-      console.log('[WorkerMessenger] Unknown message type:', typeof data, data);
+      if (this.debugEnabled) console.log('[WorkerMessenger] Unknown message type:', typeof data, data);
     }
   };
 
@@ -134,11 +138,11 @@ export class WorkerMessenger {
   };
 
   private async handleRequest(request: WorkerRequest) {
-    console.log('[WorkerMessenger] Handling request:', request.method, request.id);
+    if (this.debugEnabled) console.log('[WorkerMessenger] Handling request:', request.method, request.id);
     const handler = this.handlers[request.method];
     
     if (!handler) {
-      console.log('[WorkerMessenger] Handler not found for method:', request.method);
+      if (this.debugEnabled) console.log('[WorkerMessenger] Handler not found for method:', request.method);
       this.sendResponse(request.id, null, {
         code: 'METHOD_NOT_FOUND',
         message: `Method "${request.method}" not found`,
@@ -147,9 +151,9 @@ export class WorkerMessenger {
     }
 
     try {
-      console.log('[WorkerMessenger] Calling handler for method:', request.method);
+      if (this.debugEnabled) console.log('[WorkerMessenger] Calling handler for method:', request.method);
       const result = await handler(request.params);
-      console.log('[WorkerMessenger] Handler completed successfully for method:', request.method);
+      if (this.debugEnabled) console.log('[WorkerMessenger] Handler completed successfully for method:', request.method);
       this.sendResponse(request.id, result);
     } catch (error) {
       console.error('[WorkerMessenger] Handler error for method:', request.method, error);
@@ -163,23 +167,23 @@ export class WorkerMessenger {
   }
 
   private handleResponse(response: WorkerResponse) {
-    console.log('[WorkerMessenger] Received response for request:', response.id, 'error:', !!response.error);
+    if (this.debugEnabled) console.log('[WorkerMessenger] Received response for request:', response.id, 'error:', !!response.error);
     const pending = this.pendingRequests.get(response.id);
     
     if (!pending) {
-      console.log('[WorkerMessenger] No pending request found for response:', response.id);
+      if (this.debugEnabled) console.log('[WorkerMessenger] No pending request found for response:', response.id);
       return;
     }
 
-    console.log('[WorkerMessenger] Resolving pending request:', response.id);
+    if (this.debugEnabled) console.log('[WorkerMessenger] Resolving pending request:', response.id);
     clearTimeout(pending.timeout);
     this.pendingRequests.delete(response.id);
 
     if (response.error) {
-      console.log('[WorkerMessenger] Rejecting request with error:', response.error.message);
+      if (this.debugEnabled) console.log('[WorkerMessenger] Rejecting request with error:', response.error.message);
       pending.reject(new Error(response.error.message));
     } else {
-      console.log('[WorkerMessenger] Resolving request with result');
+      if (this.debugEnabled) console.log('[WorkerMessenger] Resolving request with result');
       pending.resolve(response.result);
     }
   }
@@ -192,7 +196,7 @@ export class WorkerMessenger {
       timestamp: Date.now(),
     };
 
-    console.log('[WorkerMessenger] Sending response for request:', id, 'error:', !!error);
+    if (this.debugEnabled) console.log('[WorkerMessenger] Sending response for request:', id, 'error:', !!error);
 
     if (this.isSharedWorkerContext) {
       const targetPort = this.requestPortMap.get(id);

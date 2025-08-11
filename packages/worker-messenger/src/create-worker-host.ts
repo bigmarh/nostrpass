@@ -3,7 +3,7 @@ import type { WorkerMessageHandlers } from './types';
 
 export function createWorkerHost(
   handlers: WorkerMessageHandlers,
-  options?: { timeout?: number; onError?: (error: Error) => void }
+  options?: { timeout?: number; onError?: (error: Error) => void; debug?: boolean }
 ): WorkerMessenger {
   const messenger = new WorkerMessenger(options);
   messenger.registerHandlers(handlers);

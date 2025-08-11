@@ -262,11 +262,12 @@ export class VaultService {
   /**
    * Sign event with current session
    */
-  async signEvent(username: string, event: any) {
+  async signEvent(username: string, event: any, identityIndex: number) {
     try {
       return await this.workerClient.signEventWithSession({
         username,
-        event
+        event,
+        identityIndex
       });
     } catch (error) {
       throw handleVaultError(error);
@@ -276,11 +277,12 @@ export class VaultService {
   /**
    * Sign message with current session
    */
-  async signMessage(username: string, message: string) {
+  async signMessage(username: string, message: string, identityIndex: number) {
     try {
       return await this.workerClient.signMessageWithSession({
         username,
-        message
+        message,
+        identityIndex
       });
     } catch (error) {
       throw handleVaultError(error);
@@ -290,12 +292,13 @@ export class VaultService {
   /**
    * Encrypt with current session
    */
-  async encrypt(username: string, plaintext: string, recipientPubkey: string) {
+  async encrypt(username: string, plaintext: string, recipientPubkey: string, identityIndex: number) {
     try {
       return await this.workerClient.encryptWithSession({
         username,
         plaintext,
-        recipientPubkey
+        recipientPubkey,
+        identityIndex
       });
     } catch (error) {
       throw handleVaultError(error);
@@ -305,12 +308,13 @@ export class VaultService {
   /**
    * Decrypt with current session
    */
-  async decrypt(username: string, ciphertext: string, senderPubkey: string) {
+  async decrypt(username: string, ciphertext: string, senderPubkey: string, identityIndex: number) {
     try {
       return await this.workerClient.decryptWithSession({
         username,
         ciphertext,
-        senderPubkey
+        senderPubkey,
+        identityIndex
       });
     } catch (error) {
       throw handleVaultError(error);

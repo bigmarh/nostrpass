@@ -79,7 +79,7 @@ export const VaultTestConsole: Component = () => {
               if (currentIdentity) {
                 identityInfo = {
                   nickname: currentIdentity.nickname || 'Personal',
-                  index: currentIndex
+              index: 0
                 };
               }
             }
@@ -134,7 +134,8 @@ export const VaultTestConsole: Component = () => {
         // Sign with worker
         const result = await cryptoWorker.signEventWithSession({
           username: currentUser.profile.username,
-          event: testEvent
+          event: testEvent,
+          identityIndex: 0
         });
 
         addLog('response', 'Event signed successfully:', result.event);
@@ -172,7 +173,8 @@ export const VaultTestConsole: Component = () => {
         // Sign with worker
         const result = await cryptoWorker.signMessageWithSession({
           username: currentUser.profile.username,
-          message: testMessage
+          message: testMessage,
+          identityIndex: 0
         });
 
         addLog('response', 'Data signed successfully:', {
@@ -217,7 +219,8 @@ export const VaultTestConsole: Component = () => {
         const ciphertext = await cryptoWorker.encryptWithSession({
           username: currentUser.profile.username,
           plaintext,
-          recipientPubkey
+          recipientPubkey,
+          identityIndex: 0
         });
 
         addLog('response', 'Encrypted successfully:', { 
@@ -232,7 +235,8 @@ export const VaultTestConsole: Component = () => {
         const decrypted = await cryptoWorker.decryptWithSession({
           username: currentUser.profile.username,
           ciphertext,
-          senderPubkey: recipientPubkey
+          senderPubkey: recipientPubkey,
+          identityIndex: 0
         });
         
         addLog('response', 'Decrypted successfully:', { 
@@ -311,7 +315,7 @@ export const VaultTestConsole: Component = () => {
         currentUser.profile.username,
         currentAppOrigin(),
         {
-          kinds: { 30023: 'ALLOW' }
+          permissions: { social: 'ASK_EVERYTIME', messaging: 'ASK_EVERYTIME', signData: 'ALLOW', financial: 'ASK_EVERYTIME' }
         },
         'Test App'
       );

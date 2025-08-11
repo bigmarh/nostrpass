@@ -9,7 +9,7 @@ type ExtractMethods<T> = {
 
 export function createWorkerClient<T extends Record<string, WorkerMethod>>(
   workerOrPort: Worker | MessagePort,
-  options?: { timeout?: number; onError?: (error: Error) => void }
+  options?: { timeout?: number; onError?: (error: Error) => void; debug?: boolean }
 ): ExtractMethods<T> {
   const messenger = new WorkerMessenger(options);
 

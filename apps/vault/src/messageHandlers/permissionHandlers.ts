@@ -10,11 +10,19 @@ export const permissionHandlers: MessageHandler[] = [
       }
 
       const origin = context?.origin || 'unknown';
-      const { action, eventKind } = data;
+      const { action, eventKind, identityIndex } = data;
 
       // This would trigger the permission UI prompt
       // For now, just check the permission
-      const hasPermission = await deps.checkPermission(action, origin, eventKind);
+      // Validate requested identity matches authorized identity for this origin
+      if (identityIndex === undefined || identityIndex === null) {
+        throw new Error('Missing identity index');
+      }
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (identityIndex !== authorizedIndex) {
+        return { granted: false, action, origin };
+      }
+      const hasPermission = await deps.checkPermission(action, origin, eventKind, identityIndex);
       
       return {
         granted: hasPermission,
@@ -33,6 +41,10 @@ export const permissionHandlers: MessageHandler[] = [
       }
 
       const origin = context?.origin || 'unknown';
+      const identityIndex = data?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        throw new Error('Missing identity index');
+      }
       
       // TODO: Return all permissions for this origin
       return {

@@ -29,9 +29,11 @@ export const PermissionsDashboard: Component = () => {
         return;
       }
       // Load only this app's permissions for the active identity
+      const identityIndex = (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
       const appPerm = await permissionService.getAppPermissions(
         currentUser.profile.username,
-        appId
+        appId,
+        identityIndex
       );
       setPermissions(appPerm ? [appPerm] : []);
     } catch (error) {
@@ -85,11 +87,13 @@ export const PermissionsDashboard: Component = () => {
         };
       }
 
+      const identityIndex = (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
       await permissionService.saveAppPermissions(
         currentUser.profile.username,
         appId,
         updates,
-        app.appName
+        app.appName,
+        identityIndex
       );
 
       await loadPermissions();

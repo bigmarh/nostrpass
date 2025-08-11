@@ -348,23 +348,25 @@ export const Dashboard: Component = () => {
         lastUsedAt: Date.now()
     });
 
-    // Load permissions for the current app
+    // Load permissions for the current app and identity
     const loadAppPermissions = async () => {
         const currentUser = user();
         if (!currentUser || !params.app) return;
 
         console.log('🔄 Loading app permissions for:', params.app);
         try {
-            const permissions = await permissionService.getAllAppPermissions(currentUser.profile.username);
-            console.log('📋 Retrieved permissions:', permissions.length, 'total');
-            console.log('📋 All permissions:', JSON.stringify(permissions, null, 2));
-            const appPerm = permissions.find(p => p.appId === params.app);
-            console.log('🎯 Found app permissions:', !!appPerm);
+            const idx = vaultData()?.activeIdentityByApp?.[params.app] ?? 0;
+            const appPerm = await permissionService.getAppPermissions(
+                currentUser.profile.username,
+                params.app,
+                idx
+            );
             if (appPerm) {
                 console.log('🎯 App permissions details:', JSON.stringify(appPerm, null, 2));
+                setAppPermissions(appPerm);
+            } else {
+                setAppPermissions(createDefaultPermissions(params.app));
             }
-
-            setAppPermissions(appPerm || createDefaultPermissions(params.app));
         } catch (error) {
             console.error('❌ Error loading app permissions:', error);
             setAppPermissions(createDefaultPermissions(params.app));
@@ -540,11 +542,13 @@ export const Dashboard: Component = () => {
             console.log('🔧 Permission updates:', JSON.stringify(updates, null, 2));
 
             try {
+                const identityIndex = vaultData()?.activeIdentityByApp?.[params.app] ?? undefined;
                 await permissionService.saveAppPermissions(
                     currentUser.profile.username,
                     params.app,
                     updates,
-                    appPermissions()!.appName || params.app
+                    appPermissions()!.appName || params.app,
+                    identityIndex
                 );
                 console.log('✅ App permissions saved locally');
 

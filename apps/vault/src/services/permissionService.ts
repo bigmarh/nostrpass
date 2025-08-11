@@ -27,8 +27,8 @@ export class PermissionService {
 
 
 
-  async getAppPermissions(username: string, origin: string): Promise<AppPermissions | null> {
-    return vaultDataService.getAppPermissions(username, origin);
+  async getAppPermissions(username: string, origin: string, identityIndex?: number): Promise<AppPermissions | null> {
+    return vaultDataService.getAppPermissions(username, origin, identityIndex);
   }
 
   async checkPermission(
@@ -50,9 +50,10 @@ export class PermissionService {
     username: string,
     origin: string,
     permissions: Partial<AppPermissions>,
-    appName?: string
+    appName?: string,
+    identityIndex?: number
   ): Promise<void> {
-    await vaultDataService.saveAppPermissions(username, origin, permissions, appName);
+    await vaultDataService.saveAppPermissions(username, origin, permissions, appName, identityIndex);
   }
 
   async grantSessionPermission(
