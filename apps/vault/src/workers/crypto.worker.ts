@@ -11,31 +11,22 @@ const isSharedWorker = typeof (globalThis as any).SharedWorkerGlobalScope !== 'u
                        self instanceof (globalThis as any).SharedWorkerGlobalScope;
 
 if (isSharedWorker) {
-  // SharedWorker context - handle multiple port connections
-  const ports: Map<MessagePort, any> = new Map();
+  // Initialize a single host to register handlers and let it manage per-port wiring
+  createWorkerHost(handlers as any);
   
+  // Track connections for diagnostics and send readiness signals
+  const ports: Set<MessagePort> = new Set();
   console.log('[SharedWorker] Initializing in SharedWorker mode');
   
   self.addEventListener('connect', (event: any) => {
-    const port = event.ports[0];
-    console.log('[SharedWorker] New connection established');
-    
-    // Create a worker host for this specific port
-    const host = createWorkerHost(handlers as any, port);
-    ports.set(port, host);
-    
-    // Start the port (required for SharedWorker)
-    port.start();
-    
-    // Send ready message
+    const port: MessagePort = event.ports[0];
+    ports.add(port);
+    try { port.start(); } catch {}
     port.postMessage({ type: 'WORKER_READY' });
-    
-    // Handle port disconnection
     port.addEventListener('close', () => {
       ports.delete(port);
       console.log('[SharedWorker] Port closed, remaining connections:', ports.size);
     });
-    
     console.log('[SharedWorker] Active connections:', ports.size);
   });
 } else {
@@ -62,7 +53,6 @@ let wasmInitPromise = ensureWasmReady()
 
 // Ensure WASM is ready before processing any messages
 if (isSharedWorker) {
-  const originalHandlers = { ...handlers };
   // Wrap all handlers to ensure WASM is ready first
   for (const key in handlers) {
     const originalHandler = (handlers as any)[key];

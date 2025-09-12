@@ -1,5 +1,7 @@
 import { MessageHandler, MessageHandlerDependencies } from './index';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { Msg } from '@nostrpass/types';
+import { vaultError, ErrorCode } from './errors';
 
 function originToAppKey(origin: string): string {
   try {
@@ -13,62 +15,70 @@ function originToAppKey(origin: string): string {
 
 export const authHandlers: MessageHandler[] = [
   {
-    route: 'GET_PUBLIC_KEY',
+    route: Msg.GET_PUBLIC_KEY,
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       if (!currentUser) {
-        throw new Error('User not authenticated');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated');
       }
-
 
       // Get origin from context
       const origin = context?.origin || 'unknown';
       
       const hasPermission = await deps.checkPermission('getPublicKey', origin);
       if (!hasPermission) {
-        throw new Error('Permission denied');
+        try {
+          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
+            detail: {
+              appOrigin: origin,
+              appName: data?.appName,
+              action: 'getPublicKey',
+              identityIndex: data?.identityIndex
+            }
+          }));
+        } catch {}
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
       }
 
       // Require explicit identityIndex and validate authorization for this origin
       const requestedIndex = data?.identityIndex;
       if (requestedIndex === undefined || requestedIndex === null) {
-        throw new Error('Missing identity index');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
       const cryptoWorker = deps.getCryptoWorker();
       if (!cryptoWorker || !currentUser.profile?.username) {
-        throw new Error('Crypto not ready');
+        throw vaultError(ErrorCode.INTERNAL, 'Crypto not ready');
       }
       const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
       const appKey = originToAppKey(origin);
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (requestedIndex !== authorizedIndex) {
-        throw new Error('Requested identity not authorized for this application');
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
       }
       const appIdentity = vaultData?.identities?.[requestedIndex];
       if (!appIdentity?.appPermissions || !appIdentity.appPermissions[appKey]) {
-        throw new Error('Selected identity is not authorized for this application');
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Selected identity is not authorized for this application');
       }
       if (appIdentity?.publicKey) return appIdentity.publicKey;
-      throw new Error('No identity available');
+      throw vaultError(ErrorCode.INTERNAL, 'No identity available');
     }
   },
 
   {
-    route: 'SIGN_EVENT',
+    route: Msg.SIGN_EVENT,
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
       
       if (!currentUser || !cryptoWorker) {
-        throw new Error('User not authenticated or crypto not ready');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
       }
 
       // Preflight: ensure keys in session; if not, instruct UI to prompt PIN
       const keyStatus = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
       if (!keyStatus?.hasPrivateKey && !keyStatus?.hasXpriv) {
-        throw new Error('Session rehydrated without keys; unlock with PIN');
+        throw vaultError(ErrorCode.LOCKED, 'Session rehydrated without keys; unlock with PIN');
       }
-
 
       // Get origin from context
       const origin = context?.origin || 'unknown';
@@ -76,22 +86,33 @@ export const authHandlers: MessageHandler[] = [
       const eventKind = data.event?.kind;
       const hasPermission = await deps.checkPermission('signEvent', origin, eventKind);
       if (!hasPermission) {
-        throw new Error('Permission denied');
+        try {
+          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
+            detail: {
+              appOrigin: origin,
+              appName: data?.appName,
+              action: 'signEvent',
+              eventKind,
+              identityIndex: data?.identityIndex
+            }
+          }));
+        } catch {}
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
       }
 
       // Check if vault is locked
       if (deps.isVaultLocked()) {
-        throw new Error('Vault is locked. Please unlock with PIN.');
+        throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
       // Require explicit identity and validate authorization
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
-        throw new Error('Missing identity index');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
-        throw new Error('Requested identity not authorized for this application');
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
       }
 
       // Use session-based signing in worker with the correct identity
@@ -107,19 +128,19 @@ export const authHandlers: MessageHandler[] = [
   },
 
   {
-    route: 'SIGN_DATA',
+    route: Msg.SIGN_DATA,
     handler: async (data: { data: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
       
       if (!currentUser || !cryptoWorker) {
-        throw new Error('User not authenticated or crypto not ready');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
       }
 
       // Preflight: ensure keys in session; if not, instruct UI to prompt PIN
       const keyStatus2 = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
       if (!keyStatus2?.hasPrivateKey && !keyStatus2?.hasXpriv) {
-        throw new Error('Session rehydrated without keys; unlock with PIN');
+        throw vaultError(ErrorCode.LOCKED, 'Session rehydrated without keys; unlock with PIN');
       }
 
       // Get origin from context
@@ -127,22 +148,32 @@ export const authHandlers: MessageHandler[] = [
       
       const hasPermission2 = await deps.checkPermission('signData', origin);
       if (!hasPermission2) {
-        throw new Error('Permission denied');
+        try {
+          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
+            detail: {
+              appOrigin: origin,
+              appName: (data as any)?.appName,
+              action: 'signData',
+              identityIndex: (data as any)?.identityIndex
+            }
+          }));
+        } catch {}
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
       }
 
       // Check if vault is locked
       if (deps.isVaultLocked()) {
-        throw new Error('Vault is locked. Please unlock with PIN.');
+        throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
       // Require explicit identity and validate authorization
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
-        throw new Error('Missing identity index');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
-        throw new Error('Requested identity not authorized for this application');
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
       }
 
       // Use session-based signing with correct identity
@@ -158,19 +189,19 @@ export const authHandlers: MessageHandler[] = [
   },
 
   {
-    route: 'ENCRYPT',
+    route: Msg.ENCRYPT,
     handler: async (data: { plaintext: string; recipientPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
       
       if (!currentUser || !cryptoWorker) {
-        throw new Error('User not authenticated or crypto not ready');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
       }
 
       // Preflight: ensure keys in session; if not, instruct UI to prompt PIN
       const keyStatus3 = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
       if (!keyStatus3?.hasPrivateKey && !keyStatus3?.hasXpriv) {
-        throw new Error('Session rehydrated without keys; unlock with PIN');
+        throw vaultError(ErrorCode.LOCKED, 'Session rehydrated without keys; unlock with PIN');
       }
 
       // Get origin from context
@@ -178,22 +209,32 @@ export const authHandlers: MessageHandler[] = [
       
       const hasPermission3 = await deps.checkPermission('nip04', origin);
       if (!hasPermission3) {
-        throw new Error('Permission denied');
+        try {
+          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
+            detail: {
+              appOrigin: origin,
+              appName: (data as any)?.appName,
+              action: 'nip04',
+              identityIndex: (data as any)?.identityIndex
+            }
+          }));
+        } catch {}
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
       }
 
       // Check if vault is locked
       if (deps.isVaultLocked()) {
-        throw new Error('Vault is locked. Please unlock with PIN.');
+        throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
       // Require explicit identity and validate authorization
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
-        throw new Error('Missing identity index');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
-        throw new Error('Requested identity not authorized for this application');
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
       }
 
       // Use app-specific identity for encryption
@@ -209,13 +250,13 @@ export const authHandlers: MessageHandler[] = [
   },
 
   {
-    route: 'DECRYPT',
+    route: Msg.DECRYPT,
     handler: async (data: { ciphertext: string; senderPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
       
       if (!currentUser || !cryptoWorker) {
-        throw new Error('User not authenticated or crypto not ready');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
       }
 
       // Get origin from context
@@ -223,22 +264,32 @@ export const authHandlers: MessageHandler[] = [
       
       const hasPermission4 = await deps.checkPermission('nip04', origin);
       if (!hasPermission4) {
-        throw new Error('Permission denied');
+        try {
+          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
+            detail: {
+              appOrigin: origin,
+              appName: (data as any)?.appName,
+              action: 'nip04',
+              identityIndex: (data as any)?.identityIndex
+            }
+          }));
+        } catch {}
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
       }
 
       // Check if vault is locked
       if (deps.isVaultLocked()) {
-        throw new Error('Vault is locked. Please unlock with PIN.');
+        throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
       // Require explicit identity and validate authorization
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
-        throw new Error('Missing identity index');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
-        throw new Error('Requested identity not authorized for this application');
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
       }
 
       // Use app-specific identity for decryption

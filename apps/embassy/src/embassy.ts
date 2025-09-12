@@ -8,6 +8,7 @@
 import { ParentMessenger } from '@nostrpass/messenger';
 import { embassyMessageHandlers } from './embassyMessageHandlers';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { Msg } from '../../../packages/types/src/messages';
 
 interface EmbassyConfig {
   appName?: string;
@@ -16,6 +17,7 @@ interface EmbassyConfig {
   vaultUrl?: string;
   theme?: 'light' | 'dark' | 'auto';
   debug?: boolean;
+  parentPinOverlay?: boolean; // if true, show parent PIN UI (default false)
 }
 
 interface NostrEvent {
@@ -48,6 +50,7 @@ class NostrPassEmbassy {
   private iframe: HTMLIFrameElement | null = null;
   private _isReady = false;
   private styleElement: HTMLStyleElement | null = null;
+  private backdropEl: HTMLDivElement | null = null;
   private messenger: ParentMessenger | null = null;
   private handlers: string[] = [];
   private isPromptOpen = false;
@@ -80,7 +83,6 @@ class NostrPassEmbassy {
         // Card container
         const card = document.createElement('div');
         Object.assign(card.style, {
-          background: '#fff',
           padding: '16px',
           borderRadius: '8px',
           width: '320px',
@@ -107,7 +109,6 @@ class NostrPassEmbassy {
             d.style.height = '12px';
             d.style.borderRadius = '9999px';
             d.style.border = '2px solid ' + (i < len ? '#111' : '#d1d5db');
-            d.style.background = i < len ? '#111' : '#e5e7eb';
             dots.appendChild(d);
           }
         };
@@ -130,7 +131,6 @@ class NostrPassEmbassy {
             height: '56px',
             border: '1px solid #d1d5db',
             borderRadius: '8px',
-            background: '#fff',
             fontWeight: '600',
             cursor: 'pointer'
           } as CSSStyleDeclaration);
@@ -236,7 +236,8 @@ class NostrPassEmbassy {
       permissions: config.permissions || ['getPublicKey', 'signEvent'],
       vaultUrl: config.vaultUrl || 'http://localhost:3001',
       theme: config.theme || 'auto',
-      debug: config.debug || false
+      debug: config.debug || false,
+      parentPinOverlay: config.parentPinOverlay ?? false
     };
 
     this.handlers = Object.keys(embassyMessageHandlers(this));
@@ -315,7 +316,15 @@ class NostrPassEmbassy {
         reject(new Error('Failed to load vault iframe'));
       };
 
-      // Add to DOM
+      // Create and insert backdrop before iframe for proper stacking
+      if (!this.backdropEl) {
+        this.backdropEl = document.createElement('div');
+        this.backdropEl.className = 'nostrpass-backdrop';
+        this.backdropEl.addEventListener('click', () => this.hide());
+      }
+
+      // Add to DOM: backdrop first, then iframe on top
+      document.body.appendChild(this.backdropEl);
       document.body.appendChild(this.iframe);
 
       if (this.config.debug) console.log('Iframe created and added to DOM');
@@ -332,6 +341,11 @@ class NostrPassEmbassy {
     // Remove hidden class to show iframe
     this.iframe.classList.remove('nostrpass-iframe-hidden');
     this.iframe.classList.add('nostrpass-iframe-visible');
+
+    // Show backdrop
+    if (this.backdropEl) {
+      this.backdropEl.style.display = 'block';
+    }
 
     // Accessibility
     this.iframe.setAttribute('aria-hidden', 'false');
@@ -355,6 +369,11 @@ class NostrPassEmbassy {
     // Add hidden class to move off-screen
     this.iframe.classList.remove('nostrpass-iframe-visible');
     this.iframe.classList.add('nostrpass-iframe-hidden');
+
+    // Hide backdrop
+    if (this.backdropEl) {
+      this.backdropEl.style.display = 'none';
+    }
 
     // Accessibility
     this.iframe.setAttribute('aria-hidden', 'true');
@@ -401,9 +420,21 @@ class NostrPassEmbassy {
         visibility: visible !important;
         pointer-events: auto !important;
         border: none !important;
+        background: #00000045 !important;
         z-index: 2147483647 !important; /* Maximum z-index */
-        background: #3333334d !important;
         color-scheme: light dark; /* Support both themes */
+      }
+
+      /* Dimmed backdrop behind iframe */
+      .nostrpass-backdrop {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        background: rgba(51, 51, 51, 0.3) !important;
+        z-index: 2147483646 !important; /* Just beneath iframe */
+        pointer-events: auto !important;
       }
       
       /* Debug mode - visible but smaller */
@@ -418,7 +449,6 @@ class NostrPassEmbassy {
         pointer-events: auto !important;
         border: 2px solid red !important;
         z-index: 999999 !important;
-        background: white !important;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
       }
     `;
@@ -494,18 +524,26 @@ class NostrPassEmbassy {
 
     try {
       // Preflight: check if a prompt is needed
-      const preflight = await this.messenger!.request('CHECK_PERMISSION', {
+      const preflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
         action: 'getPublicKey',
         identityIndex: options?.identityIndex
       });
       const needsPin = preflight?.isLocked === true;
-      if (needsPin) {
+      const needsPrompt = preflight?.needsPrompt === true;
+      if (needsPin && this.config.parentPinOverlay) {
         const ok = await this.requestPinUnlock();
         if (!ok) throw new Error('User canceled PIN prompt');
+      } else if (needsPin && !this.config.parentPinOverlay) {
+        // Reveal the vault UI so the user can unlock inside the iframe
+        this.show('vault');
+      }
+      if (needsPrompt && !this.config.parentPinOverlay) {
+        // Show vault so the user can approve permissions inside the iframe
+        this.show('vault');
       }
 
       // Send request to vault using messenger
-      const response = await this.messenger!.request('GET_PUBLIC_KEY', {
+      const response = await this.messenger!.request(Msg.GET_PUBLIC_KEY, {
         appName: this.config.appName,
         appDomain: this.config.appDomain,
         identityIndex: options?.identityIndex
@@ -533,20 +571,23 @@ class NostrPassEmbassy {
     try {
       // Preflight: prompt for PIN first if needed, so the op can proceed without error
       try {
-        const pre = await this.messenger!.request('CHECK_PERMISSION', {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signEvent',
           eventKind: event?.kind,
           identityIndex: options?.identityIndex
         });
-        const needsPin = pre?.isLocked === true || pre?.needsPrompt === true;
-        if (needsPin) {
+        const needsPin = pre?.isLocked === true;
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
         }
       } catch {}
 
       // Send request to vault using messenger
-      const send = async () => this.messenger!.request('SIGN_EVENT', {
+      const send = async () => this.messenger!.request(Msg.SIGN_EVENT, {
         event,
         appName: this.config.appName,
         appDomain: this.config.appDomain,
@@ -591,18 +632,21 @@ class NostrPassEmbassy {
     try {
       // Preflight: prompt for PIN first if needed so the op can proceed
       try {
-        const pre = await this.messenger!.request('CHECK_PERMISSION', {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signData',
           identityIndex: options?.identityIndex
         });
         const needsPin = pre?.isLocked === true;
-        if (needsPin) {
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
         }
       } catch {}
 
-      const doSign = async () => this.messenger!.request('SIGN_DATA', {
+      const doSign = async () => this.messenger!.request(Msg.SIGN_DATA, {
         data: message,
         appName: this.config.appName,
         appDomain: this.config.appDomain,
@@ -651,19 +695,22 @@ class NostrPassEmbassy {
     try {
       // Preflight: prompt for PIN first if needed
       try {
-        const pre = await this.messenger!.request('CHECK_PERMISSION', {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
           identityIndex: options?.identityIndex
         });
         const needsPin = pre?.isLocked === true;
-        if (needsPin) {
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
         }
       } catch {}
 
       // Send request to vault using messenger
-      const doEncrypt = async () => this.messenger!.request('ENCRYPT', {
+      const doEncrypt = async () => this.messenger!.request(Msg.ENCRYPT, {
         plaintext,
         recipientPubkey: pubkey,
         appName: this.config.appName,
@@ -708,19 +755,22 @@ class NostrPassEmbassy {
     try {
       // Preflight: prompt for PIN first if needed
       try {
-        const pre = await this.messenger!.request('CHECK_PERMISSION', {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
           identityIndex: options?.identityIndex
         });
         const needsPin = pre?.isLocked === true;
-        if (needsPin) {
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
         }
       } catch {}
 
       // Send request to vault using messenger
-      const doDecrypt = async () => this.messenger!.request('DECRYPT', {
+      const doDecrypt = async () => this.messenger!.request(Msg.DECRYPT, {
         ciphertext,
         senderPubkey: pubkey,
         appName: this.config.appName,
@@ -788,6 +838,12 @@ class NostrPassEmbassy {
     if (this.iframe && this.iframe.parentNode) {
       this.iframe.parentNode.removeChild(this.iframe);
       this.iframe = null;
+    }
+
+    // Remove backdrop
+    if (this.backdropEl && this.backdropEl.parentNode) {
+      this.backdropEl.parentNode.removeChild(this.backdropEl);
+      this.backdropEl = null;
     }
 
     // Remove styles

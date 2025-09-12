@@ -865,7 +865,7 @@ export const Dashboard: Component = () => {
 
 
     return (
-        <div class="min-h-screen bg-gray-100 p-4">
+        <div class="min-h-screen p-4">
             <div class=" flex flex-col max-w-2xl mx-auto gap-4">
                 <div class="bg-white text-black border border-gray-700 rounded-lg">
                     <header>

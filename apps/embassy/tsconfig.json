@@ -18,7 +18,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@nostrpass/types": ["../../packages/types/src/index.ts"],
+      "@nostrpass/types/*": ["../../packages/types/src/*"]
     }
   },
   "include": ["src"],

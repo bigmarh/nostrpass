@@ -1,12 +1,14 @@
 import { MessageHandler, MessageHandlerDependencies } from './index';
+import { Msg } from '@nostrpass/types';
+import { vaultError, ErrorCode } from './errors';
 
 export const permissionHandlers: MessageHandler[] = [
   {
-    route: 'REQUEST_PERMISSION',
+    route: Msg.CHECK_PERMISSION,
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       if (!currentUser) {
-        throw new Error('User not authenticated');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated');
       }
 
       const origin = context?.origin || 'unknown';
@@ -16,16 +18,17 @@ export const permissionHandlers: MessageHandler[] = [
       // For now, just check the permission
       // Validate requested identity matches authorized identity for this origin
       if (identityIndex === undefined || identityIndex === null) {
-        throw new Error('Missing identity index');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
         return { granted: false, action, origin };
       }
       const hasPermission = await deps.checkPermission(action, origin, eventKind, identityIndex);
-      
+      const needsPrompt = !hasPermission;
       return {
         granted: hasPermission,
+        needsPrompt,
         action,
         origin
       };

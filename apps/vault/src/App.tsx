@@ -3,6 +3,7 @@ import { AppProviders } from './providers';
 import './index.css';
 import { Router, Route } from '@solidjs/router';
 import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock } from './components';
+import PermissionPromptController from './components/PermissionPromptController';
 
 const AppContent: Component = () => {
   return (
@@ -19,6 +20,7 @@ const App: Component = () => {
   return (
     <AppProviders>
       <AppContent />
+      <PermissionPromptController />
     </AppProviders>
   );
 };

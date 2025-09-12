@@ -2,6 +2,7 @@ import { createContext, useContext, ParentComponent, createSignal, onMount, onCl
 import { IframeMessenger } from '@nostrpass/messenger';
 import { setupMessageHandlers } from '../messageHandlers';
 import { useEnvironment } from './EnvironmentProvider';
+import { useAuth } from './AuthProvider';
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
@@ -20,6 +21,7 @@ export const MessengerProvider: ParentComponent = (props) => {
   const [messenger, setMessenger] = createSignal<IframeMessenger | null>(null);
   const [handlersRegistered, setHandlersRegistered] = createSignal(false);
   const { isDevelopment, isStaging, isProduction } = useEnvironment();
+  const auth = useAuth();
 
   onMount(() => {
     // Initialize messenger
@@ -77,16 +79,6 @@ export const MessengerProvider: ParentComponent = (props) => {
       }
     });
 
-    // Set up all message handlers - commented out for now due to missing dependencies
-    // setupMessageHandlers(messengerInstance);
-
-    // Don't send ready signal here - wait for AuthProvider to set up handlers
-    if (window.parent !== window) {
-      console.log('📍 In iframe mode - will send VAULT_READY after auth handlers are set up');
-    } else {
-      console.log('📍 Running standalone (not in iframe), skipping VAULT_READY signal');
-    }
-
     setMessenger(messengerInstance);
   });
 
@@ -96,6 +88,56 @@ export const MessengerProvider: ParentComponent = (props) => {
       m.destroy();
       setMessenger(null);
     }
+  });
+
+  // Once auth and messenger are available, register message handlers with deps
+  onMount(() => {
+    const m = messenger();
+    if (!m) return;
+
+    const deps = {
+      getUser: () => auth.user(),
+      getCryptoWorker: () => (auth as any).cryptoWorker || null,
+      checkPermission: async (action: string, origin: string, eventKind?: number) => {
+        try {
+          const cw = (auth as any).cryptoWorker;
+          const current = auth.user();
+          if (!cw || !current) return false;
+          const appKey = origin; // already sanitized by middleware
+          const result = await cw.checkPermission({
+            username: current.profile.username,
+            origin: appKey,
+            action,
+            eventKind
+          });
+          return !!result?.granted || result?.level === 'ALLOW' || result?.sessionGranted === true;
+        } catch {
+          return false;
+        }
+      },
+      isVaultLocked: () => auth.isVaultLocked(),
+      getAppIdentityIndex: async (origin: string) => {
+        const cw = (auth as any).cryptoWorker;
+        const current = auth.user();
+        if (!cw || !current) throw new Error('Crypto not ready');
+        const vaultData = await cw.getVaultData({ username: current.profile.username });
+        const appKey = origin; // middleware provides sanitized key
+        let activeIndex = vaultData.activeIdentityByApp?.[appKey];
+        if (activeIndex === undefined || activeIndex === null) {
+          activeIndex = vaultData.identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
+        }
+        if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {
+          throw new Error('No active identity selected for this application');
+        }
+        return activeIndex;
+      }
+    };
+
+    setupMessageHandlers(m, deps);
+    setHandlersRegistered(true);
+
+    // Inform parent handlers are ready
+    if (window.parent !== window) sendVaultReady();
   });
 
   const send = (type: string, data?: any) => {

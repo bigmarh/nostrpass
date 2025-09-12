@@ -195,17 +195,14 @@ export const handlers = {
   // Initialize a locked session by saving vault data and seeding minimal session state
   initSession: async (params: { username: string; publicKey: string; vaultData: any }): Promise<{ success: boolean }> => {
     await ensureWasmReady();
-    // Normalize vault data to carry both fields for redundancy
+    // Normalize vault data
     const vaultToSave = { ...params.vaultData };
-    if (vaultToSave.xprivEncrypted && !vaultToSave.encryptedVault) {
-      vaultToSave.encryptedVault = vaultToSave.xprivEncrypted;
-    }
     // Save/refresh vault data
     await vaultDB.saveVault(vaultToSave);
     // Persist xprivs store too if present
     try {
-      const enc = vaultToSave.xprivEncrypted || vaultToSave.encryptedVault;
-      const pinSalt = vaultToSave.pinSalt || vaultToSave.salt;
+      const enc = vaultToSave.xprivEncrypted;
+      const pinSalt = vaultToSave.salt;
       if (enc && pinSalt) {
         await vaultDB.saveXpriv(params.username, enc, pinSalt, vaultToSave.passwordSalt);
       }
@@ -343,6 +340,13 @@ export const handlers = {
     const hasXpriv = !!(session && (session as any).xpriv);
     const hasStorageKeypair = !!(session && (session as any).storagePrivateKey && (session as any).storagePublicKey);
     return { hasPrivateKey, hasXpriv, hasStorageKeypair };
+  },
+
+  // Generate a new master extended private key (xpriv)
+  generateXpriv: async (): Promise<{ xpriv: string }> => {
+    const crypto = await ensureWasmReady();
+    const xpriv = crypto.generateXpriv();
+    return { xpriv };
   },
 
   generateKeypair: async (_params: GenerateKeypairParams): Promise<GenerateKeypairResult> => {
@@ -495,16 +499,16 @@ export const handlers = {
       vault = vaultResult;
     }
     
-    // Store encrypted vault data
+    // Store encrypted vault data (xprivEncrypted only)
     await vaultDB.saveVault({
       username: vault.username,
       publicKey: vault.publicKey,
-      encryptedVault: vault.encryptedVault,
+      encryptedVault: vault.xprivEncrypted || vault.encryptedVault,
       salt: vault.salt,
       derivationPath: vault.derivationPath,
       createdAt: Date.now(),
       lastUnlocked: Date.now(),
-      sessionExpiry: Date.now() + (24 * 60 * 60 * 1000) // 24 hours from now
+      sessionExpiry: Date.now() + (24 * 60 * 60 * 1000)
     });
     
     // Create active session
@@ -543,10 +547,8 @@ export const handlers = {
     
     console.log('[Unlock] Starting unlock', { username: params.username });
     console.log('[Unlock] Vault fields presence:', {
-      hasEncryptedVault: !!(vaultData as any).encryptedVault,
-      hasSalt: !!(vaultData as any).salt,
-      hasRecoveryQ: !!(vaultData as any).recoveryQuestions,
-      hasRecoveryA: !!(vaultData as any).recoveryAnswers
+      hasXprivEncrypted: !!(vaultData as any).encryptedVault,
+      hasSalt: !!(vaultData as any).salt
     });
 
     // Decrypt the vault
@@ -851,41 +853,31 @@ export const handlers = {
     return {
       username: vaultData.username,
       publicKey: vaultData.publicKey,
-      // Provide both for redundancy
       xprivEncrypted: vaultData.encryptedVault,
-      encryptedVault: vaultData.encryptedVault,
       salt: vaultData.salt,
       identities: vaultData.identities || [],
       storagePublicKey: vaultData.publicKey,
       activeIdentityByApp: vaultData.activeIdentityByApp || {},
-      recovery: vaultData.recoveryQuestions && vaultData.recoveryAnswers ? {
-        questions: vaultData.recoveryQuestions,
-        answers: vaultData.recoveryAnswers,
-        encryptedXpriv: vaultData.encryptedVault
-      } : undefined,
       lastSyncedAt: vaultData.lastSyncedAt,
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
       createdAt: vaultData.createdAt
-    };
+    } as any;
   },
 
   // Update vault data atomically and broadcast change
   updateVaultData: async (params: { username: string; vaultData: any }): Promise<void> => {
     await ensureWasmReady();
     const toSave = { ...params.vaultData };
-    // Ensure redundant fields are in sync
-    if (toSave.xprivEncrypted && !toSave.encryptedVault) {
+    // Ensure redundant fields are in sync (write primary -> encryptedVault for storage only)
+    if (toSave.xprivEncrypted) {
       toSave.encryptedVault = toSave.xprivEncrypted;
-    }
-    if (toSave.encryptedVault && !toSave.xprivEncrypted) {
-      toSave.xprivEncrypted = toSave.encryptedVault;
     }
     // Persist
     await vaultDB.saveVault(toSave);
     // Mirror to xprivs store if present
     try {
-      const enc = toSave.xprivEncrypted || toSave.encryptedVault;
-      const pinSalt = toSave.pinSalt || toSave.salt;
+      const enc = toSave.xprivEncrypted;
+      const pinSalt = toSave.salt;
       if (enc && pinSalt) {
         await vaultDB.saveXpriv(params.username, enc, pinSalt, toSave.passwordSalt);
       }
@@ -1042,7 +1034,7 @@ export const handlers = {
     let priv = session?.storagePrivateKey || session?.privateKey;
     
     if (!priv && session?.xpriv) {
-      const STORAGE_INDEX = 2147483647;
+      const STORAGE_INDEX = 1000000;
       const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
       priv = (derived as any).privateKey;
       pub = (derived as any).publicKey;
@@ -1074,7 +1066,7 @@ export const handlers = {
     const payload = {
       username: vault.username,
       publicKey: vault.publicKey,
-      encryptedVault: (vault as any).encryptedVault || vault.xprivEncrypted,
+      encryptedVault: vault.xprivEncrypted || (vault as any).encryptedVault,
       salt: vault.salt,
       identities: vault.identities || [],
       activeIdentityByApp: vault.activeIdentityByApp || {},

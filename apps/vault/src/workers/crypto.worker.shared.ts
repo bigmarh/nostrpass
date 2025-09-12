@@ -14,37 +14,22 @@ const isSharedWorker = typeof (globalThis as any).SharedWorkerGlobalScope !== 'u
 console.log('[CryptoWorker] Starting as', isSharedWorker ? 'SharedWorker' : 'DedicatedWorker');
 
 if (isSharedWorker) {
-  // SharedWorker context - handle multiple port connections
-  const ports: Map<MessagePort, any> = new Map();
+  // Initialize a single host; it will attach per-port listeners internally
+  createWorkerHost(handlers as any);
   
-  // Type assertion for SharedWorker global scope
-  const sharedSelf = self as any;
-  
-  sharedSelf.addEventListener('connect', (event: MessageEvent) => {
-    const port = event.ports[0];
-    console.log('[SharedWorker] New connection established');
-    
-    // Create a worker host for this specific port
-    const host = createWorkerHost(handlers as any, port);
-    ports.set(port, host);
-    
-    // Start the port (required for SharedWorker)
-    port.start();
-    
-    // Send ready message
+  const ports: Set<MessagePort> = new Set();
+  console.log('[SharedWorker] Ready to accept connections');
+  (self as any).addEventListener('connect', (event: MessageEvent) => {
+    const port = (event as any).ports[0] as MessagePort;
+    ports.add(port);
+    try { port.start(); } catch {}
     port.postMessage({ type: 'WORKER_READY' });
-    
-    // Handle port disconnection
     port.addEventListener('close', () => {
       ports.delete(port);
       console.log('[SharedWorker] Port closed, remaining connections:', ports.size);
     });
-    
     console.log('[SharedWorker] Active connections:', ports.size);
   });
-  
-  // Log SharedWorker lifecycle
-  console.log('[SharedWorker] Ready to accept connections');
 } else {
   // Regular Worker context - use the global scope directly
   const host = createWorkerHost(handlers as any);
