@@ -1261,6 +1261,43 @@ export const handlers = {
       sig: (signedEvent as any).sig,
     };
     return { event: normalized };
+  },
+
+  // Get vault data from Nostr relays
+  getVaultFromNostr: async (params: { username: string }): Promise<{ vaultData: any; eventId: string; timestamp: number } | null> => {
+    await ensureCryptoReady();
+    
+    // This method delegates to the nostrHelpers package
+    // Import dynamically to avoid circular dependencies
+    const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+    
+    // Get vault data from IndexedDB to find storage public key
+    const localVault = await vaultDB.getVault(params.username);
+    if (!localVault) {
+      throw new Error('Local vault not found - cannot determine storage public key');
+    }
+    
+    const storagePublicKey = localVault.publicKey;
+    
+    // Get relays from environment or use defaults
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'ws://localhost:8080'
+    ];
+    
+    // Query Nostr for vault data
+    const vaultData = await getVaultFromNostr(storagePublicKey, relays);
+    
+    if (!vaultData) {
+      return null;
+    }
+    
+    return {
+      vaultData,
+      eventId: '', // Event ID would need to be returned from getVaultFromNostr
+      timestamp: vaultData.updatedAt || Date.now()
+    };
   }
 };
 
