@@ -7,6 +7,9 @@ export * from './nostrTypes';
 export * from './userTypes';
 export * from './identityTypes';
 export * from './permissionHelpers';
+export * from './constants';
+export * from './messages';
+export * from './worker';
 
 // New event types for the updated auth flow
 export interface LoginObj {

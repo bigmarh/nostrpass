@@ -27,6 +27,13 @@ export const PinUnlock: Component = () => {
             navigate(`/${params.app}`);
             return;
         }
+        // If recovery query param present, open recovery flow
+        try {
+            const sp = new URLSearchParams(window.location.search);
+            if (sp.get('recovery') === '1') {
+                setShowRecovery(true);
+            }
+        } catch {}
         
         // Load vault data
         const username = user()?.profile.username;

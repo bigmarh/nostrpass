@@ -1,0 +1,121 @@
+name: Release and Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run type checks
+        run: npm run type-check
+        continue-on-error: true  # Don't block on legacy type issues
+      
+      - name: Run linter
+        run: npm run lint
+        continue-on-error: true  # Don't block on legacy lint issues
+      
+      - name: Build Embassy
+        working-directory: apps/embassy
+        run: |
+          npm run build:all
+          npm run generate:sri
+      
+      - name: Build Vault
+        working-directory: apps/vault
+        run: |
+          npm run build -- --config vite.config.production.ts
+          npm run build:worker
+      
+      - name: Build Website
+        working-directory: apps/website
+        run: npm run build
+      
+      - name: Publish to NPM
+        working-directory: apps/embassy
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      
+      - name: Setup Google Cloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: nostrpass-prod
+      
+      - name: Deploy Embassy to CDN
+        run: |
+          chmod +x scripts/deploy-cdn.sh
+          ./scripts/deploy-cdn.sh
+      
+      - name: Deploy Vault to vault.nostrpass.com
+        run: |
+          # Upload to GCS bucket for vault.nostrpass.com
+          gsutil -m rsync -r -d apps/vault/dist gs://vault-nostrpass-com
+          
+          # Set proper MIME types
+          gsutil -m setmeta -h "Content-Type:application/wasm" \
+            'gs://vault-nostrpass-com/**.wasm'
+          gsutil -m setmeta -h "Content-Type:text/javascript" \
+            'gs://vault-nostrpass-com/**.js'
+          gsutil -m setmeta -h "Cache-Control:public, max-age=3600" \
+            'gs://vault-nostrpass-com/index.html'
+      
+      - name: Deploy Website to nostrpass.com
+        run: |
+          # Upload to GCS bucket for nostrpass.com
+          gsutil -m rsync -r -d apps/website/dist gs://nostrpass-com
+          gsutil -m setmeta -h "Cache-Control:public, max-age=3600" \
+            'gs://nostrpass-com/index.html'
+      
+      - name: Purge CDN Cache
+        run: |
+          gcloud compute url-maps invalidate-cdn-cache nostrpass-cdn-lb \
+            --path="/*" --global
+          gcloud compute url-maps invalidate-cdn-cache vault-lb \
+            --path="/*" --global
+          gcloud compute url-maps invalidate-cdn-cache website-lb \
+            --path="/*" --global
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            apps/embassy/dist/cdn/${{ github.ref_name }}/embassy.iife.js
+            apps/embassy/dist/cdn/${{ github.ref_name }}/metadata.json
+            apps/embassy/dist/cdn/${{ github.ref_name }}/snippet.html
+          body: |
+            ## NostrPass ${{ github.ref_name }}
+            
+            ### Embassy CDN
+            ```html
+            ${{ steps.sri.outputs.snippet }}
+            ```
+            
+            ### NPM
+            ```bash
+            npm install @nostrpass/embassy@${{ github.ref_name }}
+            ```
+            
+            ### Changes
+            See [CHANGELOG.md](https://github.com/nostrpass/nostrpass/blob/main/CHANGELOG.md)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

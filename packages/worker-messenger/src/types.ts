@@ -27,6 +27,11 @@ export type WorkerMessageHandlers = Record<string, WorkerMessageHandler>;
 export interface WorkerMessengerOptions {
   timeout?: number;
   onError?: (error: Error) => void;
+  /**
+   * When true, verbose console logging is enabled for the worker messenger.
+   * Defaults to false.
+   */
+  debug?: boolean;
 }
 
 export type WorkerMethod<TParams = unknown, TResult = unknown> = (

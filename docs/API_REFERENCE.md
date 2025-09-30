@@ -6,24 +6,30 @@ NostrPass implements the NIP-07 (window.nostr) specification for seamless integr
 
 ## Installation
 
-```javascript
-// Include the Embassy SDK in your application
-<script src="https://nostrpass.com/embassy.js"></script>
+```bash
+# Install via npm/pnpm
+npm install @nostrpass/provider
+# or
+pnpm add @nostrpass/provider
+```
 
-// Or install via npm
-npm install @nostrpass/embassy
+```html
+<!-- Or use the IIFE build (self-host/CDN) -->
+<script src="/dist/index.iife.js"></script>
 ```
 
 ## Initialization
 
 ```javascript
-// Initialize Embassy (happens automatically when script loads)
-const embassy = new Embassy({
-  app: 'YourAppName',
-  returnUrl: 'https://yourapp.com/callback'
+// Initialize provider and install window.nostr (auto if using IIFE)
+import { initNostrPass } from '@nostrpass/provider';
+
+const provider = initNostrPass({
+  appName: 'YourAppName',
+  vaultUrl: 'https://vault.nostrpass.com'
 });
 
-// The window.nostr object is automatically available after initialization
+// window.nostr is now available
 ```
 
 ## API Methods
@@ -276,7 +282,7 @@ try {
 
 ## Events
 
-The Embassy emits events for various state changes:
+The provider emits events for various state changes:
 
 ```javascript
 // Listen for authentication state changes

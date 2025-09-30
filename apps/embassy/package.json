@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 3000 & vite --port 3200",
+    "dev:single": "vite",
     "build": "tsc && vite build",
     "build:lib": "vite build --config vite.config.lib.ts",
     "preview": "vite preview",
@@ -15,6 +16,10 @@
     "@nostrpass/env": "workspace:*",
     "@nostrpass/messenger": "workspace:*",
     "@nostrpass/nostrHelpers": "workspace:*",
+    "@nostrpass/types": "workspace:*",
+    "nostr-tools": "^2.15.2",
+    "@noble/secp256k1": "^2.1.0",
+    "@noble/curves": "^1.6.0",
     "solid-js": "^1.8.11"
   },
   "devDependencies": {

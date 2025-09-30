@@ -7,15 +7,33 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "build:wasm": "pnpm --filter @nostrpass/vault build:wasm"
+    "build:provider": "pnpm --filter @nostrpass/provider build",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run tests/unit",
+    "test:unit:worker": "vitest run tests/unit/worker",
+    "test:unit:provider": "vitest run tests/unit/provider",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:provider": "playwright test --project=provider",
+    "test:e2e:vault": "playwright test --project=vault"
   },
   "devDependencies": {
+    "@playwright/test": "^1.40.0",
     "@turbo/gen": "^2.0.14",
+    "@vitest/coverage-v8": "^1.0.0",
+    "@vitest/ui": "^1.0.0",
+    "jsdom": "^23.0.0",
     "prettier": "^3.2.5",
     "turbo": "^2.0.14",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.0"
   },
-  "packageManager": "pnpm@10.13.1",
+  "packageManager": "pnpm@10.17.1",
   "dependencies": {
     "nostr-tools": "^2.15.2"
   }

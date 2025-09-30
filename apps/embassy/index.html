@@ -4,13 +4,1181 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>embassy - NostrPass</title>
+    <title>Embassy Test Console - NostrPass</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      :root {
+        --primary: #7c3aed;
+        --primary-hover: #6d28d9;
+        --secondary: #10b981;
+        --secondary-hover: #059669;
+        --danger: #ef4444;
+        --danger-hover: #dc2626;
+        --warning: #f59e0b;
+        --info: #3b82f6;
+        
+        --bg-primary: #ffffff;
+        --bg-secondary: #f9fafb;
+        --bg-tertiary: #f3f4f6;
+        --bg-dark: #111827;
+        
+        --text-primary: #111827;
+        --text-secondary: #6b7280;
+        --text-muted: #9ca3af;
+        --text-inverse: #ffffff;
+        
+        --border: #e5e7eb;
+        --border-focus: #7c3aed;
+        
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        
+        --radius: 0.5rem;
+        --radius-lg: 0.75rem;
+        
+        --transition: all 0.2s ease;
+      }
+      
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-primary: #1f2937;
+          --bg-secondary: #111827;
+          --bg-tertiary: #374151;
+          --text-primary: #f9fafb;
+          --text-secondary: #d1d5db;
+          --text-muted: #9ca3af;
+          --border: #374151;
+        }
+      }
+      
+      body {
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        color: var(--text-primary);
+        line-height: 1.5;
+        overflow: hidden;
+      }
+      
+      .app-container {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      
+      .header {
+        background: var(--bg-primary);
+        padding: 1rem 1.5rem;
+        box-shadow: var(--shadow);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      
+      .header h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      
+      .main-content {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+        background: var(--bg-secondary);
+      }
+      
+      .sidebar {
+        width: 400px;
+        background: var(--bg-primary);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      
+      @media (max-width: 1024px) {
+        .sidebar {
+          width: 350px;
+        }
+      }
+      
+      @media (max-width: 768px) {
+        .main-content {
+          flex-direction: column;
+        }
+        .sidebar {
+          width: 100%;
+          height: 50%;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+      }
+      
+      .tabs {
+        display: flex;
+        background: var(--bg-tertiary);
+        border-bottom: 1px solid var(--border);
+        padding: 0 0.5rem;
+        gap: 0.25rem;
+        flex-shrink: 0;
+      }
+      
+      .tab {
+        padding: 0.75rem 1rem;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: var(--transition);
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+      }
+      
+      .tab:hover {
+        color: var(--text-primary);
+        background: var(--bg-secondary);
+      }
+      
+      .tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        background: var(--bg-primary);
+      }
+      
+      .tab-content {
+        flex: 1;
+        padding: 1.5rem;
+        overflow-y: auto;
+        display: none;
+      }
+      
+      .tab-content.active {
+        display: block;
+      }
+      
+      .tab-content::-webkit-scrollbar {
+        width: 6px;
+      }
+      
+      .tab-content::-webkit-scrollbar-track {
+        background: var(--bg-tertiary);
+      }
+      
+      .tab-content::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 3px;
+      }
+      
+      .console-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-primary);
+        overflow: hidden;
+      }
+      
+      .console-header {
+        background: var(--bg-tertiary);
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      
+      .console-header h3 {
+        font-size: 0.875rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .console-status {
+        width: 6px;
+        height: 6px;
+        background: var(--secondary);
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      
+      .console-output {
+        flex: 1;
+        background: #0f172a;
+        color: #94a3b8;
+        padding: 1rem;
+        overflow-y: auto;
+        font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+        font-size: 0.75rem;
+        line-height: 1.5;
+      }
+      
+      .console-output::-webkit-scrollbar {
+        width: 8px;
+      }
+      
+      .console-output::-webkit-scrollbar-track {
+        background: #1e293b;
+      }
+      
+      .console-output::-webkit-scrollbar-thumb {
+        background: #475569;
+        border-radius: 4px;
+      }
+      
+      .form-group {
+        margin-bottom: 1.25rem;
+      }
+      
+      .form-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 1fr) 2fr;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      
+      .form-section {
+        background: var(--bg-secondary);
+        border-radius: var(--radius);
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+      
+      .form-section-title {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      
+      label {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+      }
+      
+      input[type="text"],
+      input[type="number"],
+      select,
+      textarea {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: 0.8125rem;
+        transition: var(--transition);
+      }
+      
+      input[type="text"]:focus,
+      input[type="number"]:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: var(--border-focus);
+        box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+      }
+      
+      textarea {
+        resize: vertical;
+        min-height: 80px;
+        font-family: inherit;
+      }
+      
+      input[type="checkbox"] {
+        width: 1rem;
+        height: 1rem;
+        cursor: pointer;
+        accent-color: var(--primary);
+      }
+      
+      .checkbox-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .btn {
+        padding: 0.5rem 1rem;
+        border: none;
+        border-radius: var(--radius);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: var(--transition);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        white-space: nowrap;
+      }
+      
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      
+      .btn-primary {
+        background: var(--primary);
+        color: var(--text-inverse);
+      }
+      
+      .btn-primary:hover:not(:disabled) {
+        background: var(--primary-hover);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow);
+      }
+      
+      .btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-secondary);
+      }
+      
+      .btn-success {
+        background: var(--secondary);
+        color: var(--text-inverse);
+      }
+      
+      .btn-success:hover:not(:disabled) {
+        background: var(--secondary-hover);
+      }
+      
+      .btn-danger {
+        background: var(--danger);
+        color: var(--text-inverse);
+      }
+      
+      .btn-danger:hover:not(:disabled) {
+        background: var(--danger-hover);
+      }
+      
+      .btn-sm {
+        padding: 0.375rem 0.75rem;
+        font-size: 0.75rem;
+      }
+      
+      .btn-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      
+      .btn-block {
+        width: 100%;
+        justify-content: center;
+      }
+      
+      .log-entry {
+        margin-bottom: 0.5rem;
+        padding: 0.375rem;
+        border-radius: 0.25rem;
+        background: rgba(255, 255, 255, 0.02);
+        border-left: 2px solid transparent;
+      }
+      
+      .log-entry.info {
+        border-left-color: var(--info);
+      }
+      
+      .log-entry.success {
+        border-left-color: var(--secondary);
+      }
+      
+      .log-entry.error {
+        border-left-color: var(--danger);
+      }
+      
+      .log-entry.warning {
+        border-left-color: var(--warning);
+      }
+      
+      .log-timestamp {
+        color: #64748b;
+        font-size: 0.7rem;
+      }
+      
+      .log-level {
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.7rem;
+        padding: 0.125rem 0.25rem;
+        border-radius: 0.125rem;
+        margin: 0 0.375rem;
+      }
+      
+      .log-level.INFO { background: rgba(59, 130, 246, 0.1); color: #60a5fa; }
+      .log-level.SUCCESS { background: rgba(16, 185, 129, 0.1); color: #34d399; }
+      .log-level.ERROR { background: rgba(239, 68, 68, 0.1); color: #f87171; }
+      .log-level.WARNING { background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+      .log-level.RESPONSE { background: rgba(139, 92, 246, 0.1); color: #a78bfa; }
+      
+      .log-message {
+        color: #e2e8f0;
+        margin-top: 0.25rem;
+        font-size: 0.75rem;
+      }
+      
+      .log-data {
+        margin-top: 0.375rem;
+        padding: 0.375rem;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 0.125rem;
+        color: #cbd5e1;
+        font-size: 0.7rem;
+        overflow-x: auto;
+      }
+      
+      .log-data pre {
+        margin: 0;
+      }
+      
+      .input-group {
+        display: flex;
+        gap: 0.5rem;
+      }
+      
+      .input-group input {
+        flex: 1;
+      }
+      
+      .badge {
+        display: inline-block;
+        padding: 0.125rem 0.375rem;
+        font-size: 0.7rem;
+        font-weight: 500;
+        border-radius: 0.25rem;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      
+      .divider {
+        height: 1px;
+        background: var(--border);
+        margin: 1rem 0;
+      }
+    </style>
   </head>
   <body>
-    <button id="show-vault" onclick="window.showVault?.()">Show Vault</button>
-    <button id="hide-vault" onclick="window.hideVault?.()">Hide Vault</button>
+    <div class="app-container">
+      <div class="header">
+        <h1>Embassy Test Console</h1>
+      </div>
+      
+      <div class="main-content">
+        <div class="sidebar">
+          <div class="tabs">
+            <button class="tab active" data-tab="config">Config</button>
+            <button class="tab" data-tab="operations">Operations</button>
+            <button class="tab" data-tab="signing">Signing</button>
+            <button class="tab" data-tab="encryption">Encryption</button>
+          </div>
+          
+          <div id="config-tab" class="tab-content active">
+            <div class="form-section">
+              <div class="form-section-title">Connection Settings</div>
+              <div class="form-group">
+                <div class="form-row">
+                  <label for="vault-url">Vault URL</label>
+                  <input id="vault-url" type="text" value="http://localhost:3001" placeholder="Enter vault URL" />
+                </div>
+                <div class="form-row">
+                  <label for="app-name">App Name</label>
+                  <input id="app-name" type="text" value="Embassy Test" placeholder="Enter app name" />
+                </div>
+                <div class="form-row">
+                  <label for="debug-mode">Debug Mode</label>
+                  <div class="checkbox-wrapper">
+                    <input id="debug-mode" type="checkbox" />
+                    <span class="badge">Verbose logging</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="form-section">
+              <div class="form-section-title">Initialization</div>
+              <div class="btn-group">
+                <button id="btn-init" class="btn btn-primary btn-block">
+                  🚀 Initialize NostrPass
+                </button>
+                <button id="btn-open-vault" class="btn btn-secondary btn-block">
+                  🔐 Open Vault
+                </button>
+              </div>
+              <div class="divider"></div>
+              <div class="btn-group">
+                <button id="show-vault" class="btn btn-secondary">
+                  👁️ Show Vault
+                </button>
+                <button id="hide-vault" class="btn btn-secondary">
+                  🙈 Hide Vault
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div id="operations-tab" class="tab-content">
+            <div class="form-section">
+              <div class="form-section-title">Basic Operations</div>
+              <div class="btn-group">
+                <button id="btn-get-pubkey" class="btn btn-success">
+                  🔑 Get Public Key
+                </button>
+                <button id="btn-verify-pubkey" class="btn btn-secondary">
+                  ✅ Verify Pubkey
+                </button>
+                <button id="btn-get-relays" class="btn btn-success">
+                  🌐 Get Relays
+                </button>
+              </div>
+            </div>
+            
+            <div class="form-section">
+              <div class="form-section-title">Event Signing</div>
+              <div class="form-group">
+                <div class="form-row">
+                  <label for="kind-select">Event Kind</label>
+                  <select id="kind-select">
+                    <option value="1">1 - Text Note</option>
+                    <option value="4">4 - Encrypted DM</option>
+                    <option value="7">7 - Reaction</option>
+                    <option value="9735">9735 - Zap</option>
+                    <option value="custom">Custom Kind</option>
+                  </select>
+                </div>
+                <div class="form-row" id="custom-kind-row" style="display: none;">
+                  <label for="kind-custom">Custom Value</label>
+                  <input id="kind-custom" type="number" placeholder="e.g., 30023" />
+                </div>
+                <div class="form-row">
+                  <label for="content-input">Content</label>
+                  <textarea id="content-input" placeholder="Enter event content..."></textarea>
+                </div>
+              </div>
+              <div class="btn-group">
+                <button id="btn-sign-event" class="btn btn-primary">
+                  ✍️ Sign Event
+                </button>
+                <button id="btn-verify-event" class="btn btn-secondary">
+                  ✅ Verify Event
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div id="signing-tab" class="tab-content">
+            <div class="form-section">
+              <div class="form-section-title">Data Signing</div>
+              <div class="form-group">
+                <label for="signdata-input" style="display: block; margin-bottom: 0.5rem;">Message to Sign</label>
+                <textarea id="signdata-input" placeholder="Enter message to sign..."></textarea>
+              </div>
+              <div class="btn-group">
+                <button id="btn-sign-data" class="btn btn-primary">
+                  ✍️ Sign Data
+                </button>
+                <button id="btn-verify-signdata" class="btn btn-secondary">
+                  ✅ Verify Signature
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div id="encryption-tab" class="tab-content">
+            <div class="form-section">
+              <div class="form-section-title">NIP-04 Encryption</div>
+              <div class="form-group">
+                <div class="form-row">
+                  <label for="nip04-pubkey">Peer Pubkey</label>
+                  <div class="input-group">
+                    <input id="nip04-pubkey" type="text" placeholder="Hex public key" />
+                    <button id="btn-copy-mypubkey" class="btn btn-sm btn-secondary" title="Copy my public key">
+                      📋 My Key
+                    </button>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <label for="identity-index">Identity Index</label>
+                  <input id="identity-index" type="number" min="0" value="0" />
+                </div>
+                <div class="form-row">
+                  <label for="nip04-plain">Plaintext</label>
+                  <textarea id="nip04-plain" placeholder="Message to encrypt"></textarea>
+                </div>
+                <div class="form-row">
+                  <label for="nip04-cipher">Ciphertext</label>
+                  <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <textarea id="nip04-cipher" placeholder="Encrypted message or paste to decrypt"></textarea>
+                    <div class="btn-group">
+                      <button id="btn-copy-cipher" class="btn btn-sm btn-secondary">
+                        📋 Copy
+                      </button>
+                      <button id="btn-clear-cipher" class="btn btn-sm btn-secondary">
+                        🗑️ Clear
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="btn-group">
+                <button id="btn-encrypt" class="btn btn-primary">
+                  🔒 Encrypt
+                </button>
+                <button id="btn-decrypt" class="btn btn-secondary">
+                  🔓 Decrypt
+                </button>
+              </div>
+              <div class="divider"></div>
+              <div class="form-section">
+                <div class="form-section-title">Current Account Info</div>
+                <div id="current-account-info" style="font-size: 0.75rem; color: var(--text-secondary); word-break: break-all;">
+                  <p>Loading...</p>
+                </div>
+                <button id="btn-refresh-account" class="btn btn-sm btn-secondary">
+                  🔄 Refresh Account Info
+                </button>
+              </div>
+              <div class="divider"></div>
+              <div class="form-section-title">Cross-Tab Testing Instructions</div>
+              <ol style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
+                <li>In Tab A: Enter recipient's public key and message, click Encrypt</li>
+                <li>Copy the ciphertext and sender's public key from the console</li>
+                <li>In Tab B: Paste the ciphertext and enter sender's public key (from Tab A)</li>
+                <li>Click Decrypt to reveal the original message</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+        
+        <div class="console-area">
+          <div class="console-header">
+            <h3>
+              <span class="console-status"></span>
+              Console Output
+            </h3>
+            <button id="btn-clear" class="btn btn-sm btn-danger">Clear</button>
+          </div>
+          <div id="log" class="console-output"></div>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/src/embassy.ts"></script>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      const logEl = $('log');
+      
+      // Tab switching
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          const tabName = tab.dataset.tab;
+          
+          // Update active tab
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          
+          // Update active content
+          document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+          });
+          document.getElementById(`${tabName}-tab`).classList.add('active');
+        });
+      });
+      
+      function formatLogEntry(level, message, data) {
+        const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+        const levelClass = level.toUpperCase();
+        const entryClass = level.toLowerCase();
+        
+        let html = `<div class="log-entry ${entryClass}">`;
+        html += `<span class="log-timestamp">${ts}</span>`;
+        html += `<span class="log-level ${levelClass}">${levelClass}</span>`;
+        html += `<div class="log-message">${message}</div>`;
+        
+        if (data) {
+          html += `<div class="log-data"><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+        }
+        
+        html += `</div>`;
+        return html;
+      }
+      
+      function log(level, message, data) {
+        const entry = formatLogEntry(level, message, data);
+        logEl.innerHTML += entry;
+        logEl.scrollTop = logEl.scrollHeight;
+        
+        // Auto-show vault on authentication errors
+        if (level === 'error') {
+          const errorStr = String(data?.error || '');
+          const authErrors = [
+            'User not authenticated',
+            'crypto not ready',
+            'Session rehydrated without keys',
+            'No session found',
+            'Vault not found',
+            'Session expired'
+          ];
+          
+          if (authErrors.some(err => errorStr.includes(err))) {
+            console.log('[Embassy] Authentication error detected, showing vault...');
+            if (window.nostr?.showVault) {
+              window.nostr.showVault();
+            } else {
+              console.warn('[Embassy] NostrPass not initialized yet, cannot show vault');
+            }
+          }
+        }
+      }
+
+      let lastSignedEvent = null;
+      let lastSignedData = { message: null, signature: null, pubkey: null };
+      let lastEncrypted = { ciphertext: null, pubkey: null, myPubkey: null };
+
+      function ensureProvider() {
+        if (!window.nostr) {
+          const vaultUrl = $('vault-url').value.trim();
+          const appName = $('app-name').value.trim() || 'Embassy Test';
+          const debug = $('debug-mode').checked;
+          window.nostr = window.initNostrPass?.({ vaultUrl, appName, debug, theme: 'auto' });
+          log('info', 'Provider auto-initialized');
+        }
+      }
+      
+      // Show/hide custom kind input
+      $('kind-select').addEventListener('change', (e) => {
+        $('custom-kind-row').style.display = e.target.value === 'custom' ? 'grid' : 'none';
+      });
+
+      $('btn-init').addEventListener('click', () => {
+        try {
+          const vaultUrl = $('vault-url').value.trim();
+          const appName = $('app-name').value.trim() || 'Embassy Test';
+          const debug = $('debug-mode').checked;
+          window.nostr = window.initNostrPass?.({ vaultUrl, appName, debug, theme: 'auto' });
+          log('success', 'NostrPass provider initialized', { vaultUrl, appName, debug });
+        } catch (e) {
+          log('error', 'Initialization failed', { error: String(e) });
+        }
+      });
+      
+      $('btn-open-vault').addEventListener('click', () => {
+        if (window.nostr?.showVault) {
+          window.nostr.showVault();
+          log('info', 'Vault opened');
+        } else {
+          log('warning', 'NostrPass not initialized - initializing now...');
+          // Initialize first, then show vault
+          const vaultUrl = $('vault-url').value.trim();
+          const appName = $('app-name').value.trim() || 'Embassy Test';
+          const debug = $('debug-mode').checked;
+          window.nostr = window.initNostrPass?.({ vaultUrl, appName, debug, theme: 'auto' });
+          if (window.nostr?.showVault) {
+            window.nostr.showVault();
+            log('success', 'NostrPass initialized and vault opened');
+          }
+        }
+      });
+
+      $('show-vault').addEventListener('click', () => {
+        window.showVault?.();
+        log('info', 'Vault display requested');
+      });
+      
+      $('hide-vault').addEventListener('click', () => {
+        window.hideVault?.();
+        log('info', 'Vault hidden');
+      });
+
+      $('btn-get-pubkey').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          if (!window.nostr || typeof window.nostr.getPublicKey !== 'function') {
+            throw new Error('Provider not ready');
+          }
+          const pk = await window.nostr.getPublicKey();
+          log('response', 'Public key retrieved', { publicKey: pk });
+        } catch (e) {
+          log('error', 'Failed to get public key', { error: String(e) });
+        }
+      });
+
+      $('btn-verify-pubkey').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const pk = await window.nostr.getPublicKey();
+          if (!/^([0-9a-f]{64})$/i.test(pk)) throw new Error('Invalid hex pubkey');
+          log('success', 'Pubkey format OK (hex 32-byte)', { publicKey: pk });
+        } catch (e) {
+          log('error', 'Pubkey verification failed', { error: String(e) });
+        }
+      });
+
+      $('btn-sign-event').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const kindSel = $('kind-select').value;
+          const kind = kindSel === 'custom' ? Number($('kind-custom').value || 1) : Number(kindSel);
+          const content = $('content-input').value || `Test event from Embassy @ ${new Date().toISOString()}`;
+          const evt = {
+            kind,
+            content,
+            tags: [['client', 'embassy-test']],
+            created_at: Math.floor(Date.now() / 1000)
+          };
+          if (!window.nostr || typeof window.nostr.signEvent !== 'function') {
+            throw new Error('Provider not ready');
+          }
+          const signed = await window.nostr.signEvent(evt);
+          lastSignedEvent = signed;
+          log('response', 'Event signed successfully', signed);
+        } catch (e) {
+          log('error', 'Event signing failed', { error: String(e) });
+        }
+      });
+
+      $('btn-verify-event').addEventListener('click', async () => {
+        try {
+          if (!lastSignedEvent) throw new Error('No signed event available');
+          const { validateEvent, verifyEvent, getEventHash } = await import('nostr-tools');
+          const evt = lastSignedEvent;
+          const okStructure = validateEvent(evt);
+          const idCalc = getEventHash(evt);
+          const idOk = idCalc === evt.id;
+          const sigOk = await verifyEvent(evt);
+          console.log('[Embassy] Verify Event inputs:', {
+            id: evt.id,
+            idCalc,
+            pubkey: evt.pubkey,
+            sig: evt.sig,
+            okStructure,
+            idOk,
+            sigOk
+          });
+          if (!okStructure || !idOk || !sigOk) {
+            throw new Error(`Invalid event: structure=${okStructure}, id=${idOk}, sig=${sigOk}`);
+          }
+          log('success', 'Event signature verified', { idOk, sigOk });
+        } catch (e) {
+          log('error', 'Event verification failed', { error: String(e) });
+        }
+      });
+
+      $('btn-get-relays').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const relays = window.nostr && typeof window.nostr.getRelays === 'function'
+            ? await window.nostr.getRelays()
+            : {};
+          log('response', 'Relays retrieved', relays);
+        } catch (e) {
+          log('error', 'Failed to get relays', { error: String(e) });
+        }
+      });
+
+      $('btn-sign-data').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const msg = $('signdata-input').value || `Test message @ ${new Date().toISOString()}`;
+          if (!window.nostr || typeof window.nostr.signData !== 'function') {
+            throw new Error('signData not available in provider');
+          }
+          const pk = await window.nostr.getPublicKey();
+          const sig = await window.nostr.signData(msg);
+          lastSignedData = { message: msg, signature: sig, pubkey: pk };
+          log('response', 'Data signed successfully', { message: msg, signature: sig });
+        } catch (e) {
+          log('error', 'Data signing failed', { error: String(e) });
+        }
+      });
+
+      $('btn-verify-signdata').addEventListener('click', async () => {
+        try {
+          const { message, signature, pubkey } = lastSignedData;
+          if (!message || !signature || !pubkey) throw new Error('No signed data available');
+          
+          // Import @noble/curves which is what nostr-tools uses internally
+          const { schnorr } = await import('@noble/curves/secp256k1');
+          
+          // Accept x-only 32-byte or compressed 33-byte SEC1 pubkey  
+          let usePubkey = pubkey.toLowerCase();
+          if (/^([0-9a-f]{66})$/i.test(usePubkey) && (usePubkey.startsWith('02') || usePubkey.startsWith('03'))) {
+            usePubkey = usePubkey.slice(2); // drop prefix → x-only
+          }
+          if (!/^([0-9a-f]{64})$/i.test(usePubkey)) throw new Error('Invalid hex pubkey');
+          if (!/^([0-9a-f]{128})$/i.test(signature)) throw new Error('Invalid signature format');
+          
+          // Hash the message the same way the signing function does
+          const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
+          const hex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+          const msgHashHex = hex(hashBuf);
+          
+          console.log('[Embassy] Verify Data inputs:', {
+            message,
+            msgHashHex: msgHashHex,
+            signature,
+            pubkeyOriginal: pubkey,
+            pubkeyXOnly: usePubkey
+          });
+          
+          // Use schnorr.verify from @noble/curves (same as nostr-tools uses)
+          let ok = false;
+          try {
+            // schnorr.verify expects (signature, messageHash, publicKey) as hex strings
+            ok = schnorr.verify(signature, msgHashHex, usePubkey);
+            console.log('[Embassy] Verification result:', ok);
+          } catch (err) {
+            console.error('[Embassy] Verification error:', err);
+            ok = false;
+          }
+          
+          if (!ok) throw new Error('Invalid signature');
+          log('success', 'Data signature verified', { ok: true });
+        } catch (e) {
+          log('error', 'Data signature verification failed', { error: String(e) });
+        }
+      });
+
+      $('btn-encrypt').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const pubkey = $('nip04-pubkey').value.trim();
+          const plaintext = $('nip04-plain').value;
+          if (!pubkey) {
+            throw new Error('Peer public key required');
+          }
+          if (!window.nostr?.nip04?.encrypt) {
+            throw new Error('NIP-04 encryption not available');
+          }
+          const identityIndex = Number($('identity-index').value) || 0;
+          const myPubkey = await window.nostr.getPublicKey({ identityIndex });
+          const cipher = await window.nostr.nip04.encrypt(pubkey, plaintext, { identityIndex });
+          $('nip04-cipher').value = cipher;
+          
+          // Store encrypted data for cross-tab testing
+          lastEncrypted = { ciphertext: cipher, pubkey: pubkey, myPubkey: myPubkey };
+          
+          log('response', 'Message encrypted', { 
+            ciphertext: cipher,
+            recipientPubkey: pubkey,
+            senderPubkey: myPubkey
+          });
+          log('info', 'Encrypted data stored. You can decrypt this in another tab using the ciphertext and sender\'s public key.');
+        } catch (e) {
+          log('error', 'Encryption failed', { error: String(e) });
+        }
+      });
+
+      $('btn-decrypt').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          let pubkey = $('nip04-pubkey').value.trim();
+          let ciphertext = $('nip04-cipher').value.trim();
+          
+          // If ciphertext is empty but we have lastEncrypted data, use it
+          if (!ciphertext && lastEncrypted.ciphertext) {
+            ciphertext = lastEncrypted.ciphertext;
+            $('nip04-cipher').value = ciphertext;
+            log('info', 'Using stored ciphertext from last encryption');
+          }
+          
+          if (!pubkey) {
+            // If no pubkey provided but we have lastEncrypted, suggest using the sender's pubkey
+            if (lastEncrypted.myPubkey) {
+              log('warning', `No peer pubkey provided. The sender's pubkey from encryption was: ${lastEncrypted.myPubkey}`);
+              log('info', 'Paste the sender\'s public key in the Peer Pubkey field to decrypt');
+            }
+            throw new Error('Peer public key required (use the sender\'s public key)');
+          }
+          if (!ciphertext) {
+            throw new Error('Ciphertext required');
+          }
+          if (!window.nostr?.nip04?.decrypt) {
+            throw new Error('NIP-04 decryption not available');
+          }
+          
+          const myPubkey = await window.nostr.getPublicKey();
+          
+          // Log the key pair being used for debugging
+          log('info', 'Attempting decryption', {
+            myPubkey: myPubkey,
+            senderPubkey: pubkey,
+            ciphertextLength: ciphertext.length
+          });
+          
+          // Check if we're the intended recipient
+          if (lastEncrypted.pubkey && myPubkey !== lastEncrypted.pubkey) {
+            log('warning', `You may not be the intended recipient.`, {
+              intendedRecipient: lastEncrypted.pubkey,
+              yourPubkey: myPubkey
+            });
+            log('info', 'Switch to the account with the recipient\'s public key to decrypt this message');
+          }
+          
+          try {
+            const identityIndex = Number($('identity-index').value) || 0;
+            const plaintext = await window.nostr.nip04.decrypt(pubkey, ciphertext, { identityIndex });
+            $('nip04-plain').value = plaintext;
+            
+            log('success', 'Message decrypted successfully', { 
+              plaintext,
+              senderPubkey: pubkey,
+              recipientPubkey: myPubkey
+            });
+          } catch (decryptError) {
+            // Provide more helpful error messages
+            const errorStr = String(decryptError);
+            if (errorStr.includes('aead::Error') || errorStr.includes('DecryptionError')) {
+              log('error', 'Decryption failed - wrong key pair or corrupted message', {
+                error: errorStr,
+                hint: 'Make sure you are logged in as the recipient and using the correct sender public key'
+              });
+              
+              // Provide specific guidance based on stored data
+              if (lastEncrypted.ciphertext === ciphertext) {
+                log('info', 'For this message:', {
+                  recipientShouldBe: lastEncrypted.pubkey,
+                  senderShouldBe: lastEncrypted.myPubkey,
+                  youAre: myPubkey
+                });
+              }
+            } else {
+              throw decryptError;
+            }
+          }
+        } catch (e) {
+          log('error', 'Decryption failed', { error: String(e) });
+        }
+      });
+
+      $('btn-clear').addEventListener('click', () => {
+        $('log').innerHTML = '';
+        log('info', 'Console cleared');
+      });
+      
+      // Helper buttons for encryption tab
+      $('btn-copy-mypubkey').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const myPubkey = await window.nostr.getPublicKey();
+          navigator.clipboard.writeText(myPubkey);
+          log('info', 'Your public key copied to clipboard', { publicKey: myPubkey });
+        } catch (e) {
+          log('error', 'Failed to copy public key', { error: String(e) });
+        }
+      });
+      
+      $('btn-copy-cipher').addEventListener('click', () => {
+        const cipher = $('nip04-cipher').value;
+        if (cipher) {
+          navigator.clipboard.writeText(cipher);
+          log('info', 'Ciphertext copied to clipboard');
+        } else {
+          log('warning', 'No ciphertext to copy');
+        }
+      });
+      
+      $('btn-clear-cipher').addEventListener('click', () => {
+        $('nip04-cipher').value = '';
+        $('nip04-plain').value = '';
+        $('nip04-pubkey').value = '';
+        log('info', 'Encryption fields cleared');
+      });
+      
+      // Function to update account info
+      async function updateAccountInfo() {
+        try {
+          ensureProvider();
+          const pubkey = await window.nostr.getPublicKey();
+          const accountInfoEl = $('current-account-info');
+          accountInfoEl.innerHTML = `
+            <p><strong>Your Public Key:</strong></p>
+            <p style="font-family: monospace; font-size: 0.7rem;">${pubkey}</p>
+            <button onclick="navigator.clipboard.writeText('${pubkey}'); alert('Copied!');" class="btn btn-sm btn-secondary" style="margin-top: 0.5rem;">
+              📋 Copy Your Public Key
+            </button>
+          `;
+        } catch (e) {
+          const accountInfoEl = $('current-account-info');
+          accountInfoEl.innerHTML = `<p style="color: var(--danger);">Not logged in or provider not initialized</p>`;
+        }
+      }
+      
+      // Refresh account info button
+      $('btn-refresh-account').addEventListener('click', async () => {
+        await updateAccountInfo();
+        log('info', 'Account info refreshed');
+      });
+      
+      // Auto-update account info when switching to encryption tab
+      document.querySelector('[data-tab="encryption"]').addEventListener('click', () => {
+        setTimeout(updateAccountInfo, 100);
+      });
+      
+      // Auto-initialize NostrPass on page load
+      function initializeNostrPass() {
+        try {
+          const vaultUrl = $('vault-url').value.trim();
+          const appName = $('app-name').value.trim() || 'Embassy Test';
+          const debug = $('debug-mode').checked;
+          
+          if (!window.nostr) {
+            window.nostr = window.initNostrPass?.({ vaultUrl, appName, debug, theme: 'auto' });
+            log('success', 'NostrPass auto-initialized on page load', { vaultUrl, appName, debug });
+          }
+        } catch (e) {
+          log('warning', 'Auto-initialization skipped', { error: String(e) });
+        }
+      }
+      
+      // Wait for the embassy module to load, then initialize
+      setTimeout(() => {
+        if (window.initNostrPass) {
+          initializeNostrPass();
+        } else {
+          log('info', 'Waiting for NostrPass module to load...');
+          // Try again after a short delay
+          const checkInterval = setInterval(() => {
+            if (window.initNostrPass) {
+              clearInterval(checkInterval);
+              initializeNostrPass();
+            }
+          }, 100);
+          
+          // Stop trying after 5 seconds
+          setTimeout(() => clearInterval(checkInterval), 5000);
+        }
+      }, 100);
+      
+      // Initial log
+      log('info', 'Embassy Test Console ready');
+    </script>
   
   </body>
 </html>

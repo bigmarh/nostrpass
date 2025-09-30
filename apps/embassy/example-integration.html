@@ -12,6 +12,20 @@
     
     <button id="get-pubkey" disabled>Get Public Key</button>
     <button id="sign-event" disabled>Sign Event</button>
+    <div style="margin-top:12px">
+      <input id="sign-data-input" placeholder="Message to sign" style="width:340px"/>
+      <button id="sign-data" disabled>Sign Data</button>
+    </div>
+    <div style="margin-top:12px">
+      <input id="nip04-pubkey" placeholder="Peer pubkey (hex)" style="width:340px"/>
+      <input id="nip04-plaintext" placeholder="Plaintext" style="width:340px"/>
+      <button id="nip04-encrypt" disabled>Encrypt</button>
+    </div>
+    <div style="margin-top:12px">
+      <input id="nip04-sender" placeholder="Sender pubkey (hex)" style="width:340px"/>
+      <input id="nip04-cipher" placeholder="Ciphertext" style="width:340px"/>
+      <button id="nip04-decrypt" disabled>Decrypt</button>
+    </div>
     <button id="show-vault">Show Vault</button>
     <button id="hide-vault">Hide Vault</button>
     
@@ -37,6 +51,9 @@
             document.getElementById('status').textContent = 'NostrPass Ready!';
             document.getElementById('get-pubkey').disabled = false;
             document.getElementById('sign-event').disabled = false;
+            document.getElementById('sign-data').disabled = false;
+            document.getElementById('nip04-encrypt').disabled = false;
+            document.getElementById('nip04-decrypt').disabled = false;
         });
         
         // Also check if window.nostr is available immediately
@@ -46,6 +63,9 @@
                 document.getElementById('status').textContent = 'NostrPass Available (no ready event)';
                 document.getElementById('get-pubkey').disabled = false;
                 document.getElementById('sign-event').disabled = false;
+                document.getElementById('sign-data').disabled = false;
+                document.getElementById('nip04-encrypt').disabled = false;
+                document.getElementById('nip04-decrypt').disabled = false;
             }
         }, 1000);
 
@@ -77,6 +97,42 @@
         });
 
         // Show/Hide Vault UI
+        // Sign Data
+        document.getElementById('sign-data').addEventListener('click', async () => {
+            try {
+                const msg = (document.getElementById('sign-data-input') as HTMLInputElement).value || 'hello';
+                const sig = await (window as any).nostr?.signData?.(msg) || await (window as any).nostr?.nip04?.encrypt?.('', msg); // fallback in case signData is routed elsewhere
+                document.getElementById('result').textContent = 'Signature: ' + JSON.stringify(sig);
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + (error as any).message;
+            }
+        });
+
+        // NIP-04 Encrypt
+        document.getElementById('nip04-encrypt').addEventListener('click', async () => {
+            try {
+                const pubkey = (document.getElementById('nip04-pubkey') as HTMLInputElement).value;
+                const plaintext = (document.getElementById('nip04-plaintext') as HTMLInputElement).value || 'hello';
+                const ct = await (window as any).nostr?.nip04?.encrypt(pubkey, plaintext);
+                document.getElementById('result').textContent = 'Ciphertext: ' + ct;
+                (document.getElementById('nip04-cipher') as HTMLInputElement).value = ct;
+                (document.getElementById('nip04-sender') as HTMLInputElement).value = pubkey;
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + (error as any).message;
+            }
+        });
+
+        // NIP-04 Decrypt
+        document.getElementById('nip04-decrypt').addEventListener('click', async () => {
+            try {
+                const sender = (document.getElementById('nip04-sender') as HTMLInputElement).value;
+                const cipher = (document.getElementById('nip04-cipher') as HTMLInputElement).value;
+                const pt = await (window as any).nostr?.nip04?.decrypt(sender, cipher);
+                document.getElementById('result').textContent = 'Plaintext: ' + pt;
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + (error as any).message;
+            }
+        });
         document.getElementById('show-vault').addEventListener('click', () => {
             window.showVault?.();
         });

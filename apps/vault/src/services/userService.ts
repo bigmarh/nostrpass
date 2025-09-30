@@ -1,4 +1,5 @@
-import type { Identity, UserMasterKey } from '@nostrpass/types';
+import type { UserMasterKey } from '@nostrpass/types';
+import { STORAGE_INDEX, identityPath } from '@nostrpass/types';
 import { getCryptoWorker } from './cryptoWorkerSingleton';
 
 // Get shared worker client
@@ -9,7 +10,17 @@ const cryptoWorker = getCryptoWorker() as any;
  */
 export async function createUser(): Promise<UserMasterKey> {
   // Generate a new master key (xpriv)
-  const { xpriv } = await cryptoWorker.generateXpriv();
+  const result = await cryptoWorker.generateXpriv();
+  console.log('🔑 generateXpriv result:', result);
+  
+  const xpriv = result.xpriv;
+  console.log('🔑 xpriv extracted:', {
+    xprivType: typeof xpriv,
+    xprivLength: xpriv?.length,
+    xprivPrefix: xpriv?.substring(0, 10),
+    isString: typeof xpriv === 'string',
+    hasXprivKey: 'xpriv' in result
+  });
   
   // Create the initial "Personal" identity at index 0
   const personalIdentity = await createIdentity(xpriv, 'Personal', 0);
@@ -28,10 +39,6 @@ export async function createUser(): Promise<UserMasterKey> {
  * Path: m/44'/1237'/1'/0/0 (account 1 for storage)
  */
 export async function getStorageKeypair(xpriv: string): Promise<{ privateKey: string; publicKey: string }> {
-  // Use a special index (2^31 - 1) which is the maximum for non-hardened derivation
-  // This ensures it won't conflict with user identities which start from 0
-  const STORAGE_INDEX = 2147483647; // Max value for BIP32 non-hardened index
-  
   const derived = await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index: STORAGE_INDEX });
   
   // Handle if result is a Map
@@ -60,10 +67,10 @@ export async function createIdentity(xpriv: string, nickname: string, index: num
   let path: string;
   let publicKey: string;
   if (derived instanceof Map) {
-    path = derived.get('path') || `m/44'/1237'/0'/0/${index}`;
+    path = derived.get('path') || identityPath(index);
     publicKey = derived.get('publicKey');
   } else {
-    path = derived.path || `m/44'/1237'/0'/0/${index}`;
+    path = derived.path || identityPath(index);
     publicKey = derived.publicKey;
   }
   

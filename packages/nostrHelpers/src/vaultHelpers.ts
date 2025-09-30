@@ -15,8 +15,9 @@ export interface VaultData {
   
   // Identity management
   identities: any[];
-  currentIdentityIndex: number;
   storagePublicKey?: string; // Explicit storage public key (same as publicKey)
+  // Active identity per app (persistent selection separate from authorization)
+  activeIdentityByApp?: Record<string, number | null>;
   
   // Recovery system
   recovery?: {
@@ -297,10 +298,6 @@ export async function getVaultFromNostr(
 
     // Try to find a vault we can decrypt
     for (const event of sortedEvents) {
-      const versionTag = event.tags.find(t => t[0] === 'version')?.[1];
-      
-
-
       try {
         // First try to parse as plain JSON (base encryption)
         try {

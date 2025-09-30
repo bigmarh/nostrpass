@@ -4,10 +4,11 @@ import type { NostrEvent } from '@nostrpass/types';
 export class SessionService {
   private cryptoWorker = getCryptoWorker();
 
-  async signEvent(username: string, event: NostrEvent) {
+  async signEvent(username: string, event: NostrEvent, identityIndex: number) {
     const result = await this.cryptoWorker.signEventWithSession({
       username,
-      event
+      event,
+      identityIndex
     });
     
     if (result.error) {
@@ -17,10 +18,11 @@ export class SessionService {
     return result.signedEvent;
   }
 
-  async signMessage(username: string, message: string) {
+  async signMessage(username: string, message: string, identityIndex: number) {
     const result = await this.cryptoWorker.signMessageWithSession({
       username,
-      message
+      message,
+      identityIndex
     });
     
     if (result.error) {
@@ -30,11 +32,12 @@ export class SessionService {
     return result.signature;
   }
 
-  async encrypt(username: string, plaintext: string, pubkey: string) {
+  async encrypt(username: string, plaintext: string, pubkey: string, identityIndex: number) {
     const encrypted = await this.cryptoWorker.encryptWithSession({
       username,
       plaintext,
-      pubkey
+      pubkey,
+      identityIndex
     });
     
     if (encrypted.error) {
@@ -44,11 +47,12 @@ export class SessionService {
     return encrypted.ciphertext;
   }
 
-  async decrypt(username: string, ciphertext: string, pubkey: string) {
+  async decrypt(username: string, ciphertext: string, pubkey: string, identityIndex: number) {
     const decrypted = await this.cryptoWorker.decryptWithSession({
       username,
       ciphertext,
-      pubkey
+      pubkey,
+      identityIndex
     });
     
     if (decrypted.error) {

@@ -163,10 +163,23 @@ export class SecureMessenger {
       if (!message.type.endsWith('_RESPONSE')) {
         await this.sendResponse(message, result);
       }
-    } catch (error) {
+    } catch (error: any) {
       // Only send error response if this isn't already a response message
       if (!message.type.endsWith('_RESPONSE')) {
-        await this.sendResponse(message, null, error instanceof Error ? error.message : String(error));
+        const errMsg = error instanceof Error ? error.message : String(error);
+        // Include optional error code if present on the error object
+        const responseData: any = { error: errMsg };
+        if (error && typeof error === 'object' && 'code' in error && error.code) {
+          responseData.code = error.code;
+        }
+        const responseMessage = {
+          id: message.id,
+          type: `${message.type}_RESPONSE`,
+          data: responseData,
+          timestamp: Date.now(),
+          origin: (this as any).window.location.origin
+        };
+        (this as any).sendMessage(responseMessage);
       }
     }
   }
@@ -181,8 +194,12 @@ export class SecureMessenger {
     this.pendingRequests.delete(message.id);
 
     // Resolve or reject based on response
-    if (message.data && message.data.error) {
-      pending.reject(new Error(message.data.error));
+    if (message.data && (message.data as any).error) {
+      const errorObj: any = new Error((message.data as any).error);
+      if ((message.data as any).code) {
+        errorObj.code = (message.data as any).code;
+      }
+      pending.reject(errorObj);
     } else {
       pending.resolve(message.data);
     }

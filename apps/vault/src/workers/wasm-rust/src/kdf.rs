@@ -32,8 +32,9 @@ pub fn derive_key_from_password(
     };
     
     // Configure Argon2 parameters
-    // Memory: 64 MB, Iterations: 3, Parallelism: 4
-    let params = Params::new(65536, 3, 4, Some(32))
+    // Memory: 4 MB (4096 KiB), Iterations: 5, Parallelism: 1
+    // Minimal memory for WASM constraints, compensated with more iterations
+    let params = Params::new(4096, 5, 1, Some(32))
         .map_err(|e| CryptoError::DerivationError(e.to_string()))?;
     
     let argon2 = Argon2::new(

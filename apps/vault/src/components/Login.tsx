@@ -2,6 +2,8 @@ import { Component, createSignal, Show } from 'solid-js';
 import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady, useCryptoWorker, useEnvironment } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
 import PinSetup from './PinSetup';
+import { permissionService } from '../services/permissionService';
+import { DEFAULT_PERMISSIONS, DEFAULT_GET_PUBLIC_KEY } from '@nostrpass/types';
 
 function desanitizeDomain(domain: string) {
     return domain.replace(/_/g, '.');
@@ -171,6 +173,25 @@ export const Login: Component = () => {
             // Create account with PIN encryption
             const { publicKey } = await createAccount(accountData.username, accountData.password, pin, undefined);
             
+            // Automatically connect the current app with default permissions
+            try {
+                const appId = params.app;
+                if (appId) {
+                    setLoadingStatus('Connecting app with default permissions...');
+                    await permissionService.saveAppPermissions(
+                        accountData.username,
+                        appId,
+                        {
+                            permissions: { ...DEFAULT_PERMISSIONS },
+                            getPublicKey: DEFAULT_GET_PUBLIC_KEY
+                        },
+                        desanitizeDomain(appId)
+                    );
+                }
+            } catch (e) {
+                console.warn('Failed to auto-connect app permissions (non-fatal):', e);
+            }
+            
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
         
@@ -270,6 +291,25 @@ export const Login: Component = () => {
                 pin,
                 { questions, answers }
             );
+            
+            // Automatically connect the current app with default permissions
+            try {
+                const appId = params.app;
+                if (appId) {
+                    setLoadingStatus('Connecting app with default permissions...');
+                    await permissionService.saveAppPermissions(
+                        accountData.username,
+                        appId,
+                        {
+                            permissions: { ...DEFAULT_PERMISSIONS },
+                            getPublicKey: DEFAULT_GET_PUBLIC_KEY
+                        },
+                        desanitizeDomain(appId)
+                    );
+                }
+            } catch (e) {
+                console.warn('Failed to auto-connect app permissions (non-fatal):', e);
+            }
             
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');

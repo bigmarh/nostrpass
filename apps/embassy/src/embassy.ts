@@ -8,6 +8,7 @@
 import { ParentMessenger } from '@nostrpass/messenger';
 import { embassyMessageHandlers } from './embassyMessageHandlers';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { Msg } from '../../../packages/types/src/messages';
 
 interface EmbassyConfig {
   appName?: string;
@@ -16,6 +17,7 @@ interface EmbassyConfig {
   vaultUrl?: string;
   theme?: 'light' | 'dark' | 'auto';
   debug?: boolean;
+  parentPinOverlay?: boolean; // if true, show parent PIN UI (default false)
 }
 
 interface NostrEvent {
@@ -28,13 +30,18 @@ interface NostrEvent {
   sig?: string;
 }
 
+interface NostrOperationOptions {
+  identityIndex?: number;
+}
+
 interface NostrProvider {
-  getPublicKey(): Promise<string>;
-  signEvent(event: NostrEvent): Promise<NostrEvent>;
-  getRelays?(): Promise<Record<string, { read: boolean; write: boolean }>>;
+  getPublicKey(options?: NostrOperationOptions): Promise<string>;
+  signEvent(event: NostrEvent, options?: NostrOperationOptions): Promise<NostrEvent>;
+  signData?(message: string, options?: NostrOperationOptions): Promise<string>;
+  getRelays?(options?: NostrOperationOptions): Promise<Record<string, { read: boolean; write: boolean }>>;
   nip04?: {
-    encrypt(pubkey: string, plaintext: string): Promise<string>;
-    decrypt(pubkey: string, ciphertext: string): Promise<string>;
+    encrypt(pubkey: string, plaintext: string, options?: NostrOperationOptions): Promise<string>;
+    decrypt(pubkey: string, ciphertext: string, options?: NostrOperationOptions): Promise<string>;
   };
 }
 
@@ -43,8 +50,184 @@ class NostrPassEmbassy {
   private iframe: HTMLIFrameElement | null = null;
   private _isReady = false;
   private styleElement: HTMLStyleElement | null = null;
+  private backdropEl: HTMLDivElement | null = null;
   private messenger: ParentMessenger | null = null;
   private handlers: string[] = [];
+  private isPromptOpen = false;
+  // Reserved for future cooldown logic; intentionally unused for now
+  // private lastUnlockAt = 0;
+  private sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
+    private promptPin(): Promise<boolean> {
+      return new Promise((resolve) => {
+        if (this.isPromptOpen) return resolve(false);
+        this.isPromptOpen = true;
+        // Utility: scramble number buttons each time
+        const scramble = (arr: string[]) => arr.sort(() => Math.random() - 0.5);
+
+        // Remove any existing overlay
+        document.getElementById('np-pin-overlay')?.remove();
+
+        // Build overlay container
+        const overlay = document.createElement('div');
+        overlay.id = 'np-pin-overlay';
+        Object.assign(overlay.style, {
+          position: 'fixed',
+          inset: '0',
+          background: 'rgba(0,0,0,0.5)',
+          zIndex: '2147483647',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        } as CSSStyleDeclaration);
+
+        // Card container
+        const card = document.createElement('div');
+        Object.assign(card.style, {
+          padding: '16px',
+          borderRadius: '8px',
+          width: '320px',
+          maxWidth: '90vw',
+          fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
+        } as CSSStyleDeclaration);
+
+        const title = document.createElement('h3');
+        title.textContent = 'Unlock Vault';
+        Object.assign(title.style, { margin: '0 0 8px', fontSize: '16px' } as CSSStyleDeclaration);
+
+        const subtitle = document.createElement('p');
+        subtitle.textContent = 'Enter your PIN to continue.';
+        Object.assign(subtitle.style, { margin: '0 0 12px', color: '#555', fontSize: '13px' } as CSSStyleDeclaration);
+
+        // Dots display
+        const dots = document.createElement('div');
+        Object.assign(dots.style, { display: 'flex', justifyContent: 'center', gap: '12px', marginBottom: '12px' } as CSSStyleDeclaration);
+        const makeDots = (len: number) => {
+          dots.innerHTML = '';
+          for (let i = 0; i < 6; i++) {
+            const d = document.createElement('div');
+            d.style.width = '12px';
+            d.style.height = '12px';
+            d.style.borderRadius = '9999px';
+            d.style.border = '2px solid ' + (i < len ? '#111' : '#d1d5db');
+            dots.appendChild(d);
+          }
+        };
+
+        // Keypad grid
+        const grid = document.createElement('div');
+        Object.assign(grid.style, {
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '10px',
+          width: '240px',
+          margin: '0 auto'
+        } as CSSStyleDeclaration);
+
+        const numButton = (label: string) => {
+          const btn = document.createElement('button');
+          btn.textContent = label;
+          Object.assign(btn.style, {
+            width: '76px',
+            height: '56px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            fontWeight: '600',
+            cursor: 'pointer'
+          } as CSSStyleDeclaration);
+          return btn;
+        };
+
+        const actionButton = (label: string) => {
+          const btn = document.createElement('button');
+          btn.textContent = label;
+          Object.assign(btn.style, {
+            height: '44px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            background: '#fff',
+            cursor: 'pointer'
+          } as CSSStyleDeclaration);
+          return btn;
+        };
+
+        // State
+        let pin = '';
+        const numbers = scramble(['1','2','3','4','5','6','7','8','9','0']);
+
+        const cleanup = () => { this.isPromptOpen = false; overlay.remove(); };
+
+        const tryUnlock = async () => {
+          try {
+            const result = await (this.messenger as any).request('UNLOCK_WITH_PIN', { pin });
+            if (result?.success) {
+              cleanup();
+              resolve(true);
+            } else {
+              // Reset and reshuffle on failure
+              pin = '';
+              makeDots(0);
+              while (grid.firstChild) grid.removeChild(grid.firstChild);
+              scramble(numbers);
+              renderKeys();
+            }
+          } catch {
+            pin = '';
+            makeDots(0);
+          }
+        };
+
+        const onDigit = (d: string) => {
+          if (pin.length >= 6) return;
+          pin += d;
+          makeDots(pin.length);
+          if (pin.length === 6) {
+            void tryUnlock();
+          }
+        };
+
+        const onBackspace = () => {
+          if (!pin) return;
+          pin = pin.slice(0, -1);
+          makeDots(pin.length);
+        };
+
+        const renderKeys = () => {
+          numbers.forEach((n) => {
+            const b = numButton(n);
+            b.addEventListener('click', () => onDigit(n));
+            grid.appendChild(b);
+          });
+          const del = actionButton('← Delete');
+          del.style.gridColumn = 'span 2';
+          del.addEventListener('click', onBackspace);
+          grid.appendChild(del);
+          const empty = document.createElement('div');
+          grid.appendChild(empty);
+        };
+
+        // Footer actions
+        const footer = document.createElement('div');
+        Object.assign(footer.style, { display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'flex-end' } as CSSStyleDeclaration);
+        const cancelBtn = actionButton('Cancel');
+        cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
+        footer.appendChild(cancelBtn);
+
+        // Assemble
+        card.appendChild(title);
+        card.appendChild(subtitle);
+        card.appendChild(dots);
+        makeDots(0);
+        renderKeys();
+        card.appendChild(grid);
+        card.appendChild(footer);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+      });
+    }
+
+    public requestPinUnlock(): Promise<boolean> {
+      return this.promptPin();
+    }
 
   constructor(config: EmbassyConfig = {}) {
     this.config = {
@@ -53,7 +236,8 @@ class NostrPassEmbassy {
       permissions: config.permissions || ['getPublicKey', 'signEvent'],
       vaultUrl: config.vaultUrl || 'http://localhost:3001',
       theme: config.theme || 'auto',
-      debug: config.debug || false
+      debug: config.debug || false,
+      parentPinOverlay: config.parentPinOverlay ?? false
     };
 
     this.handlers = Object.keys(embassyMessageHandlers(this));
@@ -132,7 +316,15 @@ class NostrPassEmbassy {
         reject(new Error('Failed to load vault iframe'));
       };
 
-      // Add to DOM
+      // Create and insert backdrop before iframe for proper stacking
+      if (!this.backdropEl) {
+        this.backdropEl = document.createElement('div');
+        this.backdropEl.className = 'nostrpass-backdrop';
+        this.backdropEl.addEventListener('click', () => this.hide());
+      }
+
+      // Add to DOM: backdrop first, then iframe on top
+      document.body.appendChild(this.backdropEl);
       document.body.appendChild(this.iframe);
 
       if (this.config.debug) console.log('Iframe created and added to DOM');
@@ -149,6 +341,11 @@ class NostrPassEmbassy {
     // Remove hidden class to show iframe
     this.iframe.classList.remove('nostrpass-iframe-hidden');
     this.iframe.classList.add('nostrpass-iframe-visible');
+
+    // Show backdrop
+    if (this.backdropEl) {
+      this.backdropEl.style.display = 'block';
+    }
 
     // Accessibility
     this.iframe.setAttribute('aria-hidden', 'false');
@@ -172,6 +369,11 @@ class NostrPassEmbassy {
     // Add hidden class to move off-screen
     this.iframe.classList.remove('nostrpass-iframe-visible');
     this.iframe.classList.add('nostrpass-iframe-hidden');
+
+    // Hide backdrop
+    if (this.backdropEl) {
+      this.backdropEl.style.display = 'none';
+    }
 
     // Accessibility
     this.iframe.setAttribute('aria-hidden', 'true');
@@ -218,9 +420,21 @@ class NostrPassEmbassy {
         visibility: visible !important;
         pointer-events: auto !important;
         border: none !important;
+        background: #00000045 !important;
         z-index: 2147483647 !important; /* Maximum z-index */
-        background: #3333334d !important;
         color-scheme: light dark; /* Support both themes */
+      }
+
+      /* Dimmed backdrop behind iframe */
+      .nostrpass-backdrop {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        background: rgba(51, 51, 51, 0.3) !important;
+        z-index: 2147483646 !important; /* Just beneath iframe */
+        pointer-events: auto !important;
       }
       
       /* Debug mode - visible but smaller */
@@ -235,7 +449,6 @@ class NostrPassEmbassy {
         pointer-events: auto !important;
         border: 2px solid red !important;
         z-index: 999999 !important;
-        background: white !important;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
       }
     `;
@@ -302,27 +515,43 @@ class NostrPassEmbassy {
   }
 
   // Core Nostr methods
-  async getPublicKey(): Promise<string> {
+  async getPublicKey(options?: NostrOperationOptions): Promise<string> {
     // Ensure iframe and messenger exist
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
       await this.waitForReady();
     }
 
-    // Show iframe for user interaction
-    this.show();
-
     try {
+      // Preflight: check if a prompt is needed
+      const preflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+        action: 'getPublicKey',
+        identityIndex: options?.identityIndex
+      });
+      const needsPin = preflight?.isLocked === true;
+      const needsPrompt = preflight?.needsPrompt === true;
+      if (needsPin && this.config.parentPinOverlay) {
+        const ok = await this.requestPinUnlock();
+        if (!ok) throw new Error('User canceled PIN prompt');
+      } else if (needsPin && !this.config.parentPinOverlay) {
+        // Reveal the vault UI so the user can unlock inside the iframe
+        this.show('vault');
+      }
+      if (needsPrompt && !this.config.parentPinOverlay) {
+        // Show vault so the user can approve permissions inside the iframe
+        this.show('vault');
+      }
+
       // Send request to vault using messenger
-      const response = await this.messenger!.request('GET_PUBLIC_KEY', {
+      const response = await this.messenger!.request(Msg.GET_PUBLIC_KEY, {
         appName: this.config.appName,
-        appDomain: this.config.appDomain
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
       });
 
       if (this.config.debug) console.log('Public key received:', response);
 
-      // Hide iframe after successful response
-      this.hide();
+      // No iframe show/hide flicker
 
       return response.publicKey || response;
     } catch (error) {
@@ -332,30 +561,54 @@ class NostrPassEmbassy {
     }
   }
 
-  async signEvent(event: NostrEvent): Promise<NostrEvent> {
+  async signEvent(event: NostrEvent, options?: NostrOperationOptions): Promise<NostrEvent> {
     // Ensure iframe and messenger exist
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
       await this.waitForReady();
     }
 
-    // Show iframe for user interaction
-    this.show();
-
     try {
+      // Preflight: prompt for PIN first if needed, so the op can proceed without error
+      try {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+          action: 'signEvent',
+          eventKind: event?.kind,
+          identityIndex: options?.identityIndex
+        });
+        const needsPin = pre?.isLocked === true;
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
+        }
+      } catch {}
+
       // Send request to vault using messenger
-      const response = await this.messenger!.request('SIGN_EVENT', {
+      const send = async () => this.messenger!.request(Msg.SIGN_EVENT, {
         event,
         appName: this.config.appName,
-        appDomain: this.config.appDomain
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
       });
 
-      if (this.config.debug) console.log('Signed event received:', response);
-
-      // Hide iframe after successful response
-      this.hide();
-
-      return response.signedEvent || response;
+      try {
+        const response = await send();
+        if (this.config.debug) console.log('Signed event received:', response);
+        return response.signedEvent || response;
+      } catch (e: any) {
+        // If we JUST unlocked, there might be a tiny race. Retry once.
+        const msg = String(e?.message || e);
+        if (msg.toLowerCase().includes('vault is locked') || msg.toLowerCase().includes('rehydrated')) {
+          await this.sleep(150);
+          const response = await send();
+          if (this.config.debug) console.log('Signed event received (retry):', response);
+          return response.signedEvent || response;
+        }
+        throw e;
+      }
     } catch (error) {
       // Keep iframe visible on error
       console.error('Failed to sign event:', error);
@@ -369,16 +622,187 @@ class NostrPassEmbassy {
     return {};
   }
 
-  async encrypt(pubkey: string, plaintext: string): Promise<string> {
-    // TODO: Implement NIP-04 encrypt
-    console.log('TODO: encrypt', { pubkey, plaintext });
-    throw new Error('Not implemented');
+  async signData(message: string, options?: NostrOperationOptions): Promise<string> {
+    // Ensure iframe and messenger exist
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      // Preflight: prompt for PIN first if needed so the op can proceed
+      try {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+          action: 'signData',
+          identityIndex: options?.identityIndex
+        });
+        const needsPin = pre?.isLocked === true;
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
+        }
+      } catch {}
+
+      const doSign = async () => this.messenger!.request(Msg.SIGN_DATA, {
+        data: message,
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
+      });
+
+      try {
+        const resp = await doSign();
+        const signature = resp?.signature ?? resp;
+        if (this.config.debug) console.log('Signed data received:', signature);
+        return signature;
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+          await this.sleep(150);
+          try {
+            const resp = await doSign();
+            return resp?.signature ?? resp;
+          } catch (e2: any) {
+            const msg2 = String(e2?.message || e2);
+            if (msg2.toLowerCase().includes('rehydrated')) {
+              await this.sleep(200);
+              const resp2 = await doSign();
+              return resp2?.signature ?? resp2;
+            }
+            throw e2;
+          }
+        }
+        throw e;
+      }
+    } catch (error) {
+      console.error('Failed to sign data:', error);
+      throw error;
+    }
   }
 
-  async decrypt(pubkey: string, ciphertext: string): Promise<string> {
-    // TODO: Implement NIP-04 decrypt
-    console.log('TODO: decrypt', { pubkey, ciphertext });
-    throw new Error('Not implemented');
+  async encrypt(pubkey: string, plaintext: string, options?: NostrOperationOptions): Promise<string> {
+    // Ensure iframe and messenger exist
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      // Preflight: prompt for PIN first if needed
+      try {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+          action: 'nip04',
+          identityIndex: options?.identityIndex
+        });
+        const needsPin = pre?.isLocked === true;
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
+        }
+      } catch {}
+
+      // Send request to vault using messenger
+      const doEncrypt = async () => this.messenger!.request(Msg.ENCRYPT, {
+        plaintext,
+        recipientPubkey: pubkey,
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
+      });
+
+      try {
+        const ciphertext = await doEncrypt();
+        if (this.config.debug) console.log('Encrypted payload received:', ciphertext);
+        return ciphertext;
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+          await this.sleep(150);
+          try { return await doEncrypt(); } catch (e2: any) {
+            const msg2 = String(e2?.message || e2);
+            if (msg2.toLowerCase().includes('rehydrated')) {
+              await this.sleep(200);
+              return await doEncrypt();
+            }
+            throw e2;
+          }
+        }
+        throw e;
+      }
+    } catch (error) {
+      console.error('Failed to encrypt:', error);
+      throw error;
+    }
+  }
+
+  async decrypt(pubkey: string, ciphertext: string, options?: NostrOperationOptions): Promise<string> {
+    // Ensure iframe and messenger exist
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      // Preflight: prompt for PIN first if needed
+      try {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+          action: 'nip04',
+          identityIndex: options?.identityIndex
+        });
+        const needsPin = pre?.isLocked === true;
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
+          this.show('vault');
+        }
+      } catch {}
+
+      // Send request to vault using messenger
+      const doDecrypt = async () => this.messenger!.request(Msg.DECRYPT, {
+        ciphertext,
+        senderPubkey: pubkey,
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: options?.identityIndex
+      });
+
+      try {
+        const plaintext = await doDecrypt();
+        if (this.config.debug) console.log('Decrypted payload received:', plaintext);
+        return plaintext;
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+          await this.sleep(150);
+          try { return await doDecrypt(); } catch (e2: any) {
+            const msg2 = String(e2?.message || e2);
+            if (msg2.toLowerCase().includes('rehydrated')) {
+              await this.sleep(200);
+              return await doDecrypt();
+            }
+            throw e2;
+          }
+        }
+        throw e;
+      }
+    } catch (error) {
+      console.error('Failed to decrypt:', error);
+      throw error;
+    }
   }
 
   // Public utility methods
@@ -416,6 +840,12 @@ class NostrPassEmbassy {
       this.iframe = null;
     }
 
+    // Remove backdrop
+    if (this.backdropEl && this.backdropEl.parentNode) {
+      this.backdropEl.parentNode.removeChild(this.backdropEl);
+      this.backdropEl = null;
+    }
+
     // Remove styles
     if (this.styleElement && this.styleElement.parentNode) {
       this.styleElement.parentNode.removeChild(this.styleElement);
@@ -442,12 +872,13 @@ function initNostrPass(config: EmbassyConfig = {}): NostrProvider {
 
   // Create the nostr provider interface
   const nostrProvider: NostrProvider = {
-    getPublicKey: () => embassyInstance!.getPublicKey(),
-    signEvent: (event: NostrEvent) => embassyInstance!.signEvent(event),
+    getPublicKey: (options?: NostrOperationOptions) => embassyInstance!.getPublicKey(options),
+    signEvent: (event: NostrEvent, options?: NostrOperationOptions) => embassyInstance!.signEvent(event, options),
+    signData: (message: string, options?: NostrOperationOptions) => embassyInstance!.signData(message, options),
     getRelays: () => embassyInstance!.getRelays(),
     nip04: {
-      encrypt: (pubkey: string, plaintext: string) => embassyInstance!.encrypt(pubkey, plaintext),
-      decrypt: (pubkey: string, ciphertext: string) => embassyInstance!.decrypt(pubkey, ciphertext)
+      encrypt: (pubkey: string, plaintext: string, options?: NostrOperationOptions) => embassyInstance!.encrypt(pubkey, plaintext, options),
+      decrypt: (pubkey: string, ciphertext: string, options?: NostrOperationOptions) => embassyInstance!.decrypt(pubkey, ciphertext, options)
     }
   };
 

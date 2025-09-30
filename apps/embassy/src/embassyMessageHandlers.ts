@@ -34,8 +34,8 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
             
             return { acknowledged: true };
         },
-        AUTH_STATUS: () => {
-            console.log('Auth status signal received');
+        AUTH_STATUS: (data?: any) => {
+            console.log('Auth status signal received', data);
             return { acknowledged: true };
         },
         GET_RELAYS: () => {
@@ -44,6 +44,16 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
         },
         GOT_ERROR: () => {
             console.log('Error signal received');
+            return { acknowledged: true };
+        },
+        PROMPT_REQUIRED: async (data: any) => {
+            console.log('Prompt requested by vault:', data);
+            if (data?.promptType === 'PIN_PAD') {
+                const ok = await (embassyInstance as any).requestPinUnlock();
+                if (!ok) {
+                    console.warn('PIN prompt canceled or failed');
+                }
+            }
             return { acknowledged: true };
         }
     }

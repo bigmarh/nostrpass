@@ -337,7 +337,7 @@ Used to store encrypted vault data on Nostr.
     ["client", "nostrpass"],           // Client identifier
     ["version", "1.0.0"]               // Data version
   ],
-  content: encryptedVaultData,         // Encrypted JSON stringified VaultData
+  content: vaultObjJson,               // JSON stringified VaultObj (PIN-encrypted xpriv)
   created_at: timestamp,
   pubkey: storagePublicKey,            // Storage identity public key
   id: eventId,

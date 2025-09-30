@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Schnorr Verification</title>
+</head>
+<body>
+    <h1>Test Schnorr Signature Verification</h1>
+    <div id="output"></div>
+    
+    <script type="module">
+        const output = document.getElementById('output');
+        
+        async function test() {
+            try {
+                // Import the library
+                const secp = await import('https://esm.sh/@noble/secp256k1@2.1.0');
+                
+                // Your test data
+                const message = 'love';
+                const signature = '9f2c1cfae17e24a2d8074ed486a113e149751093f68614cccf0867c353730f1f5e2780c8d36fac47fa5b36469a19f1b130ba0f1d7a672928d1275a066015ce11';
+                const pubkey = '74dd1fb58e0cc021bdc8f7f69a3a42fc4eb9d829ad030ebc445756d6ecf372cd';
+                
+                // Hash the message
+                const msgBytes = new TextEncoder().encode(message);
+                const hashBuf = await crypto.subtle.digest('SHA-256', msgBytes);
+                const msgHash = new Uint8Array(hashBuf);
+                
+                // Convert to hex
+                const toHex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+                const msgHashHex = toHex(msgHash);
+                
+                output.innerHTML += `<p>Message: "${message}"</p>`;
+                output.innerHTML += `<p>Message Hash (hex): ${msgHashHex}</p>`;
+                output.innerHTML += `<p>Signature: ${signature}</p>`;
+                output.innerHTML += `<p>Public Key: ${pubkey}</p>`;
+                
+                // Try verification with different approaches
+                output.innerHTML += `<h3>Verification Attempts:</h3>`;
+                
+                // Method 1: Pass hex strings directly
+                try {
+                    const result1 = secp.schnorr.verify(signature, msgHashHex, pubkey);
+                    output.innerHTML += `<p style="color: green;">Method 1 (hex strings): ${result1 ? 'VALID' : 'INVALID'}</p>`;
+                } catch (e) {
+                    output.innerHTML += `<p style="color: red;">Method 1 error: ${e.message}</p>`;
+                }
+                
+                // Method 2: Try with the message directly (no pre-hash)
+                try {
+                    const msgHex = toHex(msgBytes);
+                    const result2 = secp.schnorr.verify(signature, msgHex, pubkey);
+                    output.innerHTML += `<p style="color: green;">Method 2 (message as hex): ${result2 ? 'VALID' : 'INVALID'}</p>`;
+                } catch (e) {
+                    output.innerHTML += `<p style="color: red;">Method 2 error: ${e.message}</p>`;
+                }
+                
+                // Method 3: Try with Uint8Array inputs
+                try {
+                    const fromHex = (hex) => {
+                        const bytes = new Uint8Array(hex.length / 2);
+                        for (let i = 0; i < hex.length; i += 2) {
+                            bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+                        }
+                        return bytes;
+                    };
+                    
+                    const sigBytes = fromHex(signature);
+                    const pkBytes = fromHex(pubkey);
+                    const result3 = secp.schnorr.verify(sigBytes, msgHash, pkBytes);
+                    output.innerHTML += `<p style="color: green;">Method 3 (Uint8Array): ${result3 ? 'VALID' : 'INVALID'}</p>`;
+                } catch (e) {
+                    output.innerHTML += `<p style="color: red;">Method 3 error: ${e.message}</p>`;
+                }
+                
+            } catch (error) {
+                output.innerHTML += `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+        
+        test();
+    </script>
+</body>
+</html>
