@@ -100,6 +100,11 @@ EOF
 echo "WASM module built successfully!"
 echo "Output directory: pkg/"
 
+# Patch the generated JavaScript file to fix memory cache issue
+echo "Patching generated JavaScript for proper memory cache handling..."
+sed -i.bak 's/if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {/if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0 || cachedUint8ArrayMemory0.buffer.detached === true || (cachedUint8ArrayMemory0.buffer.detached === undefined \&\& cachedUint8ArrayMemory0.buffer !== wasm.memory.buffer)) {/' pkg/nostrpass_crypto.js
+rm -f pkg/nostrpass_crypto.js.bak
+
 # Make the build output available to the worker
 echo "Copying WASM files to worker directory..."
 mkdir -p ../wasm

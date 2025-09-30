@@ -15,15 +15,11 @@ export const STORAGE_INDEX = 8907;
 
 // Derivation helpers
 export function identityPath(index: number): string {
-  return `m/${BIP44_PURPOSE}'/${BIP44_COIN_TYPE_NOSTR}'/${DEFAULT_ACCOUNT_INDEX}'/${DEFAULT_changeSegment()}/${index}`;
+  return `m/${BIP44_PURPOSE}'/${BIP44_COIN_TYPE_NOSTR}'/${DEFAULT_ACCOUNT_INDEX}'/${DEFAULT_CHANGE}/${index}`;
 }
 
 export function storagePath(): string {
-  return `m/${BIP44_PURPOSE}'/${BIP44_COIN_TYPE_NOSTR}'/1'/${DEFAULT_changeSegment()}/0`;
-}
-
-function DEFAULT_changeSegment(): number {
-  return DEFAULT_CHANGE;
+  return `m/${BIP44_PURPOSE}'/${BIP44_COIN_TYPE_NOSTR}'/1'/${DEFAULT_CHANGE}/0`;
 }
 
 // KDF parameters (Argon2id)

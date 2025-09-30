@@ -1,10 +1,14 @@
-import { Component, createSignal, Show, createEffect } from 'solid-js';
+import { Component, createSignal, Show, createEffect, For } from 'solid-js';
 import { useAuth, useCryptoWorker, useEnvironment } from '../providers';
 import { useNavigate, useParams } from '@solidjs/router';
 import { PermissionsDashboard } from './PermissionsDashboard';
+import RelaysSection from './RelaysSection';
+import SessionsSection from './SessionsSection';
+import { AuditLog } from './AuditLog';
 import type { Identity } from '@nostrpass/types';
+import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 
-type SettingsTab = 'identity' | 'permissions' | 'security';
+type SettingsTab = 'identity' | 'permissions' | 'security' | 'audit';
 
 export const Settings: Component = () => {
   const { user, logout, updateProfile } = useAuth();
@@ -18,6 +22,8 @@ export const Settings: Component = () => {
   const [editingNickname, setEditingNickname] = createSignal(false);
   const [newNickname, setNewNickname] = createSignal('');
   const [identityIndex, setIdentityIndex] = createSignal(0);
+  const [allIdentities, setAllIdentities] = createSignal<any[]>([]);
+  const [activeIndexForApp, setActiveIndexForApp] = createSignal<number | null>(null);
 
   // Load specific identity from URL
   createEffect(async () => {
@@ -31,6 +37,7 @@ export const Settings: Component = () => {
       });
       
       if (vaultData && vaultData.identities) {
+        setAllIdentities(vaultData.identities);
         // Find the identity that matches the pubkey from URL
         let foundIndex = -1;
         let foundIdentity = null;
@@ -58,6 +65,11 @@ export const Settings: Component = () => {
           setCurrentIdentity(foundIdentity);
           setNewNickname(foundIdentity.nickname || 'Personal');
           setIdentityPublicKey(identityPubkey);
+          try {
+            const appKey = sanitizeDomain(params.app);
+            const ai = (vaultData as any).activeIdentityByApp?.[appKey];
+            setActiveIndexForApp(typeof ai === 'number' ? ai : null);
+          } catch {}
         } else {
           // Identity not found - redirect to dashboard
           navigate(`/${params.app}/dashboard`);
@@ -109,10 +121,31 @@ export const Settings: Component = () => {
     }
   };
 
+  const makeActiveForThisApp = async (index: number) => {
+    const currentUser = user();
+    if (!currentUser || !cryptoWorker) return;
+    try {
+      const appKey = sanitizeDomain(params.app);
+      const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+      (vaultData as any).activeIdentityByApp = (vaultData as any).activeIdentityByApp || {};
+      (vaultData as any).activeIdentityByApp[appKey] = index;
+      (vaultData as any).updatedAt = Date.now();
+      await cryptoWorker.updateVaultData({ username: currentUser.profile.username, vaultData });
+      setActiveIndexForApp(index);
+      // Optionally sync to Nostr in background
+      try {
+        const vaultEvent = await cryptoWorker.saveVaultToNostr({ username: currentUser.profile.username });
+        const { publishEvent } = await import('@nostrpass/nostrHelpers');
+        await publishEvent(vaultEvent.event, env.getRelays());
+      } catch {}
+    } catch {}
+  };
+
   const tabs: { id: SettingsTab; label: string; icon: string }[] = [
     { id: 'identity', label: 'Identity', icon: '👤' },
     { id: 'permissions', label: 'App Permissions', icon: '🔒' },
-    { id: 'security', label: 'Security', icon: '🛡️' }
+    { id: 'security', label: 'Security', icon: '🛡️' },
+    { id: 'audit', label: 'Audit Log', icon: '📝' }
   ];
 
   return (
@@ -265,10 +298,37 @@ export const Settings: Component = () => {
               </Show>
               
               <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
-                  You are viewing settings for the "{currentIdentity()?.nickname || 'Personal'}" identity.
-                  Each identity maintains its own permissions and settings.
-                </p>
+                <div class="space-y-4">
+                  <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Identities</h3>
+                  <div class="grid gap-3">
+                    <For each={allIdentities()}>
+                      {(id, idx) => (
+                        <div class={`flex items-center justify-between p-3 rounded-lg border ${activeIndexForApp() === idx() ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700'}`}>
+                          <div>
+                            <div class="text-sm text-gray-900 dark:text-white font-medium">{id.nickname || (idx() === 0 ? 'Personal' : `Identity ${idx()}`)}</div>
+                            <div class="text-xs text-gray-600 dark:text-gray-400">Index {idx()}</div>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <Show when={activeIndexForApp() === idx()} fallback={
+                              <button
+                                onClick={() => makeActiveForThisApp(idx())}
+                                class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                              >
+                                Use for this app
+                              </button>
+                            }>
+                              <span class="text-xs px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Active</span>
+                            </Show>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
+                    You are viewing settings for the "{currentIdentity()?.nickname || 'Personal'}" identity.
+                    Each identity maintains its own permissions and settings.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -284,6 +344,8 @@ export const Settings: Component = () => {
               Security Settings
             </h2>
             <div class="space-y-6">
+              <SessionsSection />
+              <RelaysSection />
               <div>
                 <h3 class="font-medium mb-2 text-gray-900 dark:text-white">Session Timeout</h3>
                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
@@ -312,20 +374,67 @@ export const Settings: Component = () => {
 
               <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
                 <h3 class="font-medium mb-2 text-red-600 dark:text-red-400">Danger Zone</h3>
-                <button
-                  onClick={() => {
-                    if (confirm('Are you sure you want to log out?')) {
-                      logout();
-                      navigate(`/${params.app}`);
-                    }
-                  }}
-                  class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  Log Out
-                </button>
+                <div class="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => navigate(`/${params.app}/unlock?recovery=1`)}
+                    class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Start Recovery
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const current = user();
+                        if (current) {
+                          const cw = useCryptoWorker();
+                          if (cw) {
+                            await cw.clearSession({ username: current.profile.username });
+                          }
+                        }
+                        navigate(`/${params.app}/unlock`);
+                      } catch {}
+                    }}
+                    class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                  >
+                    Lock Vault
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm('Are you sure you want to log out?')) {
+                        logout();
+                        navigate(`/${params.app}`);
+                      }
+                    }}
+                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    Log Out
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (confirm('⚠️ DELETE ACCOUNT?\n\nThis will permanently delete your vault from this device.\n\nYour data on Nostr relays will remain (can be recovered with username).')) {
+                        try {
+                          await logout(true);
+                          // Wait for deletion to complete
+                          await new Promise(resolve => setTimeout(resolve, 200));
+                          navigate(`/${params.app}`);
+                        } catch (error) {
+                          console.error('Failed to delete vault:', error);
+                          alert('Failed to delete vault. Check console for details.');
+                        }
+                      }
+                    }}
+                    class="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors border-2 border-red-600"
+                  >
+                    Delete Local Vault
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+        </Show>
+
+        <Show when={activeTab() === 'audit'}>
+          <AuditLog />
         </Show>
       </div>
     </div>

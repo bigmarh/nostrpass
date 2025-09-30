@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NostrPass E2E Test Host</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+        button { margin: 5px; padding: 10px; }
+        .result { margin: 10px 0; padding: 10px; background: #f5f5f5; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <h1>NostrPass E2E Test Host</h1>
+    
+    <div class="test-section">
+        <h3>Provider Status</h3>
+        <div id="provider-status">Loading...</div>
+        <button id="init-provider">Initialize Provider</button>
+    </div>
+
+    <div class="test-section">
+        <h3>NIP-07 Tests</h3>
+        <button id="test-getPublicKey">Test getPublicKey</button>
+        <button id="test-signEvent">Test signEvent</button>
+        <button id="test-nip04-encrypt">Test NIP-04 Encrypt</button>
+        <button id="test-nip04-decrypt">Test NIP-04 Decrypt</button>
+        <div id="nip07-results" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Permission Tests</h3>
+        <button id="test-permission-deny">Test Permission Deny</button>
+        <div id="permission-results" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Identity Tests</h3>
+        <button id="test-identity-switch">Test Identity Switch</button>
+        <div id="identity-results" class="result"></div>
+    </div>
+
+    <script type="module">
+        // Test data
+        const testEvent = {
+            kind: 1,
+            content: "Hello from E2E test!",
+            tags: [],
+            created_at: Math.floor(Date.now() / 1000)
+        };
+
+        const testMessage = "Secret message for encryption test";
+        const testPubkey = "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9";
+
+        let provider = null;
+        let currentPubkey = null;
+
+        // Initialize provider
+        document.getElementById('init-provider').addEventListener('click', async () => {
+            try {
+                // Load the provider script
+                const script = document.createElement('script');
+                script.src = '/embassy.js';
+                script.onload = () => {
+                    if (window.nostr) {
+                        provider = window.nostr;
+                        document.getElementById('provider-status').innerHTML = 
+                            '<span class="success">Provider loaded successfully</span>';
+                    } else {
+                        document.getElementById('provider-status').innerHTML = 
+                            '<span class="error">Provider not available</span>';
+                    }
+                };
+                script.onerror = () => {
+                    document.getElementById('provider-status').innerHTML = 
+                        '<span class="error">Failed to load provider script</span>';
+                };
+                document.head.appendChild(script);
+            } catch (error) {
+                document.getElementById('provider-status').innerHTML = 
+                    `<span class="error">Error: ${error.message}</span>`;
+            }
+        });
+
+        // Test getPublicKey
+        document.getElementById('test-getPublicKey').addEventListener('click', async () => {
+            if (!provider) {
+                showResult('nip07-results', 'Provider not initialized', 'error');
+                return;
+            }
+
+            try {
+                const pubkey = await provider.getPublicKey();
+                currentPubkey = pubkey;
+                showResult('nip07-results', `Public key: ${pubkey}`, 'success');
+            } catch (error) {
+                showResult('nip07-results', `Error: ${error.message} (Code: ${error.code})`, 'error');
+            }
+        });
+
+        // Test signEvent
+        document.getElementById('test-signEvent').addEventListener('click', async () => {
+            if (!provider) {
+                showResult('nip07-results', 'Provider not initialized', 'error');
+                return;
+            }
+
+            try {
+                const signedEvent = await provider.signEvent(testEvent);
+                showResult('nip07-results', 
+                    `Event signed successfully! ID: ${signedEvent.id}, Sig: ${signedEvent.sig?.substring(0, 20)}...`, 
+                    'success');
+            } catch (error) {
+                showResult('nip07-results', `Error: ${error.message} (Code: ${error.code})`, 'error');
+            }
+        });
+
+        // Test NIP-04 Encrypt
+        document.getElementById('test-nip04-encrypt').addEventListener('click', async () => {
+            if (!provider || !provider.nip04) {
+                showResult('nip07-results', 'NIP-04 not available', 'error');
+                return;
+            }
+
+            try {
+                const encrypted = await provider.nip04.encrypt(testPubkey, testMessage);
+                window.testEncryptedMessage = encrypted; // Store for decrypt test
+                showResult('nip07-results', `Encrypted: ${encrypted.substring(0, 50)}...`, 'success');
+            } catch (error) {
+                showResult('nip07-results', `Error: ${error.message} (Code: ${error.code})`, 'error');
+            }
+        });
+
+        // Test NIP-04 Decrypt
+        document.getElementById('test-nip04-decrypt').addEventListener('click', async () => {
+            if (!provider || !provider.nip04) {
+                showResult('nip07-results', 'NIP-04 not available', 'error');
+                return;
+            }
+
+            if (!window.testEncryptedMessage) {
+                showResult('nip07-results', 'No encrypted message to decrypt. Run encrypt test first.', 'error');
+                return;
+            }
+
+            try {
+                const decrypted = await provider.nip04.decrypt(testPubkey, window.testEncryptedMessage);
+                showResult('nip07-results', `Decrypted: ${decrypted}`, 'success');
+            } catch (error) {
+                showResult('nip07-results', `Error: ${error.message} (Code: ${error.code})`, 'error');
+            }
+        });
+
+        // Test Permission Deny
+        document.getElementById('test-permission-deny').addEventListener('click', async () => {
+            if (!provider) {
+                showResult('permission-results', 'Provider not initialized', 'error');
+                return;
+            }
+
+            try {
+                // This should trigger a permission prompt that we can deny
+                await provider.signEvent(testEvent);
+                showResult('permission-results', 'Unexpected: Permission was granted', 'error');
+            } catch (error) {
+                if (error.code === 'E_PERMISSION_DENIED') {
+                    showResult('permission-results', 'Permission correctly denied', 'success');
+                } else {
+                    showResult('permission-results', `Unexpected error: ${error.message} (Code: ${error.code})`, 'error');
+                }
+            }
+        });
+
+        // Test Identity Switch
+        document.getElementById('test-identity-switch').addEventListener('click', async () => {
+            if (!provider) {
+                showResult('identity-results', 'Provider not initialized', 'error');
+                return;
+            }
+
+            try {
+                const pubkey1 = await provider.getPublicKey({ identityIndex: 0 });
+                const pubkey2 = await provider.getPublicKey({ identityIndex: 1 });
+                
+                if (pubkey1 !== pubkey2) {
+                    showResult('identity-results', 
+                        `Identity switch works! Pubkey 0: ${pubkey1.substring(0, 20)}..., Pubkey 1: ${pubkey2.substring(0, 20)}...`, 
+                        'success');
+                } else {
+                    showResult('identity-results', 'Identity switch not working - same pubkey returned', 'error');
+                }
+            } catch (error) {
+                showResult('identity-results', `Error: ${error.message} (Code: ${error.code})`, 'error');
+            }
+        });
+
+        function showResult(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="${type}">${message}</div>`;
+        }
+
+        // Auto-initialize provider on load
+        window.addEventListener('load', () => {
+            document.getElementById('init-provider').click();
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { createWorkerHost } from '@nostrpass/worker-messenger';
-import { handlers, ensureWasmReady } from './crypto.handlers';
+import { handlers, ensureCryptoReady } from './crypto.handlers';
 
 // Re-export handlers for type checking
 export { handlers };
@@ -39,25 +39,25 @@ if (isSharedWorker) {
   self.postMessage({ type: 'WORKER_READY' });
 }
 
-// Pre-initialize WASM on worker startup - CRITICAL for SharedWorker
+// Pre-initialize crypto on worker startup - CRITICAL for SharedWorker
 // Must be initialized before handling any connections
-let wasmInitPromise = ensureWasmReady()
+let cryptoInitPromise = ensureCryptoReady()
   .then(() => {
-    console.log('[CryptoWorker] WASM crypto module ready');
+    console.log('[CryptoWorker] Noble crypto module ready');
     return true;
   })
   .catch((error) => {
-    console.error('[CryptoWorker] Error initializing WASM:', error);
+    console.error('[CryptoWorker] Error initializing crypto:', error);
     throw error;
   });
 
-// Ensure WASM is ready before processing any messages
+// Ensure crypto is ready before processing any messages
 if (isSharedWorker) {
-  // Wrap all handlers to ensure WASM is ready first
+  // Wrap all handlers to ensure crypto is ready first
   for (const key in handlers) {
     const originalHandler = (handlers as any)[key];
     (handlers as any)[key] = async (...args: any[]) => {
-      await wasmInitPromise; // Wait for WASM to be ready
+      await cryptoInitPromise; // Wait for crypto to be ready
       return originalHandler(...args);
     };
   }

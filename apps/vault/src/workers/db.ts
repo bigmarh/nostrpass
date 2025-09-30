@@ -70,7 +70,11 @@ class VaultDB {
     console.log('💾 Saving vault to IndexedDB:', {
       username: vaultData.username,
       dataSize: `${(dataSize / 1024).toFixed(2)} KB`,
-      identitiesCount: vaultData.identities?.length || 0
+      identitiesCount: vaultData.identities?.length || 0,
+      hasXprivEncrypted: !!(vaultData as any).xprivEncrypted,
+      xprivEncryptedLength: (vaultData as any).xprivEncrypted?.length,
+      hasPasswordSalt: !!(vaultData as any).passwordSalt,
+      allKeys: Object.keys(vaultData)
     });
     
     const run = (): Promise<void> => new Promise((resolve, reject) => {
@@ -118,7 +122,11 @@ class VaultDB {
           const result = request.result || null;
           if (result) {
             console.log('📤 Retrieved vault from IndexedDB:', {
-              username: result.username
+              username: result.username,
+              hasXprivEncrypted: !!(result as any).xprivEncrypted,
+              xprivEncryptedLength: (result as any).xprivEncrypted?.length,
+              hasPasswordSalt: !!(result as any).passwordSalt,
+              allKeys: Object.keys(result)
             });
           }
           resolve(result);
@@ -160,12 +168,24 @@ class VaultDB {
     if (!this.db) await this.init();
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['vaults'], 'readwrite');
-      const store = transaction.objectStore('vaults');
-      const request = store.delete(username);
+      // Delete from both vaults and xprivs stores
+      const transaction = this.db!.transaction(['vaults', 'xprivs', 'sessions'], 'readwrite');
+      const vaultStore = transaction.objectStore('vaults');
+      const xprivStore = transaction.objectStore('xprivs');
+      const sessionStore = transaction.objectStore('sessions');
+      
+      // Delete vault data
+      vaultStore.delete(username);
+      // Delete cached xpriv
+      xprivStore.delete(username);
+      // Delete session
+      sessionStore.delete(username);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => {
+        console.log('🗑️ Deleted vault, xpriv, and session for:', username);
+        resolve();
+      };
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 
@@ -250,6 +270,25 @@ class VaultDB {
 
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Clear all data from all stores (for testing/reset)
+  async clearAll(): Promise<void> {
+    if (!this.db) await this.init();
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(['vaults', 'xprivs', 'sessions'], 'readwrite');
+      
+      transaction.objectStore('vaults').clear();
+      transaction.objectStore('xprivs').clear();
+      transaction.objectStore('sessions').clear();
+
+      transaction.oncomplete = () => {
+        console.log('🗑️ Cleared all IndexedDB data');
+        resolve();
+      };
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 

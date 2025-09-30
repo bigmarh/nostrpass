@@ -81,7 +81,8 @@ add_header Strict-Transport-Security "max-age=63072000" always;
 NODE_ENV=production
 VITE_ENVIRONMENT=production
 VITE_VAULT_URL=https://vault.nostrpass.com
-VITE_EMBASSY_URL=https://cdn.nostrpass.com/embassy.js
+# If using IIFE build, point to provider bundle
+VITE_PROVIDER_URL=https://cdn.nostrpass.com/provider/index.iife.js
 VITE_NOSTR_RELAYS=wss://relay.nostr.band,wss://relay.damus.io,wss://nos.lol
 VITE_SENTRY_DSN=your-sentry-dsn
 VITE_GA_ID=your-google-analytics-id
@@ -97,9 +98,9 @@ npm install
 # Build all packages
 npm run build
 
-# Build specific apps
+# Build specific apps/packages
 npm run build:vault
-npm run build:embassy
+pnpm --filter @nostrpass/provider build
 ```
 
 **CI/CD Pipeline (GitHub Actions):**
@@ -140,11 +141,11 @@ jobs:
           ./apps/vault/dist/ \
           user@vault.nostrpass.com:/var/www/vault/
     
-    - name: Deploy Embassy
+    - name: Deploy Provider SDK
       run: |
         rsync -avz --delete \
-          ./apps/embassy/dist/ \
-          user@cdn.nostrpass.com:/var/www/embassy/
+          ./packages/provider/dist/ \
+          user@cdn.nostrpass.com:/var/www/provider/
     
     - name: Purge CDN Cache
       run: |
@@ -194,13 +195,13 @@ server {
 }
 ```
 
-**Embassy CDN Configuration:**
+**Provider CDN Configuration:**
 ```nginx
 server {
     listen 443 ssl http2;
     server_name cdn.nostrpass.com;
     
-    root /var/www/embassy;
+    root /var/www/provider;
     
     # CORS Headers for SDK
     add_header Access-Control-Allow-Origin "*" always;

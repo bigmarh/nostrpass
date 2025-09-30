@@ -1,4 +1,4 @@
-import { createContext, useContext, ParentComponent, createSignal, onMount, onCleanup } from 'solid-js';
+import { createContext, useContext, ParentComponent, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { IframeMessenger } from '@nostrpass/messenger';
 import { setupMessageHandlers } from '../messageHandlers';
 import { useEnvironment } from './EnvironmentProvider';
@@ -21,7 +21,14 @@ export const MessengerProvider: ParentComponent = (props) => {
   const [messenger, setMessenger] = createSignal<IframeMessenger | null>(null);
   const [handlersRegistered, setHandlersRegistered] = createSignal(false);
   const { isDevelopment, isStaging, isProduction } = useEnvironment();
-  const auth = useAuth();
+  
+  const getAuth = () => {
+    try {
+      return useAuth();
+    } catch {
+      return null;
+    }
+  };
 
   onMount(() => {
     // Initialize messenger
@@ -91,9 +98,10 @@ export const MessengerProvider: ParentComponent = (props) => {
   });
 
   // Once auth and messenger are available, register message handlers with deps
-  onMount(() => {
+  createEffect(() => {
     const m = messenger();
-    if (!m) return;
+    const auth = getAuth();
+    if (!m || !auth) return;
 
     const deps = {
       getUser: () => auth.user(),

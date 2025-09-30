@@ -4,6 +4,8 @@ import './index.css';
 import { Router, Route } from '@solidjs/router';
 import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock } from './components';
 import PermissionPromptController from './components/PermissionPromptController';
+import { ToastProvider } from './components/Toast';
+import { I18nProvider } from './i18n';
 
 const AppContent: Component = () => {
   return (
@@ -18,10 +20,14 @@ const AppContent: Component = () => {
 
 const App: Component = () => {
   return (
-    <AppProviders>
-      <AppContent />
-      <PermissionPromptController />
-    </AppProviders>
+    <I18nProvider>
+      <ToastProvider>
+        <AppProviders>
+          <AppContent />
+          <PermissionPromptController />
+        </AppProviders>
+      </ToastProvider>
+    </I18nProvider>
   );
 };
 

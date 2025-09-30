@@ -24,8 +24,8 @@ export default defineConfig({
       // Bundle all external dependencies
       external: [],
     },
-    // Target older browsers for better compatibility
-    target: 'es2015',
+    // Target ES2020 for BigInt support (required by Noble libraries)
+    target: 'es2020',
     minify: process.env.NODE_ENV === 'production',
     sourcemap: true,
   },

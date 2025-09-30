@@ -173,6 +173,54 @@ pub fn get_identity_path(index: u32) -> String {
     format!("m/44'/1237'/0'/0/{}", index)
 }
 
+/// Derive storage keypair from xpriv for vault data encryption
+/// Uses a separate account (1) and specific index for storage operations
+/// Path: m/44'/1237'/1'/0/0
+pub fn derive_storage_keypair_from_xpriv(xpriv_str: &str) -> Result<(String, String), CryptoError> {
+    // Parse the extended private key
+    let master: XPrv = xpriv_str.parse()
+        .map_err(|e| CryptoError::InvalidKey(format!("Failed to parse xpriv: {}", e)))?;
+    
+    // Define the storage path: m/44'/1237'/1'/0/0
+    // 44' = purpose (BIP44)
+    // 1237' = coin type (Nostr)
+    // 1' = account 1 (separate from user identities)
+    // 0 = external chain
+    // 0 = address index
+    let path = DerivationPath::from_str("m/44'/1237'/1'/0/0")
+        .map_err(|e| CryptoError::KeyGenerationFailed(format!("Invalid derivation path: {}", e)))?;
+    
+    // Derive the child key by iterating through the path
+    let mut current_key = master;
+    for child_number in path {
+        current_key = current_key.derive_child(child_number)
+            .map_err(|e| CryptoError::KeyGenerationFailed(format!("Failed to derive child key: {}", e)))?;
+    }
+    let child = current_key;
+    
+    // Get the private key bytes
+    let private_key = child.private_key();
+    let private_key_bytes = private_key.to_bytes();
+    let private_key_hex = hex::encode(&private_key_bytes);
+    
+    // Convert to Nostr-compatible x-only public key
+    let secret_key = SecretKey::from_bytes(&private_key_bytes)
+        .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+    let signing_key = SigningKey::from(secret_key);
+    let verifying_key = signing_key.verifying_key();
+    
+    // Get x-only public key (32 bytes) for Nostr
+    let public_key_bytes = verifying_key.to_bytes();
+    let public_key_hex = hex::encode(public_key_bytes);
+    
+    Ok((private_key_hex, public_key_hex))
+}
+
+/// Get the storage derivation path
+pub fn get_storage_path() -> String {
+    "m/44'/1237'/1'/0/0".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

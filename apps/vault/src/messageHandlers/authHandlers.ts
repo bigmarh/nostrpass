@@ -2,6 +2,8 @@ import { MessageHandler, MessageHandlerDependencies } from './index';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { Msg } from '@nostrpass/types';
 import { vaultError, ErrorCode } from './errors';
+import { showErrorToast, showSuccessToast } from '../components/Toast';
+import { addAuditEvent } from '../components/AuditLog';
 
 function originToAppKey(origin: string): string {
   try {
@@ -59,7 +61,22 @@ export const authHandlers: MessageHandler[] = [
       if (!appIdentity?.appPermissions || !appIdentity.appPermissions[appKey]) {
         throw vaultError(ErrorCode.PERMISSION_DENIED, 'Selected identity is not authorized for this application');
       }
-      if (appIdentity?.publicKey) return appIdentity.publicKey;
+      if (appIdentity?.publicKey) {
+        showSuccessToast('Public Key Retrieved', `Public key provided to ${data?.appName || 'app'}`);
+        
+        // Log audit event
+        addAuditEvent({
+          type: 'permission',
+          action: 'Public Key Retrieved',
+          details: `Public key provided to ${data?.appName || 'app'} (${origin})`,
+          appName: data?.appName,
+          appId: origin,
+          identityIndex: requestedIndex,
+          severity: 'low'
+        });
+        
+        return appIdentity.publicKey;
+      }
       throw vaultError(ErrorCode.INTERNAL, 'No identity available');
     }
   },
@@ -184,6 +201,19 @@ export const authHandlers: MessageHandler[] = [
       });
 
       // Return just the signature string (NIP-07 format)
+      showSuccessToast('Event Signed', `Event signed for ${data?.appName || 'app'}`);
+      
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Event Signed',
+        details: `Event signed for ${data?.appName || 'app'} (${origin})`,
+        appName: data?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
+      });
+      
       return signature;
     }
   },
@@ -245,6 +275,7 @@ export const authHandlers: MessageHandler[] = [
         identityIndex
       });
 
+      showSuccessToast('Message Encrypted', `Message encrypted for ${data?.appName || 'app'}`);
       return encrypted;
     }
   },

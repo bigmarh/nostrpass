@@ -1,4 +1,4 @@
-import init, { NostrCrypto } from './wasm/nostrpass_crypto.js';
+import { NostrCrypto } from './crypto.noble';
 import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tools/nip04';
 import { vaultDB, type VaultData, type UserSession } from './db';
 
@@ -7,7 +7,7 @@ import { vaultDB, type VaultData, type UserSession } from './db';
  *
  * There are two layers of crypto operations in this worker:
  *
- * 1) Primitive WASM functions (stateless) that require a raw key:
+ * 1) Primitive crypto functions (stateless) that require a raw key:
  *    - crypto.signEvent(event, privateKey)
  *    - crypto.signMessage(message, privateKey)
  *    - crypto.nip04Encrypt(plaintext, privateKey, recipientPubkey)
@@ -20,14 +20,14 @@ import { vaultDB, type VaultData, type UserSession } from './db';
  *    - encryptWithSession({ username, plaintext, recipientPubkey, identityIndex })
  *    - decryptWithSession({ username, ciphertext, senderPubkey, identityIndex })
  *
- * The “WithSession” suffix disambiguates these safe, session-backed handlers
+ * The "WithSession" suffix disambiguates these safe, session-backed handlers
  * from the raw-key primitives. External calls (Embassy/Vault APIs) must use
  * the session-aware handlers. The primitives are only used internally when
  * we already hold the key material.
  */
 
-// Initialize WASM module
-let wasmReady = false;
+// Initialize crypto module (Noble libraries)
+let cryptoReady = false;
 let cryptoInstance: NostrCrypto | null = null;
 
 // Worker initialization timestamp
@@ -58,27 +58,39 @@ function logSessionState(action: string, username: string) {
   };
 }
 
-async function ensureWasmReady() {
-  if (!wasmReady) {
-    // Load WASM module with explicit path
-    try {
-      // Try to load WASM from public folder
-      const wasmUrl = '/nostrpass_crypto_bg.wasm';
-      await init(wasmUrl);
-    } catch (e) {
-      console.warn('[Worker] Failed to load WASM from public folder, trying worker path:', e);
-      try {
-        // Try worker directory path
-        const wasmUrl = '/src/workers/wasm/nostrpass_crypto_bg.wasm';
-        await init(wasmUrl);
-      } catch (e2) {
-        console.warn('[Worker] Failed to load WASM with explicit URL, trying default:', e2);
-        // Fallback to default initialization
-        await init();
-      }
-    }
+// Helper to ensure session is not already unlocked
+function ensureNotLocked(username: string) {
+  const session = activeSessions.get(username);
+  if (session?.isUnlocked) {
+    console.warn(`[Worker] Session for ${username} is already unlocked`);
+    // Don't throw - just warn. Allow re-unlocking.
+  }
+}
+
+// Helper to check if session is expired
+function isSessionExpired(session: ExtendedSession): boolean {
+  if (!session.unlockedAt) return true;
+  
+  // Session expires after 30 minutes of inactivity
+  const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes in milliseconds
+  const now = Date.now();
+  const timeSinceUnlock = now - session.unlockedAt;
+  
+  return timeSinceUnlock > SESSION_TIMEOUT;
+}
+
+// PIN attempt tracking
+const pinAttempts = new Map<string, { count: number; lastAttempt: number }>();
+
+function resetPinAttempts(username: string) {
+  pinAttempts.delete(username);
+}
+
+async function ensureCryptoReady() {
+  if (!cryptoReady) {
+    // Create Noble crypto instance (no initialization needed)
     cryptoInstance = new NostrCrypto();
-    wasmReady = true;
+    cryptoReady = true;
     
     // Initialize database
     await vaultDB.init();
@@ -90,7 +102,7 @@ async function ensureWasmReady() {
     await restoreActiveSessions();
   }
   if (!cryptoInstance) {
-    throw new Error('WASM crypto instance not initialized');
+    throw new Error('Crypto instance not initialized');
   }
   return cryptoInstance;
 }
@@ -194,9 +206,34 @@ import type {
 export const handlers = {
   // Initialize a locked session by saving vault data and seeding minimal session state
   initSession: async (params: { username: string; publicKey: string; vaultData: any }): Promise<{ success: boolean }> => {
-    await ensureWasmReady();
-    // Normalize vault data
-    const vaultToSave = { ...params.vaultData };
+    await ensureCryptoReady();
+    
+    console.log('🔧 [initSession] Received vault data:', {
+      username: params.username,
+      hasXprivEncrypted: !!params.vaultData.xprivEncrypted,
+      xprivEncryptedLength: params.vaultData.xprivEncrypted?.length,
+      hasIdentities: !!params.vaultData.identities,
+      identitiesCount: params.vaultData.identities?.length,
+      allKeys: Object.keys(params.vaultData)
+    });
+    
+    // Normalize vault data - map xprivEncrypted to encryptedVault for database storage
+    const vaultToSave = {
+      ...params.vaultData,
+      encryptedVault: params.vaultData.xprivEncrypted,  // Map to DB field name
+      publicKey: params.publicKey,
+      lastUnlocked: Date.now(),
+      createdAt: params.vaultData.createdAt || Date.now()
+    };
+    
+    console.log('💾 [initSession] Saving vault with mapped fields:', {
+      username: vaultToSave.username,
+      hasEncryptedVault: !!vaultToSave.encryptedVault,
+      encryptedVaultLength: vaultToSave.encryptedVault?.length,
+      hasIdentities: !!vaultToSave.identities,
+      allKeys: Object.keys(vaultToSave)
+    });
+    
     // Save/refresh vault data
     await vaultDB.saveVault(vaultToSave);
     // Persist xprivs store too if present
@@ -225,9 +262,11 @@ export const handlers = {
 
   // Sign a Nostr event using the current session keys for a specific identity
   signEventWithSession: async (params: { username: string; event: any; identityIndex: number }): Promise<{ event: any }> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const session = activeSessions.get(params.username);
-    if (!session) throw new Error('No session found');
+    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+      throw new Error('Session expired or locked');
+    }
 
     // Resolve private key for identity
     let privateKey: string | undefined = undefined;
@@ -270,9 +309,11 @@ export const handlers = {
 
   // Sign arbitrary data using session keys for a specific identity
   signMessageWithSession: async (params: { username: string; message: string; identityIndex: number }): Promise<{ signature: string }> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const session = activeSessions.get(params.username);
-    if (!session) throw new Error('No session found');
+    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+      throw new Error('Session expired or locked');
+    }
 
     let privateKey: string | undefined = undefined;
     if (params.identityIndex === 0 && session.privateKey) {
@@ -289,9 +330,11 @@ export const handlers = {
 
   // Encrypt with session key for a specific identity (NIP-04)
   encryptWithSession: async (params: { username: string; plaintext: string; recipientPubkey: string; identityIndex: number }): Promise<string> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const session = activeSessions.get(params.username);
-    if (!session) throw new Error('No session found');
+    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+      throw new Error('Session expired or locked');
+    }
 
     let privateKey: string | undefined = undefined;
     if (params.identityIndex === 0 && session.privateKey) {
@@ -308,9 +351,11 @@ export const handlers = {
 
   // Decrypt with session key for a specific identity (NIP-04)
   decryptWithSession: async (params: { username: string; ciphertext: string; senderPubkey: string; identityIndex: number }): Promise<string> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const session = activeSessions.get(params.username);
-    if (!session) throw new Error('No session found');
+    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+      throw new Error('Session expired or locked');
+    }
 
     let privateKey: string | undefined = undefined;
     if (params.identityIndex === 0 && session.privateKey) {
@@ -327,14 +372,14 @@ export const handlers = {
 
   // Return PIN-encrypted xpriv and salts from the dedicated store
   getEncryptedXpriv: async (params: { username: string }): Promise<{ encryptedXpriv: string; pinSalt: string; passwordSalt?: string } | null> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const row = await vaultDB.getXpriv(params.username);
     if (!row) return null;
     return row;
   },
   // Preflight: check if session has keys loaded
   hasKeysInSession: async (params: { username: string }): Promise<{ hasPrivateKey: boolean; hasXpriv: boolean; hasStorageKeypair: boolean }> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const session = activeSessions.get(params.username);
     const hasPrivateKey = !!(session && session.privateKey);
     const hasXpriv = !!(session && (session as any).xpriv);
@@ -344,39 +389,39 @@ export const handlers = {
 
   // Generate a new master extended private key (xpriv)
   generateXpriv: async (): Promise<{ xpriv: string }> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const xpriv = crypto.generateXpriv();
     return { xpriv };
   },
 
   generateKeypair: async (_params: GenerateKeypairParams): Promise<GenerateKeypairResult> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     return crypto.generateKeypair();
   },
 
   signEvent: async (params: SignEventParams): Promise<SignEventResult> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const signedEvent = crypto.signEvent(params.event, params.privateKey);
     return { event: signedEvent };
   },
 
   signMessage: async (params: SignMessageParams): Promise<SignMessageResult> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     return { signature: crypto.signMessage(params.message, params.privateKey) };
   },
 
   calculateEventId: async (params: { event: any }): Promise<string> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     return crypto.calculateEventId(params.event);
   },
 
   getPublicKey: async (params: { privateKey: string }): Promise<string> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     return crypto.getPublicKey(params.privateKey);
   },
 
   encrypt: async (params: EncryptParams): Promise<string> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     return nip04EncryptJS(
       params.privateKey,
       params.recipientPubkey,
@@ -385,7 +430,7 @@ export const handlers = {
   },
 
   decrypt: async (params: DecryptParams): Promise<string> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     return nip04DecryptJS(
       params.privateKey,
       params.senderPubkey,
@@ -395,7 +440,7 @@ export const handlers = {
 
   // Derive identity keypair using xpriv from the current session
   deriveIdentityFromSession: async (params: { username: string; index: number }): Promise<{ publicKey: string; path: string }> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const session = activeSessions.get(params.username);
     if (!session || !(session as any).xpriv) {
       throw new Error('No xpriv in session - please unlock with PIN first');
@@ -421,7 +466,7 @@ export const handlers = {
   },
 
   deriveKey: async (params: DeriveKeyParams): Promise<DeriveKeyResult> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const result = crypto.deriveKeyFromPassword(params.password, params.salt);
     
     // Handle if result is a Map (from serde_wasm_bindgen)
@@ -437,7 +482,7 @@ export const handlers = {
   },
 
   encryptData: async (params: EncryptDataParams): Promise<string> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     
     // Use key directly if provided, otherwise use password
     const encryptionKey = params.key || params.password;
@@ -445,11 +490,12 @@ export const handlers = {
       throw new Error('Either key or password must be provided');
     }
     
-    return crypto.encryptData(params.data, encryptionKey);
+    // Use Argon2id-based encryption for better security
+    return crypto.encryptDataWithArgon2(params.data, encryptionKey);
   },
 
   decryptData: async (params: DecryptDataParams): Promise<string> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     
     // Use key directly if provided, otherwise use password
     const decryptionKey = params.key || params.password;
@@ -457,11 +503,12 @@ export const handlers = {
       throw new Error('Either key or password must be provided');
     }
     
-    return crypto.decryptData(params.encryptedData, decryptionKey);
+    // Use Argon2id-based decryption for better security
+    return crypto.decryptDataWithArgon2(params.encryptedData, decryptionKey);
   },
 
   deriveKeypairFromXpriv: async (params: { xpriv: string; index: number }): Promise<any> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const result = crypto.deriveKeypairFromXpriv(params.xpriv, params.index);
     
     // Handle if result is a Map (from serde_wasm_bindgen)
@@ -476,9 +523,80 @@ export const handlers = {
     return result;
   },
 
+  // PIN-based encryption with specific salt (for xpriv encryption)
+  encryptDataWithSalt: async (params: { data: string; password: string; salt: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.encryptDataWithSalt(params.data, params.password, params.salt);
+  },
+
+  // PIN-based decryption with specific salt (for xpriv decryption)
+  decryptDataWithSalt: async (params: { encryptedData: string; password: string; salt: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.decryptDataWithSalt(params.encryptedData, params.password, params.salt);
+  },
+
+  // Generate secure random bytes
+  generateRandomBytes: async (params: { length: number }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.generateRandomBytes(params.length);
+  },
+
+  // Generate secure salt
+  generateSalt: async (): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.generateSalt();
+  },
+
+  // Derive storage keypair from xpriv for vault data encryption
+  deriveStorageKeypairFromXpriv: async (params: { xpriv: string }): Promise<any> => {
+    const crypto = await ensureCryptoReady();
+    const result = crypto.deriveStorageKeypairFromXpriv(params.xpriv);
+    
+    // Handle if result is a Map (from serde_wasm_bindgen)
+    if (result instanceof Map) {
+      return {
+        privateKey: result.get('privateKey'),
+        publicKey: result.get('publicKey'),
+        path: result.get('path')
+      };
+    }
+    
+    return result;
+  },
+
+  // Get storage derivation path
+  getStoragePath: async (): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.getStoragePath();
+  },
+
+  // Encrypt LoginObj with storage public key
+  encryptLoginObj: async (params: { loginObj: string; storagePublicKey: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.encryptLoginObj(params.loginObj, params.storagePublicKey);
+  },
+
+  // Decrypt LoginObj with storage private key
+  decryptLoginObj: async (params: { encryptedLoginObj: string; storagePrivateKey: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.decryptLoginObj(params.encryptedLoginObj, params.storagePrivateKey);
+  },
+
+  // Encrypt VaultObj with PIN
+  encryptVaultObj: async (params: { vaultObj: string; pin: string; salt: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.encryptVaultObj(params.vaultObj, params.pin, params.salt);
+  },
+
+  // Decrypt VaultObj with PIN
+  decryptVaultObj: async (params: { encryptedVaultObj: string; pin: string; salt: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.decryptVaultObj(params.encryptedVaultObj, params.pin, params.salt);
+  },
+
   // Add the vault management handlers
   createVault: async (params: CreateVaultParams): Promise<CreateVaultResult> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     
     // Generate the vault
     const vaultResult = crypto.createVault(params.username, params.pin);
@@ -537,7 +655,7 @@ export const handlers = {
   },
 
   unlockVault: async (params: UnlockVaultParams): Promise<UnlockVaultResult> => {
-    const crypto = await ensureWasmReady();
+    await ensureCryptoReady();
     
     // Get vault data from IndexedDB
     const vaultData = await vaultDB.getVault(params.username);
@@ -552,6 +670,7 @@ export const handlers = {
     });
 
     // Decrypt the vault
+    ensureNotLocked(params.username);
     const decryptedResult = crypto.decryptVault(
       vaultData.encryptedVault,
       params.pin
@@ -621,6 +740,7 @@ export const handlers = {
     }
     
     activeSessions.set(params.username, session);
+    resetPinAttempts(params.username);
     logSessionState('unlock', params.username);
     
     // Update last unlocked time
@@ -641,7 +761,7 @@ export const handlers = {
 
   // Back-compat alias: unlockSession behaves like unlockVault but accepts { username, privateKey, xpriv }
   unlockSession: async (params: { username: string; privateKey?: string; xpriv?: string }): Promise<{ success: boolean }> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const v = await vaultDB.getVault(params.username);
     const session = activeSessions.get(params.username) || {
       username: params.username,
@@ -649,11 +769,13 @@ export const handlers = {
       isUnlocked: false,
       unlockedAt: Date.now()
     } as ExtendedSession;
+    ensureNotLocked(params.username);
     if (params.privateKey) session.privateKey = params.privateKey;
     if (params.xpriv) (session as any).xpriv = params.xpriv;
     session.isUnlocked = !!(session.privateKey || (session as any).xpriv);
     session.unlockedAt = Date.now();
     activeSessions.set(params.username, session);
+    resetPinAttempts(params.username);
     logSessionState('UNLOCKED_ALIAS', params.username);
     await vaultDB.saveSession({ username: params.username, publicKey: session.publicKey!, isUnlocked: session.isUnlocked } as any);
     broadcastVaultUpdate(params.username, 'SESSION_UNLOCKED', { username: params.username });
@@ -661,7 +783,7 @@ export const handlers = {
   },
 
   lockVault: async (params: LockVaultParams): Promise<void> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     const session = activeSessions.get(params.username);
     if (session) {
@@ -681,7 +803,7 @@ export const handlers = {
 
   // Explicit logout clears session and broadcasts to all tabs
   logoutUser: async (params: { username: string }): Promise<{ success: boolean }> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const username = params.username;
     // Clear in-memory session data
     const session = activeSessions.get(username);
@@ -703,7 +825,7 @@ export const handlers = {
 
   // Clear session without full logout (used by UI for cleanup)
   clearSession: async (params: { username: string }): Promise<{ success: boolean }> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const username = params.username;
     const session = activeSessions.get(username);
     if (session) {
@@ -719,7 +841,7 @@ export const handlers = {
   },
 
   getSession: async (params: GetSessionParams): Promise<GetSessionResult> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     const session = activeSessions.get(params.username);
     const vaultData = await vaultDB.getVault(params.username);
@@ -741,7 +863,7 @@ export const handlers = {
 
   // Additional handlers for recovery, etc.
   recoverVault: async (params: RecoverVaultParams): Promise<RecoverVaultResult> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     
     const vaultData = await vaultDB.getVault(params.username);
     if (!vaultData) {
@@ -800,7 +922,7 @@ export const handlers = {
   },
 
   updateVaultRecovery: async (params: UpdateVaultRecoveryParams): Promise<void> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     // Update recovery data in database
     await vaultDB.updateVault(params.username, {
@@ -817,20 +939,20 @@ export const handlers = {
   },
 
   checkVaultExists: async (params: CheckVaultExistsParams): Promise<CheckVaultExistsResult> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     const vaultData = await vaultDB.getVault(params.username);
     return { exists: !!vaultData };
   },
 
   deleteVault: async (params: DeleteVaultParams): Promise<DeleteVaultResult> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     // Remove from active sessions
     activeSessions.delete(params.username);
     logSessionState('delete', params.username);
     
-    // Delete from database
+    // Delete from database (vaults, xprivs, sessions)
     await vaultDB.deleteVault(params.username);
     
     // Broadcast deletion
@@ -839,8 +961,23 @@ export const handlers = {
     return { success: true };
   },
 
+  // Clear all data (for testing/reset)
+  clearAllData: async (): Promise<{ success: boolean }> => {
+    await ensureCryptoReady();
+    
+    // Clear all in-memory sessions
+    activeSessions.clear();
+    
+    // Clear all database stores
+    await vaultDB.clearAll();
+    
+    console.log('🗑️ All vault data cleared');
+    
+    return { success: true };
+  },
+
   getVaultData: async (params: { username: string }): Promise<VaultData | null> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     // Get vault data from database
     const vaultData = await vaultDB.getVault(params.username);
@@ -866,7 +1003,7 @@ export const handlers = {
 
   // Update vault data atomically and broadcast change
   updateVaultData: async (params: { username: string; vaultData: any }): Promise<void> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const toSave = { ...params.vaultData };
     // Ensure redundant fields are in sync (write primary -> encryptedVault for storage only)
     if (toSave.xprivEncrypted) {
@@ -889,7 +1026,7 @@ export const handlers = {
   // Session status helper for UI (kept for compatibility)
   getSessionStatus: async (_params?: { username?: string }): Promise<{ sessionId: string | null; username: string | null }> => {
     try {
-      await ensureWasmReady();
+      await ensureCryptoReady();
       
       // Prefer any active in-memory session
       if (activeSessions.size > 0) {
@@ -916,7 +1053,7 @@ export const handlers = {
   ,
   // Refresh session (broadcast to all tabs)
   refreshSession: async (params: { username: string }): Promise<{ success: boolean }> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     const session = activeSessions.get(params.username);
     if (session) {
@@ -943,7 +1080,7 @@ export const handlers = {
 
   // Get app permissions for a specific origin using the active identity for that app
   getAppPermissions: async (params: { username: string; origin: string; identityIndex?: number }): Promise<any | null> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     const vault = await vaultDB.getVault(params.username);
     if (!vault || !vault.identities || vault.identities.length === 0) return null;
     const identityIndex = Math.max(0, Math.min(
@@ -957,7 +1094,7 @@ export const handlers = {
 
   // Save/update app permissions scoped to origin on the active identity for that app
   saveAppPermissions: async (params: { username: string; origin: string; permissions: any; appName?: string; identityIndex?: number }): Promise<{ success: boolean }> => {
-    await ensureWasmReady();
+    await ensureCryptoReady();
     
     const { username, origin, permissions, appName } = params;
     // Get current vault data
@@ -1024,7 +1161,7 @@ export const handlers = {
 
   // Build a minimal vault event for Nostr publishing (fallback if WASM builder missing)
   saveVaultToNostr: async (params: { username: string }): Promise<{ event: any }> => {
-    const crypto = await ensureWasmReady();
+    const crypto = await ensureCryptoReady();
     const vault = await vaultDB.getVault(params.username);
     if (!vault) throw new Error('No vault to save');
     const session = (activeSessions as any).get(params.username);
@@ -1034,8 +1171,7 @@ export const handlers = {
     let priv = session?.storagePrivateKey || session?.privateKey;
     
     if (!priv && session?.xpriv) {
-      const STORAGE_INDEX = 1000000;
-      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
+      const derived = await handlers.deriveStorageKeypairFromXpriv({ xpriv: session.xpriv });
       priv = (derived as any).privateKey;
       pub = (derived as any).publicKey;
       (session as any).storagePrivateKey = priv;
@@ -1129,4 +1265,4 @@ export const handlers = {
 };
 
 // Export utility functions for worker initialization
-export { ensureWasmReady, activeSessions, logSessionState };
+export { ensureCryptoReady, activeSessions, logSessionState };

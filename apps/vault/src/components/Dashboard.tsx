@@ -261,8 +261,14 @@ export const Dashboard: Component = () => {
     });
 
     const handleLogout = async () => {
-        await logout();
-        navigate(`/${params.app}`);
+        try {
+            await logout();
+            // Small delay to ensure state is cleared before navigation
+            await new Promise(resolve => setTimeout(resolve, 50));
+            navigate(`/${params.app}`);
+        } catch (error) {
+            console.error('Logout failed:', error);
+        }
     };
 
     const handleHideVault = () => {

@@ -123,14 +123,14 @@ pub fn nip04_decrypt(
         .map_err(|e| CryptoError::DecryptionError(e.to_string()))
 }
 
-/// Encrypt data with AES-256-GCM for local storage
+/// Encrypt data with AES-256-GCM for local storage using Argon2id
 pub fn aes_encrypt(data: &[u8], password: &str) -> Result<Vec<u8>, CryptoError> {
-    // Derive key from password using SHA256 (for now, should use proper KDF)
-    let mut hasher = Sha256::new();
-    hasher.update(password.as_bytes());
-    let key = hasher.finalize();
+    use crate::kdf::derive_key_from_password;
     
-    let cipher = Aes256Gcm::new_from_slice(&key)
+    // Derive key from password using Argon2id
+    let derived = derive_key_from_password(password, None)?;
+    
+    let cipher = Aes256Gcm::new_from_slice(&derived.key)
         .map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
     
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
@@ -139,7 +139,59 @@ pub fn aes_encrypt(data: &[u8], password: &str) -> Result<Vec<u8>, CryptoError> 
         .encrypt(&nonce, data)
         .map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
     
-    // Combine nonce and ciphertext
+    // Combine salt, nonce and ciphertext
+    let mut result = Vec::new();
+    result.extend_from_slice(derived.salt.as_bytes());
+    result.extend_from_slice(&nonce);
+    result.extend_from_slice(&ciphertext);
+    
+    Ok(result)
+}
+
+/// Decrypt data with AES-256-GCM using Argon2id
+pub fn aes_decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, CryptoError> {
+    use crate::kdf::derive_key_from_password;
+    
+    if data.len() < 44 { // 32 bytes salt + 12 bytes nonce minimum
+        return Err(CryptoError::DecryptionError("Invalid ciphertext".to_string()));
+    }
+    
+    // Extract salt (first 32 bytes), nonce (next 12 bytes), and ciphertext
+    let (salt_bytes, rest) = data.split_at(32);
+    let (nonce_bytes, ciphertext) = rest.split_at(12);
+    
+    let salt = String::from_utf8(salt_bytes.to_vec())
+        .map_err(|e| CryptoError::DecryptionError(e.to_string()))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+    
+    // Derive key from password using the stored salt
+    let derived = derive_key_from_password(password, Some(&salt))?;
+    
+    let cipher = Aes256Gcm::new_from_slice(&derived.key)
+        .map_err(|e| CryptoError::DecryptionError(e.to_string()))?;
+    
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| CryptoError::DecryptionError(e.to_string()))
+}
+
+/// Encrypt data with AES-256-GCM using a specific salt (for PIN-based encryption)
+pub fn aes_encrypt_with_salt(data: &[u8], password: &str, salt: &str) -> Result<Vec<u8>, CryptoError> {
+    use crate::kdf::derive_key_from_password;
+    
+    // Derive key from password using provided salt
+    let derived = derive_key_from_password(password, Some(salt))?;
+    
+    let cipher = Aes256Gcm::new_from_slice(&derived.key)
+        .map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
+    
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    
+    let ciphertext = cipher
+        .encrypt(&nonce, data)
+        .map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
+    
+    // Combine nonce and ciphertext (salt is already known)
     let mut result = Vec::new();
     result.extend_from_slice(&nonce);
     result.extend_from_slice(&ciphertext);
@@ -147,21 +199,22 @@ pub fn aes_encrypt(data: &[u8], password: &str) -> Result<Vec<u8>, CryptoError> 
     Ok(result)
 }
 
-/// Decrypt data with AES-256-GCM
-pub fn aes_decrypt(data: &[u8], password: &str) -> Result<Vec<u8>, CryptoError> {
-    if data.len() < 12 {
+/// Decrypt data with AES-256-GCM using a specific salt (for PIN-based decryption)
+pub fn aes_decrypt_with_salt(data: &[u8], password: &str, salt: &str) -> Result<Vec<u8>, CryptoError> {
+    use crate::kdf::derive_key_from_password;
+    
+    if data.len() < 12 { // 12 bytes nonce minimum
         return Err(CryptoError::DecryptionError("Invalid ciphertext".to_string()));
     }
     
+    // Extract nonce and ciphertext
     let (nonce_bytes, ciphertext) = data.split_at(12);
     let nonce = Nonce::from_slice(nonce_bytes);
     
-    // Derive key from password
-    let mut hasher = Sha256::new();
-    hasher.update(password.as_bytes());
-    let key = hasher.finalize();
+    // Derive key from password using provided salt
+    let derived = derive_key_from_password(password, Some(salt))?;
     
-    let cipher = Aes256Gcm::new_from_slice(&key)
+    let cipher = Aes256Gcm::new_from_slice(&derived.key)
         .map_err(|e| CryptoError::DecryptionError(e.to_string()))?;
     
     cipher
