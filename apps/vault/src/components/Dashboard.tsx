@@ -964,17 +964,6 @@ export const Dashboard: Component = () => {
                             </div>
                             <div class="flex items-center gap-2">
                                 <button
-                                    onClick={() => setShowGlobalSettings(true)}
-                                    class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
-                                    title="Settings"
-                                >
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
-                                    <span class="text-sm hidden md:inline">Settings</span>
-                                </button>
-                                <button
                                     onClick={handleLogout}
                                     class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
                                     title="Logout"
@@ -1191,23 +1180,18 @@ export const Dashboard: Component = () => {
 
                     <footer class="text-sm py-4 px-4 border-t border-gray-200 flex justify-between items-center relative">
                         <div class="flex items-center gap-4">
-                            {/* Manual sync buttons - only show in development */}
-                            <Show when={import.meta.env.DEV}>
-                                <button
-                                    onClick={handleManualSync}
-                                    class="text-gray-500 hover:text-gray-700 text-xs transition-colors"
-                                    title="Sync to Nostr (Dev only)"
-                                >
-                                    Sync to Nostr
-                                </button>
-                                <button
-                                    onClick={handleGetFromNostr}
-                                    class="text-gray-500 hover:text-gray-700 text-xs transition-colors"
-                                    title="Get from Nostr (Dev only)"
-                                >
-                                    Get from Nostr
-                                </button>
-                            </Show>
+                            {/* Settings button */}
+                            <button
+                                onClick={() => setShowGlobalSettings(true)}
+                                class="text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+                                title="Vault Settings"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <span class="text-xs">Settings</span>
+                            </button>
                         </div>
                         <div class="text-gray-400">
                             {searchQuery() && (
@@ -1684,6 +1668,36 @@ export const Dashboard: Component = () => {
                                         <span class="text-sm text-gray-600">Identities:</span>
                                         <span class="text-sm font-medium text-gray-900">{identities().length}</span>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* Nostr Sync Actions */}
+                            <div>
+                                <h3 class="text-lg font-medium text-gray-900 mb-3">Nostr Sync</h3>
+                                <div class="space-y-3">
+                                    <button
+                                        onClick={handleManualSync}
+                                        class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                        title="Sync your vault data to Nostr relays"
+                                    >
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                        </svg>
+                                        <span>Sync to Nostr</span>
+                                    </button>
+                                    <button
+                                        onClick={handleGetFromNostr}
+                                        class="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
+                                        title="Get latest vault data from Nostr relays"
+                                    >
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                                        </svg>
+                                        <span>Get from Nostr</span>
+                                    </button>
+                                    <p class="text-xs text-gray-500 mt-2">
+                                        Use these to manually sync your vault data with Nostr relays. Auto-sync happens on changes.
+                                    </p>
                                 </div>
                             </div>
 
