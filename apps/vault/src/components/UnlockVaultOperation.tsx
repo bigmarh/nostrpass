@@ -1,10 +1,13 @@
 import { Component, createSignal, Show } from 'solid-js';
 import { useAuth, useMessenger } from '../providers';
+import { useNavigate, useParams } from '@solidjs/router';
 import PinPad from './PinPad';
 
 const UnlockVaultOperation: Component = () => {
   const { unlockVault, isLoading, logout } = useAuth();
   const { send } = useMessenger();
+  const navigate = useNavigate();
+  const params = useParams();
   const [pin, setPin] = createSignal('');
   const [error, setError] = createSignal('');
   const [success, setSuccess] = createSignal('');
@@ -41,6 +44,12 @@ const UnlockVaultOperation: Component = () => {
         } catch (err) {
           console.error('Failed to send unlock notification:', err);
         }
+        
+        // Navigate back to dashboard
+        setTimeout(() => {
+          const appSegment = params.app || '';
+          navigate(`/${appSegment}`);
+        }, 500); // Small delay to show success message
       } else {
         console.log('❌ [UnlockVaultOperation] Unlock failed - incorrect PIN');
         setError('Incorrect PIN. Please try again.');

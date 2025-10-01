@@ -63,7 +63,7 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
                 console.log('✅ Unlock was for an operation, notifying waiters');
                 (embassyInstance as any).notifyUnlocked();
             }
-            return { acknowledged: true };
+            // Don't return anything - this is a notification, not a request/response
         }
     }
 };
