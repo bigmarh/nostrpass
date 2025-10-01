@@ -1,5 +1,26 @@
+// Top-level error handler
+self.addEventListener('error', (event) => {
+  console.error('[CryptoWorker] Uncaught error:', event.error);
+  // Post error to main thread
+  if (self.postMessage) {
+    self.postMessage({ type: 'WORKER_ERROR', error: event.error?.message || String(event.error) });
+  }
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  console.error('[CryptoWorker] Unhandled rejection:', event.reason);
+  // Post error to main thread
+  if (self.postMessage) {
+    self.postMessage({ type: 'WORKER_ERROR', error: event.reason?.message || String(event.reason) });
+  }
+});
+
+console.log('[CryptoWorker] Starting initialization...');
+
 import { createWorkerHost } from '@nostrpass/worker-messenger';
 import { handlers, ensureCryptoReady } from './crypto.handlers';
+
+console.log('[CryptoWorker] Imports loaded successfully');
 
 // Re-export handlers for type checking
 export { handlers };
@@ -10,23 +31,33 @@ export type CryptoWorkerMethods = typeof handlers;
 const isSharedWorker = typeof (globalThis as any).SharedWorkerGlobalScope !== 'undefined' && 
                        self instanceof (globalThis as any).SharedWorkerGlobalScope;
 
+console.log('[CryptoWorker] Worker type detected:', isSharedWorker ? 'SharedWorker' : 'DedicatedWorker');
+
 if (isSharedWorker) {
-  // Initialize a single host to register handlers and let it manage per-port wiring
-  createWorkerHost(handlers as any);
+  // Create worker host ONCE - it handles all port connections internally
+  console.log('[SharedWorker] Creating single worker host (handles all ports)');
+  const host = createWorkerHost(handlers as any, { debug: true });
   
-  // Track connections for diagnostics and send readiness signals
+  // Track connections for diagnostics
   const ports: Set<MessagePort> = new Set();
   console.log('[SharedWorker] Initializing in SharedWorker mode');
   
   self.addEventListener('connect', (event: any) => {
     const port: MessagePort = event.ports[0];
     ports.add(port);
+    
+    console.log('[SharedWorker] New connection received (worker host will handle it)');
+    
+    // Port is automatically handled by WorkerMessenger's internal connect listener
+    // Just send ready signal
     try { port.start(); } catch {}
     port.postMessage({ type: 'WORKER_READY' });
+    
     port.addEventListener('close', () => {
       ports.delete(port);
       console.log('[SharedWorker] Port closed, remaining connections:', ports.size);
     });
+    
     console.log('[SharedWorker] Active connections:', ports.size);
   });
 } else {

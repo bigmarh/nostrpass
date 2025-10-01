@@ -5,12 +5,14 @@ import type { VaultData } from '@nostrpass/nostrHelpers';
 export type { VaultData };
 
 export interface UserSession {
+  sessionId?: string; // Added for session tracking
   username: string;
   publicKey: string;
   privateKey?: string; // Only stored temporarily in memory
   isUnlocked: boolean;
   unlockedAt?: number;
   expiresAt?: number;
+  createdAt?: number; // When the session was created
 }
 
 const DB_NAME = 'NostrPassVault';
@@ -126,8 +128,12 @@ class VaultDB {
               hasXprivEncrypted: !!(result as any).xprivEncrypted,
               xprivEncryptedLength: (result as any).xprivEncrypted?.length,
               hasPasswordSalt: !!(result as any).passwordSalt,
+              identitiesCount: result.identities?.length || 0,
+              identities: result.identities,
               allKeys: Object.keys(result)
             });
+          } else {
+            console.log('❌ No vault found in IndexedDB for username:', username);
           }
           resolve(result);
         };

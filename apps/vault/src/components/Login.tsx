@@ -400,15 +400,15 @@ export const Login: Component = () => {
     };
 
     return (
-        <div class="flex justify-center md:h-screen items-center">
-            <div class="flex min-w-[400px] w-full max-w-2xl h-auto bg-white black-outline flex-col md:flex-row rounded-lg ">
-                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center  md:rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center p-4 md:w-48 md:min-w-[12rem]`}>
+        <div class="w-full h-full md:flex md:justify-center md:items-center">
+            <div class="flex w-full md:min-w-[400px] md:max-w-2xl min-h-screen md:min-h-0 md:h-auto bg-white black-outline flex-col md:flex-row md:rounded-lg md:shadow-2xl">
+                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center  md:rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center pt-8 pb-2 px-4 md:p-4 md:w-48 md:min-w-[12rem]`}>
                     <div class="w-32 h-32 ">
                         <img class="w-full h-full " src="/logo.svg" alt="NostrPass Logo" />
                     </div>
                    
                 </div>
-                <div class="flex flex-1 flex-col items-center justify-center min-w-0 p-6">
+                <div class="flex flex-1 flex-col items-center  min-w-0 pt-2 pb-6 px-6 md:p-6">
                     <div class="w-full max-w-sm space-y-4">
                         <div class="text-center">
                             <h1 class="text-xl font-semibold">{isSignup() ? 'Create Account' : 'Welcome Back'}</h1>

@@ -32,7 +32,8 @@ const ENVIRONMENT_CONFIGS: Record<string, EnvironmentConfig> = {
     relays: [
       'wss://relay.damus.io',
       'wss://nos.lol',
-      // 'wss://relay.nostr.band', // Temporarily disabled - might be requiring PoW
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
       'ws://localhost:8080' // Local relay for testing
     ],
     debug: true

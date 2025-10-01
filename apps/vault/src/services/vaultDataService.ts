@@ -208,12 +208,17 @@ export class VaultDataService {
       const vaultEvent = await cryptoWorker.saveVaultToNostr({ username });
       console.log('✅ Vault event created:', vaultEvent.event.id);
       
-      // Get relays and publish
+      // Get relays - prefer user's custom relays if set
       const { publishEvent } = await import('@nostrpass/nostrHelpers');
       const { getRelays } = await import('../providers/EnvironmentProvider');
-      const relays = getRelays();
-      console.log('📡 Publishing to relays:', relays);
+      const vaultData = await this.getVaultData(username);
+      const relays = vaultData?.customRelays && vaultData.customRelays.length > 0 
+        ? vaultData.customRelays 
+        : getRelays();
+      console.log('📡 Publishing to relays:', relays, vaultData?.customRelays ? '(custom)' : '(default)');
       
+      // For background syncs, don't use worker for PoW (keeps worker free for user operations)
+      // PoW runs in main thread, but it's OK since this is already a background operation
       const publishedRelays = await publishEvent(vaultEvent.event, relays);
       console.log('✅ Vault synced to Nostr successfully:', publishedRelays);
     } catch (error) {

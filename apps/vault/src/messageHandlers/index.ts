@@ -72,12 +72,12 @@ export function setupMessageHandlers(
   messenger.use(async (context, next) => {
     if (lockProtected.has(context.type)) {
       if (dependencies.isVaultLocked()) {
-        // Navigate to /:app/unlock to show the PIN UI inside the iframe
+        // Navigate to /:app/unlock-quick to show the minimal PIN UI inside the iframe
         try {
           const currentPath = window.location.pathname;
           const segments = currentPath.split('/').filter(Boolean);
           const appSegment = segments[0] || (context.metadata && (context.metadata as any).appKey) || '';
-          const target = `/${appSegment}/unlock`;
+          const target = `/${appSegment}/unlock-quick`;
           if (currentPath !== target) {
             window.history.pushState({}, '', target);
             window.dispatchEvent(new PopStateEvent('popstate'));

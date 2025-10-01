@@ -55,6 +55,15 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
                 }
             }
             return { acknowledged: true };
+        },
+        'nostrpass:unlocked': (data: any) => {
+            console.log('🔓 Vault unlocked signal received from vault iframe', data);
+            // Notify any waiting operations that unlock is complete
+            if (data?.forOperation) {
+                console.log('✅ Unlock was for an operation, notifying waiters');
+                (embassyInstance as any).notifyUnlocked();
+            }
+            return { acknowledged: true };
         }
     }
 };

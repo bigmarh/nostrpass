@@ -27,6 +27,9 @@ export interface VaultData {
     version: number; // Recovery system version
   };
   
+  // User preferences
+  customRelays?: string[]; // User's preferred relays (overrides default if set)
+  
   // Metadata
   updatedAt: number;
   version: number; // Vault version for migrations

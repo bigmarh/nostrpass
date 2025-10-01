@@ -254,7 +254,14 @@ export const handlers = {
     activeSessions.set(params.username, session);
     logSessionState('SESSION_INIT', params.username);
     // Persist non-sensitive session status
-    await vaultDB.saveSession({ username: params.username, publicKey: params.publicKey, isUnlocked: false } as any);
+    const sessionId = `session_${params.username}_${Date.now()}`;
+    await vaultDB.saveSession({ 
+      sessionId,
+      username: params.username, 
+      publicKey: params.publicKey, 
+      isUnlocked: false,
+      createdAt: Date.now()
+    } as any);
     // Broadcast login event
     broadcastVaultUpdate(params.username, 'USER_LOGGED_IN', { username: params.username, publicKey: params.publicKey });
     return { success: true };
@@ -777,7 +784,14 @@ export const handlers = {
     activeSessions.set(params.username, session);
     resetPinAttempts(params.username);
     logSessionState('UNLOCKED_ALIAS', params.username);
-    await vaultDB.saveSession({ username: params.username, publicKey: session.publicKey!, isUnlocked: session.isUnlocked } as any);
+    const sessionId = `session_${params.username}_${Date.now()}`;
+    await vaultDB.saveSession({ 
+      sessionId,
+      username: params.username, 
+      publicKey: session.publicKey!, 
+      isUnlocked: session.isUnlocked,
+      createdAt: Date.now()
+    } as any);
     broadcastVaultUpdate(params.username, 'SESSION_UNLOCKED', { username: params.username });
     return { success: true };
   },
@@ -977,28 +991,103 @@ export const handlers = {
   },
 
   getVaultData: async (params: { username: string }): Promise<VaultData | null> => {
-    await ensureCryptoReady();
+    try {
+      console.log('📥 [getVaultData] Request received for username:', params.username);
+      
+      console.log('🔄 [getVaultData] Ensuring crypto ready...');
+      await ensureCryptoReady();
+      console.log('✅ [getVaultData] Crypto ready');
+      
+      // Get vault data from database
+      console.log('🗄️ [getVaultData] Querying IndexedDB...');
+      const vaultData = await vaultDB.getVault(params.username);
+      console.log('✅ [getVaultData] IndexedDB query complete, found:', !!vaultData);
+      
+      if (!vaultData) {
+        console.log('❌ [getVaultData] No vault found for username:', params.username);
+        return null;
+      }
+      
+      console.log('📤 [getVaultData] Retrieved vault data:', {
+      username: vaultData.username,
+      hasPasswordVerifier: !!(vaultData as any).passwordVerifier,
+      hasPasswordSalt: !!(vaultData as any).passwordSalt,
+      hasXprivEncrypted: !!vaultData.encryptedVault,
+      hasRecovery: !!(vaultData as any).recovery,
+      identitiesCount: vaultData.identities?.length || 0,
+      identities: vaultData.identities
+    });
     
-    // Get vault data from database
-    const vaultData = await vaultDB.getVault(params.username);
-    
-    if (!vaultData) {
-      return null;
-    }
-    
-    // Return the vault data in the expected format
+    // Return the vault data in the expected format (including password verification fields!)
     return {
       username: vaultData.username,
       publicKey: vaultData.publicKey,
       xprivEncrypted: vaultData.encryptedVault,
       salt: vaultData.salt,
+      passwordSalt: (vaultData as any).passwordSalt, // CRITICAL: Include for password verification
+      passwordVerifier: (vaultData as any).passwordVerifier, // CRITICAL: Include for password verification
       identities: vaultData.identities || [],
       storagePublicKey: vaultData.publicKey,
       activeIdentityByApp: vaultData.activeIdentityByApp || {},
+      recovery: (vaultData as any).recovery, // Include recovery data
       lastSyncedAt: vaultData.lastSyncedAt,
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
-      createdAt: vaultData.createdAt
+      createdAt: vaultData.createdAt,
+      version: (vaultData as any).version || 1
     } as any;
+    } catch (error) {
+      console.error('❌ [getVaultData] Error:', error);
+      throw error;
+    }
+  },
+
+  // Save a new vault (used when fetching from Nostr for the first time)
+  saveVault: async (params: {
+    username: string;
+    publicKey: string;
+    xprivEncrypted: string;
+    salt: string;
+    identities?: any[];
+    activeIdentityByApp?: Record<string, number | null>;
+    passwordVerifier?: string;
+    passwordSalt?: string;
+    recovery?: any;
+    lastSyncedAt?: number;
+    updatedAt?: number;
+    createdAt?: number;
+  }): Promise<void> => {
+    await ensureCryptoReady();
+    
+    const vaultData = {
+      username: params.username,
+      publicKey: params.publicKey,
+      xprivEncrypted: params.xprivEncrypted,
+      encryptedVault: params.xprivEncrypted, // Redundant field for compatibility
+      salt: params.salt,
+      identities: params.identities || [],
+      activeIdentityByApp: params.activeIdentityByApp || {},
+      passwordVerifier: params.passwordVerifier,
+      passwordSalt: params.passwordSalt,
+      recovery: params.recovery,
+      lastSyncedAt: params.lastSyncedAt || Date.now(),
+      updatedAt: params.updatedAt || Date.now(),
+      createdAt: params.createdAt || Date.now(),
+      lastUnlocked: Date.now()
+    };
+    
+    // Persist to vaults store
+    await vaultDB.saveVault(vaultData);
+    
+    // Mirror to xprivs store if present
+    try {
+      if (params.xprivEncrypted && params.salt) {
+        await vaultDB.saveXpriv(params.username, params.xprivEncrypted, params.salt, params.passwordSalt);
+      }
+    } catch (err) {
+      console.error('Failed to mirror to xprivs store:', err);
+    }
+    
+    console.log('✅ Vault saved to IndexedDB');
   },
 
   // Update vault data atomically and broadcast change
@@ -1028,22 +1117,33 @@ export const handlers = {
     try {
       await ensureCryptoReady();
       
-      // Prefer any active in-memory session
-      if (activeSessions.size > 0) {
-        for (const [uname, session] of activeSessions.entries()) {
-          const sessionId = `${uname}_${session.unlockedAt || Date.now()}`;
-          return { sessionId, username: uname };
+      // Check persisted sessions table (source of truth for logged-in state)
+      // This gets cleared on logout, so if empty, user is logged out
+      const allSessions = await vaultDB.getAllSessions();
+      if (allSessions.length > 0) {
+        const latest = allSessions[allSessions.length - 1];
+        
+        // Restore to activeSessions if not already there
+        if (!activeSessions.has(latest.username)) {
+          try {
+            const vaultData = await vaultDB.getVault(latest.username);
+            if (vaultData) {
+              // Create a locked session (no keys in memory after refresh)
+              activeSessions.set(latest.username, {
+                username: latest.username,
+                publicKey: vaultData.publicKey,
+                isUnlocked: false,
+                unlockedAt: Date.now()
+              });
+            }
+          } catch {}
         }
+        
+        return { sessionId: latest.sessionId, username: latest.username };
       }
       
-      // Fallback: any vault in DB indicates a potential session (locked)
-      const allVaults = await vaultDB.getAllVaults();
-      if (allVaults && allVaults.length > 0) {
-        const uname = allVaults[0].username;
-        const sessionId = `${uname}_${Date.now()}`;
-        return { sessionId, username: uname };
-      }
-      
+      // No sessions in DB = user is logged out
+      // Don't check vaults or activeSessions - sessions table is source of truth
       return { sessionId: null, username: null };
     } catch (error) {
       console.error('[Worker] Error in getSessionStatus:', error);
@@ -1159,6 +1259,24 @@ export const handlers = {
     return { success: true };
   },
 
+  // Mine Proof of Work for a Nostr event (runs in worker thread to avoid blocking UI)
+  minePow: async (params: { event: any; difficulty: number }): Promise<any> => {
+    await ensureCryptoReady();
+    console.log(`⛏️ [Worker] Mining PoW with difficulty ${params.difficulty}...`);
+    const startTime = Date.now();
+    
+    try {
+      const { minePow } = await import('nostr-tools/nip13');
+      const minedEvent = minePow(params.event, params.difficulty);
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      console.log(`✅ [Worker] PoW mined in ${duration}s! Event ID: ${minedEvent.id}`);
+      return minedEvent;
+    } catch (error) {
+      console.error('❌ [Worker] PoW mining failed:', error);
+      throw error;
+    }
+  },
+
   // Build a minimal vault event for Nostr publishing (fallback if WASM builder missing)
   saveVaultToNostr: async (params: { username: string }): Promise<{ event: any }> => {
     const crypto = await ensureCryptoReady();
@@ -1204,6 +1322,9 @@ export const handlers = {
       publicKey: vault.publicKey,
       encryptedVault: vault.xprivEncrypted || (vault as any).encryptedVault,
       salt: vault.salt,
+      passwordVerifier: (vault as any).passwordVerifier, // CRITICAL: Include for password verification
+      passwordSalt: (vault as any).passwordSalt, // CRITICAL: Include for password verification
+      recovery: (vault as any).recovery, // Include recovery data
       identities: vault.identities || [],
       activeIdentityByApp: vault.activeIdentityByApp || {},
       appPermissions: (vault as any).appPermissions || {},
@@ -1214,7 +1335,7 @@ export const handlers = {
     // Build the event with strict string coercion for wasm expectations
     const dTag = String(`nostrpass.com_vault_${pub}_development`);
     const event = {
-      kind: 30001 as number,
+      kind: 30078 as number, // NIP-78 arbitrary custom app data (replaceable) - MUST match getVaultFromNostr
       content: String(JSON.stringify(payload)),
       tags: [[String('d'), dTag]] as string[][],
       created_at: Math.floor(Date.now() / 1000),

@@ -86,6 +86,29 @@ export const MessengerProvider: ParentComponent = (props) => {
       }
     });
 
+    // Handle navigation to unlock from embassy
+    messengerInstance.route('NAVIGATE_TO_UNLOCK', {
+      handler: async () => {
+        console.log('📍 Navigation to unlock-quick requested by embassy');
+        try {
+          // Get current app segment from URL
+          const currentPath = window.location.pathname;
+          const segments = currentPath.split('/').filter(Boolean);
+          const appSegment = segments[0] || '';
+          const targetPath = `/${appSegment}/unlock-quick`;
+          
+          if (currentPath !== targetPath) {
+            console.log('📍 Navigating to:', targetPath);
+            window.history.pushState({}, '', targetPath);
+            window.dispatchEvent(new PopStateEvent('popstate'));
+          }
+        } catch (err) {
+          console.error('Failed to navigate to unlock:', err);
+        }
+        return { acknowledged: true };
+      }
+    });
+
     setMessenger(messengerInstance);
   });
 

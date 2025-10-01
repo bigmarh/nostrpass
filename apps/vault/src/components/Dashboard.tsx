@@ -12,6 +12,7 @@ import { PermissionsSection } from './PermissionsSection';
 import { PermissionService } from '../services/permissionService';
 import { useVaultData } from '../hooks/useVaultData';
 import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
+import RelaySettings from './RelaySettings';
 
 export const Dashboard: Component = () => {
     const { user, logout, isVaultLocked, lockVault, unlockVault } = useAuth();
@@ -33,6 +34,7 @@ export const Dashboard: Component = () => {
     const [passwordForReset, setPasswordForReset] = createSignal('');
     const [showSettingsPanel, setShowSettingsPanel] = createSignal(false);
     const [selectedIdentityKey, setSelectedIdentityKey] = createSignal<string | null>(null);
+    const [showGlobalSettings, setShowGlobalSettings] = createSignal(false);
     const [appPermissions, setAppPermissions] = createSignal<AppPermissions | null>(null);
     const [isRefreshing, setIsRefreshing] = createSignal(false);
     const [isSavingPermission, setIsSavingPermission] = createSignal(false);
@@ -716,12 +718,24 @@ export const Dashboard: Component = () => {
 
     // Explicitly authorize an identity for this app by creating default permissions, and set it active
     const handleAuthorizeIdentityForApp = async (identityIndex: number) => {
-        if (!params.app) return;
+        console.log('🔐 [Authorize] Starting authorization for identity:', identityIndex, 'app:', params.app);
+        
+        if (!params.app) {
+            console.error('❌ [Authorize] No app parameter');
+            return;
+        }
+        
         const currentVault = vaultData();
-        if (!currentVault) return;
+        if (!currentVault) {
+            console.error('❌ [Authorize] No vault data');
+            return;
+        }
 
         try {
+            console.log('✅ [Authorize] Creating default permissions for:', params.app);
             const defaultPermissions = createDefaultPermissions(params.app);
+            
+            console.log('📝 [Authorize] Updating identities...');
             const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
                 if (idx !== identityIndex) return id;
                 const updated = { ...id };
@@ -729,13 +743,37 @@ export const Dashboard: Component = () => {
                 updated.appPermissions[params.app] = updated.appPermissions[params.app] || defaultPermissions;
                 return updated;
             });
+            
             const updatedActive = {
                 ...(currentVault.activeIdentityByApp || {}),
                 [params.app]: identityIndex
             };
-            await updateVaultData({ identities: updatedIdentities, activeIdentityByApp: updatedActive }, { syncToNostr: true });
+            
+            console.log('💾 [Authorize] Saving to vault data...');
+            
+            // Add timeout to prevent hanging
+            const savePromise = updateVaultData({ identities: updatedIdentities, activeIdentityByApp: updatedActive }, { syncToNostr: false });
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Save timeout after 5s')), 5000)
+            );
+            
+            await Promise.race([savePromise, timeoutPromise]);
+            console.log('✅ [Authorize] Authorization complete (saved locally)!');
+            
+            // Sync to Nostr in background (non-blocking)
+            (async () => {
+                try {
+                    console.log('📡 [Authorize] Syncing to Nostr in background...');
+                    await syncToNostr();
+                    console.log('✅ [Authorize] Synced to Nostr');
+                } catch (error) {
+                    console.warn('⚠️ [Authorize] Nostr sync failed (non-critical):', error);
+                }
+            })();
         } catch (error) {
-            console.error('Failed to authorize identity for app:', error);
+            console.error('❌ [Authorize] Failed to authorize identity for app:', error);
+            // Show error to user
+            alert(`Failed to authorize identity: ${error instanceof Error ? error.message : String(error)}`);
         }
     };
 
@@ -871,9 +909,9 @@ export const Dashboard: Component = () => {
 
 
     return (
-        <div class="min-h-screen p-4">
-            <div class=" flex flex-col max-w-2xl mx-auto gap-4">
-                <div class="bg-white text-black border border-gray-700 rounded-lg">
+        <div class="w-full h-full">
+            <div class="flex flex-col w-full md:max-w-2xl md:mx-auto gap-0 md:gap-4 min-h-screen md:min-h-0">
+                <div class="bg-white text-black border-0 md:border border-gray-700 md:rounded-lg md:shadow-2xl flex-1 md:flex-none">
                     <header>
                         {/* Top row - Action buttons */}
                         <div class={`flex justify-between p-2 ${isVaultLocked() ? 'bg-orange-100 border-orange-200' : 'bg-green-100 border-green-200'} rounded-t-lg p-4 items-center gap-2 border-b`}>
@@ -925,6 +963,17 @@ export const Dashboard: Component = () => {
                                 <span class={`text-sm hidden md:block ${isVaultLocked() ? 'text-orange-700' : 'text-green-700'}`}>Unlock</span>
                             </div>
                             <div class="flex items-center gap-2">
+                                <button
+                                    onClick={() => setShowGlobalSettings(true)}
+                                    class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
+                                    title="Settings"
+                                >
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    <span class="text-sm hidden md:inline">Settings</span>
+                                </button>
                                 <button
                                     onClick={handleLogout}
                                     class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
@@ -1408,9 +1457,23 @@ export const Dashboard: Component = () => {
                                             index: nextIndex,
                                             createdAt: Date.now()
                                         } as any;
-                                        await updateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: true });
+                                        // Save locally first (fast)
+                                        await updateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: false });
+                                        console.log('✅ [Add Identity] Saved locally');
+                                        
                                         setShowAddIdentityModal(false);
                                         setNewIdentityNickname('');
+                                        
+                                        // Sync to Nostr in background (non-blocking)
+                                        (async () => {
+                                            try {
+                                                console.log('📡 [Add Identity] Syncing to Nostr in background...');
+                                                await syncToNostr();
+                                                console.log('✅ [Add Identity] Synced to Nostr');
+                                            } catch (error) {
+                                                console.warn('⚠️ [Add Identity] Nostr sync failed (non-critical):', error);
+                                            }
+                                        })();
                                     } catch (e) {
                                         console.error('Failed to add identity:', e);
                                     }
@@ -1578,6 +1641,56 @@ export const Dashboard: Component = () => {
                                     </div>
                                 )}
                             </Show>
+                        </div>
+                    </div>
+                </div>
+            </Show>
+
+            {/* Global Settings Panel */}
+            <Show when={showGlobalSettings()}>
+                <div class="fixed inset-0 z-50 overflow-hidden">
+                    {/* Backdrop */}
+                    <div
+                        class="fixed inset-0 bg-black/50 transition-opacity"
+                        onClick={() => setShowGlobalSettings(false)}
+                    />
+
+                    {/* Side Panel */}
+                    <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+                        {/* Panel Header */}
+                        <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-900">Vault Settings</h2>
+                            <button
+                                onClick={() => setShowGlobalSettings(false)}
+                                class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Panel Content */}
+                        <div class="p-6 space-y-6">
+                            {/* Account Info */}
+                            <div>
+                                <h3 class="text-lg font-medium text-gray-900 mb-3">Account</h3>
+                                <div class="space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-sm text-gray-600">Username:</span>
+                                        <span class="text-sm font-medium text-gray-900">{user()?.profile.username}</span>
+                                    </div>
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-sm text-gray-600">Identities:</span>
+                                        <span class="text-sm font-medium text-gray-900">{identities().length}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Relay Settings */}
+                            <div>
+                                <RelaySettings />
+                            </div>
                         </div>
                     </div>
                 </div>

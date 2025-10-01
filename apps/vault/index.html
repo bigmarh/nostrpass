@@ -6,13 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>vault - NostrPass</title>
 
-    <script>
-      // JavaScript fallback - set transparent immediately on DOM creation
-      document.documentElement.style.setProperty('background', 'transparent', 'important');
-      document.documentElement.style.setProperty('background-color', 'transparent', 'important');
-    </script>
+    <style>
+      /* Force transparent immediately before any other styles load */
+      html, body, #root {
+        background-color: transparent !important;
+        background: transparent !important;
+      }
+    </style>
   </head>
-  <body >
+  <body style="background: transparent !important; background-color: transparent !important;">
     <div id="root" style="background: transparent !important; background-color: transparent !important;"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -908,7 +908,9 @@ export const AuthProvider: ParentComponent = (props) => {
         hasXprivEncrypted: !!vaultData.xprivEncrypted,
         xprivEncryptedLength: vaultData.xprivEncrypted.length,
         salt: vaultData.salt,
-        passwordSalt: vaultData.passwordSalt
+        passwordSalt: vaultData.passwordSalt,
+        hasPasswordVerifier: !!vaultData.passwordVerifier,
+        passwordVerifierLength: vaultData.passwordVerifier?.length
       });
       
       // Step 8: Initialize session in worker
@@ -1007,9 +1009,15 @@ export const AuthProvider: ParentComponent = (props) => {
     setIsLoading(true);
     try {
       console.log('🔍 Starting login for username:', username);
+      console.log('🔧 Crypto worker status:', cryptoWorker ? 'ready' : 'not ready');
       
       // First try to load from local storage
-      let vaultData = await cryptoWorker.getVaultData({ username });
+      console.log('📦 Calling getVaultData from worker...');
+      let vaultData = await Promise.race([
+        cryptoWorker.getVaultData({ username }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('getVaultData timeout after 10s')), 10000))
+      ]) as any;
+      console.log('📦 getVaultData returned:', vaultData ? 'found' : 'not found');
       if (vaultData) {
         try {
           const sanitized = {
@@ -1028,6 +1036,7 @@ export const AuthProvider: ParentComponent = (props) => {
       
       if (!vaultData) {
         try {
+          console.log('📡 Fetching account from Nostr relays...');
           const { getLoginObj, getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
           const relays = getRelays();
           
@@ -1038,12 +1047,33 @@ export const AuthProvider: ParentComponent = (props) => {
             throw new Error('No vault found for this username');
           }
           
+          console.log('✅ Found LoginObj on Nostr');
           const nostrVault = await getVaultFromNostr(loginObj.storagePublicKey, relays);
           
           if (nostrVault) {
+            console.log('✅ Found VaultObj on Nostr');
             vaultData = {
-              ...nostrVault
+              ...nostrVault,
+              publicKey: loginObj.storagePublicKey // Ensure publicKey is set
             } as any;
+            
+            // Save to local IndexedDB for future use
+            console.log('💾 Saving vault to local IndexedDB...');
+            await cryptoWorker.saveVault({
+              username,
+              publicKey: loginObj.storagePublicKey,
+              xprivEncrypted: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
+              salt: (nostrVault as any).salt,
+              identities: (nostrVault as any).identities || [],
+              activeIdentityByApp: (nostrVault as any).activeIdentityByApp || {},
+              passwordVerifier: (nostrVault as any).passwordVerifier,
+              passwordSalt: (nostrVault as any).passwordSalt,
+              recovery: (nostrVault as any).recovery,
+              lastSyncedAt: Date.now(),
+              updatedAt: (nostrVault as any).updatedAt || Date.now(),
+              createdAt: (nostrVault as any).createdAt || Date.now()
+            });
+            console.log('✅ Vault saved to local IndexedDB');
           } else {
             throw new Error('Vault data not found on Nostr');
           }
@@ -1065,13 +1095,35 @@ export const AuthProvider: ParentComponent = (props) => {
         throw new Error('Vault is missing PIN-encrypted master key');
       }
       
-      // Verify password if provided and verifier exists
-      if (password && (vaultData as any).passwordVerifier && (vaultData as any).passwordSalt) {
+      // Verify password - REQUIRED for all accounts
+      console.log('🔐 Password verification check:', {
+        hasPassword: !!password,
+        hasPasswordVerifier: !!(vaultData as any).passwordVerifier,
+        hasPasswordSalt: !!(vaultData as any).passwordSalt
+      });
+      
+      if (!password) {
+        throw new Error('Password is required');
+      }
+      
+      // MIGRATION PATH: Add security fields if missing (for old accounts)
+      if (!(vaultData as any).passwordVerifier || !(vaultData as any).passwordSalt) {
+        console.warn('⚠️ Account is missing security fields - attempting migration...');
+        
         try {
-          // Derive key from provided password using stored salt
+          // Generate new password salt
+          const newPasswordSalt = await cryptoWorker.generateSalt();
+          let passwordSalt: string;
+          if (newPasswordSalt instanceof Map) {
+            passwordSalt = newPasswordSalt.get('salt');
+          } else {
+            passwordSalt = (newPasswordSalt as any).salt || newPasswordSalt;
+          }
+          
+          // Derive key from password
           const passwordDeriveResult = await cryptoWorker.deriveKey({
             password,
-            salt: (vaultData as any).passwordSalt
+            salt: passwordSalt
           });
           
           let passwordKey: string;
@@ -1081,20 +1133,82 @@ export const AuthProvider: ParentComponent = (props) => {
             passwordKey = (passwordDeriveResult as any).key;
           }
           
-          // Try to decrypt the verifier with the derived key
-          const decrypted = await cryptoWorker.decryptData({
-            encryptedData: (vaultData as any).passwordVerifier,
+          // Create and encrypt verifier
+          const passwordVerifier = await cryptoWorker.encryptData({
+            data: 'NostrPass_Password_Verifier_v1',
             password: passwordKey
           });
           
-          if (decrypted !== 'NostrPass_Password_Verifier_v1') {
-            showErrorToast('INVALID_PASSWORD' as ErrorCode);
-            throw new Error('Invalid password');
-          }
-        } catch (error) {
+          // Update vault data with new security fields
+          (vaultData as any).passwordVerifier = passwordVerifier;
+          (vaultData as any).passwordSalt = passwordSalt;
+          (vaultData as any).updatedAt = Date.now();
+          
+          // Save to local IndexedDB
+          await cryptoWorker.updateVaultData({ username, vaultData });
+          
+          console.log('✅ Account migrated with security fields');
+          console.log('📡 Syncing migrated account to Nostr...');
+          
+          // Sync to Nostr in background
+          (async () => {
+            try {
+              await cryptoWorker.initSession({
+                username,
+                publicKey: (vaultData as any).publicKey,
+                vaultData
+              });
+              
+            const vaultEvent = await cryptoWorker.saveVaultToNostr({ username });
+            const { publishEvent } = await import('@nostrpass/nostrHelpers');
+            // For background migration sync, run PoW in main thread (keeps worker free)
+            await publishEvent(vaultEvent.event, getRelays(), 30);
+            console.log('✅ Migrated account synced to Nostr');
+            } catch (err) {
+              console.error('❌ Failed to sync migrated account:', err);
+            }
+          })();
+          
+        } catch (migrationError) {
+          console.error('❌ Account migration failed:', migrationError);
+          throw new Error('Failed to upgrade account security. Please try again or create a new account.');
+        }
+      }
+      
+      try {
+        console.log('🔐 Deriving key from password...');
+        // Derive key from provided password using stored salt
+        const passwordDeriveResult = await cryptoWorker.deriveKey({
+          password,
+          salt: (vaultData as any).passwordSalt
+        });
+        
+        let passwordKey: string;
+        if (passwordDeriveResult instanceof Map) {
+          passwordKey = passwordDeriveResult.get('key');
+        } else {
+          passwordKey = (passwordDeriveResult as any).key;
+        }
+        
+        console.log('🔐 Decrypting password verifier...');
+        // Try to decrypt the verifier with the derived key
+        const decrypted = await cryptoWorker.decryptData({
+          encryptedData: (vaultData as any).passwordVerifier,
+          password: passwordKey
+        });
+        
+        console.log('🔐 Verifier decrypted, checking value...');
+        if (decrypted !== 'NostrPass_Password_Verifier_v1') {
+          console.error('❌ Password verification failed - incorrect password');
           showErrorToast('INVALID_PASSWORD' as ErrorCode);
           throw new Error('Invalid password');
         }
+        
+        console.log('✅ Password verified successfully');
+      } catch (error) {
+        console.error('❌ Password verification error:', error);
+        showErrorToast('INVALID_PASSWORD' as ErrorCode);
+        throw new Error('Invalid password');
       }
       
       await cryptoWorker.initSession({
@@ -1113,13 +1227,52 @@ export const AuthProvider: ParentComponent = (props) => {
           if (!loginObj) return;
           const remote = await getVaultFromNostr(loginObj.storagePublicKey, relays);
           if (!remote) return;
+          
           const localUpdatedAt = (vaultData as any)?.updatedAt || 0;
-          const remoteUpdatedAt = (remote as any)?.timestamp || Date.now();
-          if (remoteUpdatedAt > localUpdatedAt) {
-            const merged = { ...vaultData, ...remote, updatedAt: remoteUpdatedAt } as any;
+          const remoteUpdatedAt = (remote as any)?.updatedAt || (remote as any)?.timestamp || 0;
+          const localIdentities = (vaultData as any)?.identities || [];
+          const remoteIdentities = (remote as any)?.identities || [];
+          
+          console.log('🔄 [LOGIN] Background sync check:', {
+            localUpdatedAt: new Date(localUpdatedAt).toISOString(),
+            remoteUpdatedAt: new Date(remoteUpdatedAt).toISOString(),
+            localIdentitiesCount: localIdentities.length,
+            remoteIdentitiesCount: remoteIdentities.length
+          });
+          
+          // Smart merge: Always prefer the version with MORE identities OR newer timestamp
+          const shouldMerge = 
+            remoteIdentities.length > localIdentities.length || // Remote has more identities
+            (remoteIdentities.length === localIdentities.length && remoteUpdatedAt > localUpdatedAt); // Same count but remote is newer
+          
+          if (shouldMerge) {
+            console.log('📥 [LOGIN] Syncing from Nostr...', {
+              reason: remoteIdentities.length > localIdentities.length ? 'more identities on remote' : 'remote is newer'
+            });
+            
+            // Deep merge: prefer remote data
+            const merged = {
+              ...vaultData,
+              ...remote,
+              identities: remoteIdentities, // Use remote identities
+              updatedAt: Math.max(remoteUpdatedAt, localUpdatedAt) // Use latest timestamp
+            } as any;
+            
             await cryptoWorker.updateVaultData({ username, vaultData: merged });
+            console.log('✅ [LOGIN] Vault synced from Nostr');
+            
+            // Broadcast to other tabs
+            try {
+              const refreshEvent = new CustomEvent('vault-data-refresh', { 
+                detail: { username } 
+              });
+              window.dispatchEvent(refreshEvent);
+            } catch {}
+          } else {
+            console.log('ℹ️ [LOGIN] Local vault is up to date (or has more data)');
           }
         } catch (e) {
+          console.error('❌ [LOGIN] Background sync failed:', e);
           // ignore
         }
       })();
@@ -1370,15 +1523,9 @@ export const AuthProvider: ParentComponent = (props) => {
       
       await new Promise(resolve => setTimeout(resolve, 50));
       
-      try {
-        const vaultEvent = await cryptoWorker.saveVaultToNostr({ username: currentUser.profile.username });
-        const { publishEvent } = await import('@nostrpass/nostrHelpers');
-        const relays = getRelays();
-        await publishEvent((vaultEvent as any).event, relays);
-        console.log('✅ [UNLOCK] Vault synced to Nostr');
-      } catch (error) {
-        console.log('⚠️ [UNLOCK] Vault sync to Nostr failed (non-critical):', error);
-      }
+      // Skip immediate Nostr sync - it blocks the worker with PoW and prevents other operations
+      // The vault will sync on the next operation (like adding permissions)
+      console.log('ℹ️ [UNLOCK] Skipping immediate Nostr sync to keep worker available');
         
       messenger.send('AUTH_STATUS', {
         isAuthenticated: true,

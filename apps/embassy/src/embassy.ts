@@ -56,7 +56,30 @@ class NostrPassEmbassy {
   private isPromptOpen = false;
   // Reserved for future cooldown logic; intentionally unused for now
   // private lastUnlockAt = 0;
+  private unlockResolvers: Array<() => void> = [];
   private sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
+  
+  private waitForUnlock(): Promise<void> {
+    return new Promise((resolve) => {
+      this.unlockResolvers.push(resolve);
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        const index = this.unlockResolvers.indexOf(resolve);
+        if (index > -1) {
+          this.unlockResolvers.splice(index, 1);
+          resolve();
+        }
+      }, 60000);
+    });
+  }
+  
+  public notifyUnlocked(): void {
+    console.log('🔓 Notifying unlock resolvers:', this.unlockResolvers.length);
+    while (this.unlockResolvers.length > 0) {
+      const resolve = this.unlockResolvers.shift();
+      if (resolve) resolve();
+    }
+  }
     private promptPin(): Promise<boolean> {
       return new Promise((resolve) => {
         if (this.isPromptOpen) return resolve(false);
@@ -292,6 +315,13 @@ class NostrPassEmbassy {
       // Initially hidden off-screen (not display:none for better performance)
       this.iframe.className = 'nostrpass-iframe nostrpass-iframe-hidden';
 
+      // Set transparent background inline to override browser defaults
+      this.iframe.style.background = 'transparent';
+      this.iframe.style.backgroundColor = 'transparent';
+      
+      // Legacy attribute for older browsers
+      this.iframe.setAttribute('allowtransparency', 'true');
+
       // Apply debug mode if enabled
       if (this.config.debug && new URLSearchParams(window.location.search).has('embassy-debug')) {
         this.iframe.classList.add('nostrpass-iframe-debug');
@@ -331,16 +361,24 @@ class NostrPassEmbassy {
     });
   }
 
-  public show(page: string = 'vault'): void {
+  public show(page: string = 'vault', mode: 'full' | 'minimal' = 'full'): void {
     if (!this.iframe) {
       console.warn('Cannot show iframe - not created yet');
-      this.createIframe().then(() => this.show(page));
+      this.createIframe().then(() => this.show(page, mode));
       return;
     }
 
     // Remove hidden class to show iframe
     this.iframe.classList.remove('nostrpass-iframe-hidden');
-    this.iframe.classList.add('nostrpass-iframe-visible');
+    
+    // Apply the appropriate visibility mode
+    if (mode === 'minimal') {
+      this.iframe.classList.remove('nostrpass-iframe-visible');
+      this.iframe.classList.add('nostrpass-iframe-minimal');
+    } else {
+      this.iframe.classList.remove('nostrpass-iframe-minimal');
+      this.iframe.classList.add('nostrpass-iframe-visible');
+    }
 
     // Show backdrop
     if (this.backdropEl) {
@@ -353,7 +391,17 @@ class NostrPassEmbassy {
 
     document.body.style.overflow = 'hidden'; // Prevent background scrolling
 
-    if (this.config.debug) console.log('Iframe shown');
+    // Navigate to appropriate page based on mode using message passing (not iframe reload)
+    if (mode === 'minimal' && page === 'vault' && this.messenger) {
+      // Tell the vault to navigate to unlock-quick internally
+      try {
+        this.messenger.send('NAVIGATE_TO_UNLOCK', {});
+      } catch (err) {
+        console.warn('Failed to send navigation message:', err);
+      }
+    }
+
+    if (this.config.debug) console.log('Iframe shown in', mode, 'mode');
   }
 
   public hide(): void {
@@ -368,6 +416,7 @@ class NostrPassEmbassy {
 
     // Add hidden class to move off-screen
     this.iframe.classList.remove('nostrpass-iframe-visible');
+    this.iframe.classList.remove('nostrpass-iframe-minimal');
     this.iframe.classList.add('nostrpass-iframe-hidden');
 
     // Hide backdrop
@@ -391,6 +440,12 @@ class NostrPassEmbassy {
     this.styleElement = document.createElement('style');
     this.styleElement.id = 'nostrpass-embassy-styles';
     this.styleElement.textContent = `
+      /* Base iframe styles - transparent background */
+      .nostrpass-iframe {
+        background: transparent !important;
+        background-color: transparent !important;
+      }
+      
       /* Hidden state - off-screen positioning for better performance */
       .nostrpass-iframe-hidden {
         position: fixed !important;
@@ -407,9 +462,11 @@ class NostrPassEmbassy {
         padding: 0 !important;
         overflow: hidden !important;
         z-index: -9999 !important;
+        background: transparent !important;
+        background-color: transparent !important;
       }
       
-      /* Visible state - fullscreen overlay */
+      /* Visible state - fullscreen overlay with transparent background */
       .nostrpass-iframe-visible {
         position: fixed !important;
         top: 0 !important;
@@ -420,21 +477,44 @@ class NostrPassEmbassy {
         visibility: visible !important;
         pointer-events: auto !important;
         border: none !important;
-        background: #00000045 !important;
+        background: transparent !important;
+        background-color: transparent !important;
         z-index: 2147483647 !important; /* Maximum z-index */
         color-scheme: light dark; /* Support both themes */
       }
 
-      /* Dimmed backdrop behind iframe */
+      /* Minimal state - centered modal for quick unlock */
+      .nostrpass-iframe-minimal {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: min(500px, 90vw) !important;
+        height: min(600px, 90vh) !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        border-radius: 12px !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+        z-index: 2147483647 !important; /* Maximum z-index */
+        color-scheme: light dark; /* Support both themes */
+      }
+
+      /* Dimmed backdrop behind iframe - provides the modal overlay effect */
       .nostrpass-backdrop {
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
         width: 100vw !important;
         height: 100vh !important;
-        background: rgba(51, 51, 51, 0.3) !important;
+        background: rgba(0, 0, 0, 0.5) !important;
+        backdrop-filter: blur(2px) !important;
         z-index: 2147483646 !important; /* Just beneath iframe */
         pointer-events: auto !important;
+        display: none !important;
       }
       
       /* Debug mode - visible but smaller */
@@ -524,22 +604,39 @@ class NostrPassEmbassy {
 
     try {
       // Preflight: check if a prompt is needed
-      const preflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
-        action: 'getPublicKey',
-        identityIndex: options?.identityIndex
-      });
-      const needsPin = preflight?.isLocked === true;
-      const needsPrompt = preflight?.needsPrompt === true;
-      if (needsPin && this.config.parentPinOverlay) {
-        const ok = await this.requestPinUnlock();
-        if (!ok) throw new Error('User canceled PIN prompt');
-      } else if (needsPin && !this.config.parentPinOverlay) {
-        // Reveal the vault UI so the user can unlock inside the iframe
-        this.show('vault');
+      let unlockPromise: Promise<void> | null = null;
+      try {
+        const preflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+          action: 'getPublicKey',
+          identityIndex: options?.identityIndex
+        });
+        const needsPin = preflight?.isLocked === true;
+        const needsPrompt = preflight?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+        } else if (needsPin && !this.config.parentPinOverlay) {
+          // Create the wait promise BEFORE showing the UI
+          console.log('⏳ Setting up unlock wait promise...');
+          unlockPromise = this.waitForUnlock();
+          this.show('vault', 'minimal');
+        } else if (needsPrompt && !this.config.parentPinOverlay) {
+          this.show('vault', 'full');
+        }
+      } catch (error: any) {
+        // If user is not authenticated at all, show full vault for login
+        const errorMsg = String(error?.message || error);
+        if (errorMsg.toLowerCase().includes('not authenticated')) {
+          console.log('⚠️ User not authenticated, showing full vault for login');
+          this.show('vault', 'full');
+        }
       }
-      if (needsPrompt && !this.config.parentPinOverlay) {
-        // Show vault so the user can approve permissions inside the iframe
-        this.show('vault');
+
+      // If we set up an unlock wait, now wait for it
+      if (unlockPromise) {
+        console.log('⏳ Waiting for vault unlock...');
+        await unlockPromise;
+        console.log('✅ Vault unlocked, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -551,7 +648,8 @@ class NostrPassEmbassy {
 
       if (this.config.debug) console.log('Public key received:', response);
 
-      // No iframe show/hide flicker
+      // Hide iframe on success
+      this.hide();
 
       return response.publicKey || response;
     } catch (error) {
@@ -570,6 +668,7 @@ class NostrPassEmbassy {
 
     try {
       // Preflight: prompt for PIN first if needed, so the op can proceed without error
+      let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signEvent',
@@ -581,10 +680,29 @@ class NostrPassEmbassy {
         if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
-        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
-          this.show('vault');
+        } else if (needsPin && !this.config.parentPinOverlay) {
+          // Create the wait promise BEFORE showing the UI
+          console.log('⏳ Setting up unlock wait promise...');
+          unlockPromise = this.waitForUnlock();
+          this.show('vault', 'minimal');
+        } else if (needsPrompt && !this.config.parentPinOverlay) {
+          this.show('vault', 'full');
         }
-      } catch {}
+      } catch (error: any) {
+        // If user is not authenticated at all, show full vault for login
+        const errorMsg = String(error?.message || error);
+        if (errorMsg.toLowerCase().includes('not authenticated')) {
+          console.log('⚠️ User not authenticated, showing full vault for login');
+          this.show('vault', 'full');
+        }
+      }
+
+      // If we set up an unlock wait, now wait for it
+      if (unlockPromise) {
+        console.log('⏳ Waiting for vault unlock...');
+        await unlockPromise;
+        console.log('✅ Vault unlocked, continuing operation');
+      }
 
       // Send request to vault using messenger
       const send = async () => this.messenger!.request(Msg.SIGN_EVENT, {
@@ -597,6 +715,8 @@ class NostrPassEmbassy {
       try {
         const response = await send();
         if (this.config.debug) console.log('Signed event received:', response);
+        // Hide iframe on success
+        this.hide();
         return response.signedEvent || response;
       } catch (e: any) {
         // If we JUST unlocked, there might be a tiny race. Retry once.
@@ -605,6 +725,7 @@ class NostrPassEmbassy {
           await this.sleep(150);
           const response = await send();
           if (this.config.debug) console.log('Signed event received (retry):', response);
+          this.hide();
           return response.signedEvent || response;
         }
         throw e;
@@ -631,6 +752,7 @@ class NostrPassEmbassy {
 
     try {
       // Preflight: prompt for PIN first if needed so the op can proceed
+      let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signData',
@@ -641,10 +763,29 @@ class NostrPassEmbassy {
         if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
-        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
-          this.show('vault');
+        } else if (needsPin && !this.config.parentPinOverlay) {
+          // Create the wait promise BEFORE showing the UI
+          console.log('⏳ Setting up unlock wait promise...');
+          unlockPromise = this.waitForUnlock();
+          this.show('vault', 'minimal');
+        } else if (needsPrompt && !this.config.parentPinOverlay) {
+          this.show('vault', 'full');
         }
-      } catch {}
+      } catch (error: any) {
+        // If user is not authenticated at all, show full vault for login
+        const errorMsg = String(error?.message || error);
+        if (errorMsg.toLowerCase().includes('not authenticated')) {
+          console.log('⚠️ User not authenticated, showing full vault for login');
+          this.show('vault', 'full');
+        }
+      }
+
+      // If we set up an unlock wait, now wait for it
+      if (unlockPromise) {
+        console.log('⏳ Waiting for vault unlock...');
+        await unlockPromise;
+        console.log('✅ Vault unlocked, continuing operation');
+      }
 
       const doSign = async () => this.messenger!.request(Msg.SIGN_DATA, {
         data: message,
@@ -657,21 +798,22 @@ class NostrPassEmbassy {
         const resp = await doSign();
         const signature = resp?.signature ?? resp;
         if (this.config.debug) console.log('Signed data received:', signature);
+        this.hide();
         return signature;
       } catch (e: any) {
         const msg = String(e?.message || e);
         if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
-          const ok = await this.requestPinUnlock();
-          if (!ok) throw new Error('User canceled PIN prompt');
           await this.sleep(150);
           try {
             const resp = await doSign();
+            this.hide();
             return resp?.signature ?? resp;
           } catch (e2: any) {
             const msg2 = String(e2?.message || e2);
             if (msg2.toLowerCase().includes('rehydrated')) {
               await this.sleep(200);
               const resp2 = await doSign();
+              this.hide();
               return resp2?.signature ?? resp2;
             }
             throw e2;
@@ -694,6 +836,7 @@ class NostrPassEmbassy {
 
     try {
       // Preflight: prompt for PIN first if needed
+      let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
@@ -704,10 +847,29 @@ class NostrPassEmbassy {
         if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
-        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
-          this.show('vault');
+        } else if (needsPin && !this.config.parentPinOverlay) {
+          // Create the wait promise BEFORE showing the UI
+          console.log('⏳ Setting up unlock wait promise...');
+          unlockPromise = this.waitForUnlock();
+          this.show('vault', 'minimal');
+        } else if (needsPrompt && !this.config.parentPinOverlay) {
+          this.show('vault', 'full');
         }
-      } catch {}
+      } catch (error: any) {
+        // If user is not authenticated at all, show full vault for login
+        const errorMsg = String(error?.message || error);
+        if (errorMsg.toLowerCase().includes('not authenticated')) {
+          console.log('⚠️ User not authenticated, showing full vault for login');
+          this.show('vault', 'full');
+        }
+      }
+
+      // If we set up an unlock wait, now wait for it
+      if (unlockPromise) {
+        console.log('⏳ Waiting for vault unlock...');
+        await unlockPromise;
+        console.log('✅ Vault unlocked, continuing operation');
+      }
 
       // Send request to vault using messenger
       const doEncrypt = async () => this.messenger!.request(Msg.ENCRYPT, {
@@ -721,18 +883,23 @@ class NostrPassEmbassy {
       try {
         const ciphertext = await doEncrypt();
         if (this.config.debug) console.log('Encrypted payload received:', ciphertext);
+        this.hide();
         return ciphertext;
       } catch (e: any) {
         const msg = String(e?.message || e);
         if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
-          const ok = await this.requestPinUnlock();
-          if (!ok) throw new Error('User canceled PIN prompt');
           await this.sleep(150);
-          try { return await doEncrypt(); } catch (e2: any) {
+          try { 
+            const result = await doEncrypt();
+            this.hide();
+            return result;
+          } catch (e2: any) {
             const msg2 = String(e2?.message || e2);
             if (msg2.toLowerCase().includes('rehydrated')) {
               await this.sleep(200);
-              return await doEncrypt();
+              const result = await doEncrypt();
+              this.hide();
+              return result;
             }
             throw e2;
           }
@@ -754,6 +921,7 @@ class NostrPassEmbassy {
 
     try {
       // Preflight: prompt for PIN first if needed
+      let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
@@ -764,10 +932,29 @@ class NostrPassEmbassy {
         if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
-        } else if ((needsPin || needsPrompt) && !this.config.parentPinOverlay) {
-          this.show('vault');
+        } else if (needsPin && !this.config.parentPinOverlay) {
+          // Create the wait promise BEFORE showing the UI
+          console.log('⏳ Setting up unlock wait promise...');
+          unlockPromise = this.waitForUnlock();
+          this.show('vault', 'minimal');
+        } else if (needsPrompt && !this.config.parentPinOverlay) {
+          this.show('vault', 'full');
         }
-      } catch {}
+      } catch (error: any) {
+        // If user is not authenticated at all, show full vault for login
+        const errorMsg = String(error?.message || error);
+        if (errorMsg.toLowerCase().includes('not authenticated')) {
+          console.log('⚠️ User not authenticated, showing full vault for login');
+          this.show('vault', 'full');
+        }
+      }
+
+      // If we set up an unlock wait, now wait for it
+      if (unlockPromise) {
+        console.log('⏳ Waiting for vault unlock...');
+        await unlockPromise;
+        console.log('✅ Vault unlocked, continuing operation');
+      }
 
       // Send request to vault using messenger
       const doDecrypt = async () => this.messenger!.request(Msg.DECRYPT, {
@@ -781,18 +968,23 @@ class NostrPassEmbassy {
       try {
         const plaintext = await doDecrypt();
         if (this.config.debug) console.log('Decrypted payload received:', plaintext);
+        this.hide();
         return plaintext;
       } catch (e: any) {
         const msg = String(e?.message || e);
         if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
-          const ok = await this.requestPinUnlock();
-          if (!ok) throw new Error('User canceled PIN prompt');
           await this.sleep(150);
-          try { return await doDecrypt(); } catch (e2: any) {
+          try { 
+            const result = await doDecrypt();
+            this.hide();
+            return result;
+          } catch (e2: any) {
             const msg2 = String(e2?.message || e2);
             if (msg2.toLowerCase().includes('rehydrated')) {
               await this.sleep(200);
-              return await doDecrypt();
+              const result = await doDecrypt();
+              this.hide();
+              return result;
             }
             throw e2;
           }

@@ -140,38 +140,81 @@ export async function getEvent(relays: string[], filter: Filter): Promise<NostrE
 }
 
 /**
- * Publish an event to Nostr
+ * Publish an event to Nostr relays
+ * Note: PoW support is temporarily disabled - relays requiring PoW will be skipped
  * @param signedEvent - The signed event
  * @param relays - The relays to use
- * @returns The event
+ * @returns Array of successful relay URLs
  */
-export async function publishEvent(signedEvent: NostrEvent, relays: string[]): Promise<string[]> {
+export async function publishEvent(
+  signedEvent: NostrEvent, 
+  relays: string[]
+): Promise<string[]> {
   const pool = new SimplePool();
   const successfulPublishes: string[] = [];
+  const powRelays: Map<string, number> = new Map(); // relay -> required bits
+  const failedRelays: string[] = [];
   
-  // Try each relay individually to identify which ones require PoW
+  // First pass: try publishing without PoW
+  console.log('📡 Publishing to relays (first attempt without PoW)...');
   for (const relay of relays) {
     try {
-      await pool.publish([relay], signedEvent);
+      // pool.publish returns Promise<string>[] (array of promises)
+      const publishPromises = pool.publish([relay], signedEvent);
+      const publishPromise = Promise.all(publishPromises).then(() => {});
+      
+      const timeoutPromise = new Promise<void>((_, reject) => 
+        setTimeout(() => reject(new Error('Publish timeout')), 10000)
+      );
+      
+      await Promise.race([publishPromise, timeoutPromise]);
       console.log(`✅ Published to ${relay}`);
       successfulPublishes.push(relay);
     } catch (error: any) {
-      if (error.message?.includes('pow:')) {
-        const powMatch = error.message.match(/pow:\s*(\d+)\s*bits/);
-        const bits = powMatch ? powMatch[1] : 'unknown';
-        console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits):`, error.message);
+      const errorMsg = String(error?.message || error || '');
+      
+      if (errorMsg.includes('pow:') || errorMsg.toLowerCase().includes('proof') || errorMsg.includes('bits needed')) {
+        // Extract required difficulty
+        const powMatch = errorMsg.match(/pow:\s*(\d+)\s*bits/i) || errorMsg.match(/(\d+)\s*bits\s*needed/i);
+        const bits = powMatch ? parseInt(powMatch[1]) : 20; // Default to 20 if we can't parse
+        console.log(`⛏️ Relay ${relay} requires PoW: ${bits} bits`);
+        powRelays.set(relay, bits);
+      } else if (errorMsg.includes('timeout')) {
+        console.warn(`⏱️ Publish to ${relay} timed out`);
+        failedRelays.push(relay);
       } else {
-        console.error(`❌ Failed to publish to ${relay}:`, error.message);
+        console.error(`❌ Failed to publish to ${relay}:`, errorMsg);
+        failedRelays.push(relay);
       }
-      // Continue to next relay
     }
   }
   
+  // PoW support temporarily disabled for development
+  // Just skip relays that require PoW for now
+  if (powRelays.size > 0) {
+    console.warn(`⚠️ Skipping ${powRelays.size} relay(s) that require PoW (temporarily disabled):`, 
+      Array.from(powRelays.entries()).map(([r, b]) => `${r} (${b} bits)`).join(', ')
+    );
+    powRelays.forEach((_, relay) => failedRelays.push(relay));
+  }
+  
   if (successfulPublishes.length === 0) {
-    throw new Error('Failed to publish to any relay');
+    let errorMessage = 'Failed to publish to any relay';
+    if (powRelays.size > 0) {
+      const powList = Array.from(powRelays.entries()).map(([r, b]) => `${r} (${b} bits)`).join(', ');
+      errorMessage += `. Relays requiring PoW: ${powList}`;
+    }
+    if (failedRelays.length > 0) {
+      errorMessage += `. Other failed relays: ${failedRelays.join(', ')}`;
+    }
+    throw new Error(errorMessage);
   }
   
   console.log(`✅ Event published to ${successfulPublishes.length}/${relays.length} relays`);
+  if (failedRelays.length > 0) {
+    console.log(`⚠️ ${failedRelays.length} relay(s) failed: ${failedRelays.join(', ')}`);
+  }
+  
   return successfulPublishes;
 }
 

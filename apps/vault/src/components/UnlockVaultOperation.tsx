@@ -1,13 +1,10 @@
-import { Component, createEffect, createSignal, Show } from 'solid-js';
-import { useAuth } from '../contexts/AuthContext';
+import { Component, createSignal, Show } from 'solid-js';
+import { useAuth, useMessenger } from '../providers';
 import PinPad from './PinPad';
-import { createServiceLogger } from '../utils/logger';
-import { embassyService } from '../services/embassyService';
-
-const logger = createServiceLogger('UnlockVaultOperation');
 
 const UnlockVaultOperation: Component = () => {
-  const { unlockVault, loading, backToApp, handleLogout } = useAuth();
+  const { unlockVault, isLoading, logout } = useAuth();
+  const { send } = useMessenger();
   const [pin, setPin] = createSignal('');
   const [error, setError] = createSignal('');
   const [success, setSuccess] = createSignal('');
@@ -32,22 +29,18 @@ const UnlockVaultOperation: Component = () => {
     try {
       const success = await unlockVault(pinToTry);
       if (success) {
-        console.log('✅ [UnlockVaultOperation] Unlock success - returning to app');
+        console.log('✅ [UnlockVaultOperation] Unlock success - notifying embassy');
         setSuccess('Vault unlocked successfully!');
         
-        // Send unlock message to parent window using embassyService
-        if (window.parent && window.parent !== window) {
-          embassyService.sendToParent({
-            type: 'nostrpass:unlocked',
-            data: {
-              unlocked: true,
-              forOperation: true
-            }
+        // Send unlock message to parent window - embassy will handle the rest
+        try {
+          send('nostrpass:unlocked', {
+            unlocked: true,
+            forOperation: true
           });
+        } catch (err) {
+          console.error('Failed to send unlock notification:', err);
         }
-        
-        // Let the centralized route resolver handle navigation
-        // For operations, it should auto-navigate to complete the pending operation
       } else {
         console.log('❌ [UnlockVaultOperation] Unlock failed - incorrect PIN');
         setError('Incorrect PIN. Please try again.');
@@ -59,7 +52,6 @@ const UnlockVaultOperation: Component = () => {
       }
     } catch (error) {
       console.error('💥 [UnlockVaultOperation] Failed to unlock vault:', error);
-      logger.error('Failed to unlock vault:', error);
       setError('Failed to unlock vault. Please try again.');
       setPin('');
       if (pinPadRef && pinPadRef.shakeAndClear) {
@@ -70,8 +62,12 @@ const UnlockVaultOperation: Component = () => {
     }
   };
 
+  const handleCancel = () => {
+    send('HIDE_VAULT');
+  };
+
   return (
-    <Show when={!loading()}
+    <Show when={!isLoading()}
       fallback={
         <div class="min-h-screen flex items-center justify-center">
           <div class="text-center">
@@ -115,14 +111,14 @@ const UnlockVaultOperation: Component = () => {
           {!success() && (
             <div class="mt-6 pt-4 border-t border-gray-200 flex flex-col gap-2">
               <button
-                onClick={handleLogout}
+                onClick={logout}
                 class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
                 disabled={isUnlocking()}
               >
                 Can't remember your PIN? Logout
               </button>
               <button
-                onClick={backToApp}
+                onClick={handleCancel}
                 class="text-gray-500 hover:text-gray-700 text-sm underline"
               >
                 Cancel
