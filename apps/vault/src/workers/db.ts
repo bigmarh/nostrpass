@@ -242,6 +242,19 @@ class VaultDB {
     });
   }
 
+  async getAllSessions(): Promise<UserSession[]> {
+    if (!this.db) await this.init();
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(['sessions'], 'readonly');
+      const store = transaction.objectStore('sessions');
+      const request = store.getAll();
+
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   async clearExpiredSessions(): Promise<void> {
     if (!this.db) await this.init();
 
