@@ -44,6 +44,10 @@ export const Dashboard: Component = () => {
     const [identitySelectionCallback, setIdentitySelectionCallback] = createSignal<((identityIndex: number) => void) | null>(null);
     const [isConnectingIdentity, setIsConnectingIdentity] = createSignal(false);
     const [identityOperationError, setIdentityOperationError] = createSignal<string | null>(null);
+    const [isSyncing, setIsSyncing] = createSignal(false);
+    const [isGettingFromNostr, setIsGettingFromNostr] = createSignal(false);
+    const [syncMessage, setSyncMessage] = createSignal<string | null>(null);
+    const [syncStatus, setSyncStatus] = createSignal<'success' | 'error' | null>(null);
 
     const cryptoWorker = useCryptoWorker();
     const permissionService = PermissionService.getInstance();
@@ -388,14 +392,32 @@ export const Dashboard: Component = () => {
         const currentUser = user();
         if (!currentUser) return;
 
+        setIsSyncing(true);
+        setSyncMessage(null);
+        setSyncStatus(null);
+
         try {
             console.log('🔄 Manual sync triggered...');
             await syncToNostr();
             console.log('✅ Manual sync completed successfully');
-            // Could show a success toast here
+            setSyncStatus('success');
+            setSyncMessage('Vault synced to Nostr successfully!');
+            // Clear message after 3 seconds
+            setTimeout(() => {
+                setSyncMessage(null);
+                setSyncStatus(null);
+            }, 3000);
         } catch (error: any) {
             console.error('❌ Manual sync failed:', error);
-            // Could show an error toast here
+            setSyncStatus('error');
+            setSyncMessage(error.message || 'Failed to sync to Nostr');
+            // Clear message after 5 seconds
+            setTimeout(() => {
+                setSyncMessage(null);
+                setSyncStatus(null);
+            }, 5000);
+        } finally {
+            setIsSyncing(false);
         }
     };
 
@@ -473,6 +495,10 @@ export const Dashboard: Component = () => {
         const currentUser = user();
         if (!currentUser) return;
 
+        setIsGettingFromNostr(true);
+        setSyncMessage(null);
+        setSyncStatus(null);
+
         try {
             console.log('🔄 Getting vault from Nostr...');
             const result = await getVaultFromNostr();
@@ -482,14 +508,32 @@ export const Dashboard: Component = () => {
                     timestamp: new Date(result.timestamp).toISOString(),
                     identitiesCount: result.vaultData.identities?.length || 0
                 });
-                // Could show a success toast here
+                setSyncStatus('success');
+                setSyncMessage(`Retrieved vault from Nostr (${result.vaultData.identities?.length || 0} identities)`);
+                // Clear message after 3 seconds
+                setTimeout(() => {
+                    setSyncMessage(null);
+                    setSyncStatus(null);
+                }, 3000);
             } else {
                 console.log('ℹ️ No vault found on Nostr');
-                // Could show an info toast here
+                setSyncStatus('error');
+                setSyncMessage('No vault data found on Nostr relays');
+                setTimeout(() => {
+                    setSyncMessage(null);
+                    setSyncStatus(null);
+                }, 5000);
             }
         } catch (error: any) {
             console.error('❌ Failed to get vault from Nostr:', error);
-            // Could show an error toast here
+            setSyncStatus('error');
+            setSyncMessage(error.message || 'Failed to retrieve vault from Nostr');
+            setTimeout(() => {
+                setSyncMessage(null);
+                setSyncStatus(null);
+            }, 5000);
+        } finally {
+            setIsGettingFromNostr(false);
         }
     };
 
@@ -1677,24 +1721,58 @@ export const Dashboard: Component = () => {
                                 <div class="space-y-3">
                                     <button
                                         onClick={handleManualSync}
-                                        class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                        disabled={isSyncing() || isGettingFromNostr()}
+                                        class={`w-full px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                                            isSyncing() || isGettingFromNostr()
+                                                ? 'bg-blue-400 cursor-not-allowed'
+                                                : 'bg-blue-600 hover:bg-blue-700'
+                                        } text-white`}
                                         title="Sync your vault data to Nostr relays"
                                     >
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                        </svg>
-                                        <span>Sync to Nostr</span>
+                                        <Show when={isSyncing()} fallback={
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                            </svg>
+                                        }>
+                                            <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        </Show>
+                                        <span>{isSyncing() ? 'Syncing...' : 'Sync to Nostr'}</span>
                                     </button>
                                     <button
                                         onClick={handleGetFromNostr}
-                                        class="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
+                                        disabled={isSyncing() || isGettingFromNostr()}
+                                        class={`w-full px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                                            isSyncing() || isGettingFromNostr()
+                                                ? 'bg-gray-400 cursor-not-allowed'
+                                                : 'bg-gray-600 hover:bg-gray-700'
+                                        } text-white`}
                                         title="Get latest vault data from Nostr relays"
                                     >
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-                                        </svg>
-                                        <span>Get from Nostr</span>
+                                        <Show when={isGettingFromNostr()} fallback={
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                                            </svg>
+                                        }>
+                                            <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        </Show>
+                                        <span>{isGettingFromNostr() ? 'Getting...' : 'Get from Nostr'}</span>
                                     </button>
+                                    
+                                    {/* Success/Error Message */}
+                                    <Show when={syncMessage()}>
+                                        <div class={`p-3 rounded-lg ${
+                                            syncStatus() === 'success' 
+                                                ? 'bg-green-50 border border-green-200' 
+                                                : 'bg-red-50 border border-red-200'
+                                        }`}>
+                                            <p class={`text-sm ${
+                                                syncStatus() === 'success' ? 'text-green-700' : 'text-red-700'
+                                            }`}>
+                                                {syncMessage()}
+                                            </p>
+                                        </div>
+                                    </Show>
+                                    
                                     <p class="text-xs text-gray-500 mt-2">
                                         Use these to manually sync your vault data with Nostr relays. Auto-sync happens on changes.
                                     </p>
