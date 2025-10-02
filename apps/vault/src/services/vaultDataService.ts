@@ -412,7 +412,23 @@ export class VaultDataService {
       throw new Error('Crypto worker not ready');
     }
 
-    await cryptoWorker.saveAppPermissions({ username, origin, permissions, appName, identityIndex });
+    // Determine active identity path
+    const vaultData = await this.getVaultData(username);
+    const identities = vaultData?.identities || [];
+    const idx = typeof identityIndex === 'number' ? identityIndex : 0;
+    const path = identities[idx]?.path || `m/44'/1237'/0'/0/${idx}`;
+
+    // Publish permissions PRE via worker
+    try {
+      await (cryptoWorker as any).publishPermissions({
+        username,
+        path,
+        appDomain: origin,
+        appPermissions: permissions?.allowed || []
+      });
+    } catch (e) {
+      console.warn('[saveAppPermissions] Failed to publish PRE permissions (non-critical):', e);
+    }
     
     // Clear cache to ensure fresh data is loaded next time
     this.clearCache(username);
@@ -471,7 +487,8 @@ export class VaultDataService {
       kinds: [30078], // NIP-78 arbitrary custom app data
       authors: [storagePublicKey],
       '#d': [expectedDTag],
-      '#encryption': ['password-aes'] // Only password-encrypted vaults
+      // Listen to both initial (password-encrypted) and sync (nip04) vault events
+      '#encryption': ['nip04', 'password-aes']
     };
 
     console.log('🔔 [subscribeToVaultUpdates] NDK Filter:', {
