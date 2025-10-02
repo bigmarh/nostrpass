@@ -1101,11 +1101,22 @@ export const Dashboard: Component = () => {
                         <div class="flex flex-col gap-2 p-4">
                             <header class="flex justify-between items-center">
                                 <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
-                                <button class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
-                                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-                                    </svg>
-                                </button>
+                                <div class="flex gap-2">
+                                    <button 
+                                        class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" 
+                                        onClick={() => loadVaultData(true)} 
+                                        title="Refresh vault data"
+                                    >
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                    </button>
+                                    <button class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
+                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </header>
 
                             <For each={filteredIdentities()}>

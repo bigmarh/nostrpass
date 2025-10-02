@@ -207,19 +207,19 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     }
   });
 
-  // Listen for vault data refresh events from other tabs
+  // Listen for vault data refresh events from other tabs and Nostr
   onMount(() => {
     console.log('🔧 Setting up vault data refresh listener');
     
     const handleVaultDataRefresh = (event: CustomEvent) => {
       console.log('📡 Vault data refresh event received:', event.detail);
-      const { username: eventUsername } = event.detail;
+      const { username: eventUsername, source } = event.detail;
       const currentUsername = username();
       
-      console.log('🔍 Comparing usernames:', { eventUsername, currentUsername });
+      console.log('🔍 Comparing usernames:', { eventUsername, currentUsername, source });
       
       if (currentUsername === eventUsername) {
-        console.log('🔄 Refreshing vault data due to broadcast from another tab');
+        console.log(`🔄 Refreshing vault data due to ${source || 'broadcast'} from another tab`);
         loadVaultData(true); // Force refresh
       } else {
         console.log('❌ Username mismatch, not refreshing');
@@ -229,10 +229,57 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     window.addEventListener('vault-data-refresh', handleVaultDataRefresh as EventListener);
     console.log('✅ Vault data refresh listener set up');
     
+    // Fallback: More frequent refresh for incognito tabs (where BroadcastChannel doesn't work)
+    // Check every 5 seconds if we're in an incognito context
+    let periodicRefreshInterval: ReturnType<typeof setInterval> | undefined;
+    
+    // Detect if we're in incognito mode (BroadcastChannel isolation)
+    const testBroadcastChannel = () => {
+      try {
+        const bc = new BroadcastChannel('nostrpass-test');
+        bc.postMessage({ test: true });
+        bc.close();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+    
+    if (!testBroadcastChannel()) {
+      console.log('🔍 [useVaultData] Incognito mode detected - setting up frequent refresh');
+      periodicRefreshInterval = setInterval(() => {
+        const currentUsername = username();
+        if (currentUsername) {
+          console.log('🔄 [useVaultData] Periodic refresh for incognito tab');
+          loadVaultData(true);
+        }
+      }, 5000); // Check every 5 seconds for incognito tabs
+    }
+    
     return () => {
       window.removeEventListener('vault-data-refresh', handleVaultDataRefresh as EventListener);
+      if (periodicRefreshInterval) {
+        clearInterval(periodicRefreshInterval);
+      }
       console.log('🧹 Vault data refresh listener cleaned up');
     };
+  });
+
+  // Set up Nostr subscription for real-time updates
+  createEffect(() => {
+    const currentUsername = username();
+    if (!currentUsername) return;
+
+    // Get user data for subscription
+    const currentUser = user();
+    if (!currentUser?.profile?.storagePublicKey) {
+      console.log('⚠️ [useVaultData] No storage public key available for subscription');
+      return;
+    }
+
+    // We need the password key for decryption, but it's not available in the hook
+    // The subscription will be set up in the AuthProvider after login
+    console.log('🔔 [useVaultData] Ready for Nostr subscription setup');
   });
 
   return {

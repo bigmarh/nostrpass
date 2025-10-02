@@ -16,6 +16,7 @@ export interface VaultData {
   // Identity management
   identities: any[];
   storagePublicKey?: string; // Explicit storage public key (same as publicKey)
+  currentIdentityIndex?: number; // Currently selected identity index
   // Active identity per app (persistent selection separate from authorization)
   activeIdentityByApp?: Record<string, number | null>;
   
@@ -301,7 +302,7 @@ export async function saveVaultToNostr(
 export async function getVaultFromNostr(
   userPublicKey: string,
   relays: string[],
-  passwordKey: string  // Password key REQUIRED for decryption
+  passwordKey: string  // Password key for initial vault decryption
 ): Promise<VaultData | null> {
   try {
     const pool = new SimplePool();
@@ -331,6 +332,90 @@ export async function getVaultFromNostr(
       count: events.length,
       eventIds: events.map(e => e.id.slice(0, 8)),
       eventAuthors: events.map(e => e.pubkey.slice(0, 16)),
+      eventDTags: events.map(e => e.tags.find(t => t[0] === 'd')?.[1]?.slice(0, 40)),
+      encryptionTags: events.map(e => e.tags.find(t => t[0] === 'encryption')?.[1])
+    });
+
+    if (events.length === 0) {
+      return null;
+    }
+
+    // Sort by created_at to get most recent first
+    const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
+    
+    // Try to decrypt with password key (for initial vault)
+    const { decrypt } = await import('nostr-tools/nip04');
+    
+    for (const event of sortedEvents) {
+      try {
+        const decryptedContent = await decrypt(passwordKey, userPublicKey, event.content);
+        const vaultData = JSON.parse(decryptedContent) as VaultData;
+        
+        console.log('✅ [getVaultFromNostr] Retrieved password-encrypted vault from Nostr:', {
+          username: vaultData.username,
+          identitiesCount: vaultData.identities?.length || 0,
+          hasXprivEncrypted: !!vaultData.xprivEncrypted,
+          updatedAt: vaultData.updatedAt ? new Date(vaultData.updatedAt).toISOString() : 'N/A',
+          eventCreatedAt: new Date(event.created_at * 1000).toISOString(),
+          encryption: 'password-aes',
+          eventId: event.id.slice(0, 8)
+        });
+        return vaultData;
+      } catch (decryptError) {
+        console.log('⚠️ [getVaultFromNostr] Failed to decrypt with password key, trying next event...');
+        continue;
+      }
+    }
+    
+    console.error('❌ [getVaultFromNostr] Failed to decrypt any vault events with password key');
+    return null;
+  } catch (error) {
+    console.error('Error retrieving vault from Nostr:', error);
+    return null;
+  }
+}
+
+/**
+ * Get VaultObj from Nostr using storage private key (for sync operations)
+ * @param userPublicKey - User's storage public key
+ * @param relays - Relay URLs to query
+ * @param storagePrivateKey - Storage private key for decrypting sync vaults
+ * @returns Vault data or null if not found
+ */
+export async function getVaultFromNostrWithStorageKey(
+  userPublicKey: string,
+  relays: string[],
+  storagePrivateKey: string
+): Promise<VaultData | null> {
+  try {
+    const pool = new SimplePool();
+    
+    const env = getEnvironment();
+    const expectedDTag = `nostrpass.com_vault_${userPublicKey}_${env}`;
+    
+    console.log('🔍 [getVaultFromNostrWithStorageKey] Searching for sync vault:', {
+      userPublicKey,
+      expectedDTag,
+      env,
+      hasStoragePrivateKey: !!storagePrivateKey
+    });
+    
+    // Query for vault events with NIP-04 encryption tag
+    const filter: Filter = {
+      kinds: [30078],
+      authors: [userPublicKey],
+      '#d': [expectedDTag],
+      '#encryption': ['nip04'], // Only NIP-04 encrypted vaults (sync operations)
+      limit: 10
+    };
+
+    const events = await pool.querySync(relays, filter);
+    pool.close(relays);
+    
+    console.log('🔍 [getVaultFromNostrWithStorageKey] Found sync events:', {
+      count: events.length,
+      eventIds: events.map(e => e.id.slice(0, 8)),
+      eventAuthors: events.map(e => e.pubkey.slice(0, 16)),
       eventDTags: events.map(e => e.tags.find(t => t[0] === 'd')?.[1]?.slice(0, 40))
     });
 
@@ -341,25 +426,34 @@ export async function getVaultFromNostr(
     // Sort by created_at to get most recent first
     const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
     
-    // Get the most recent event
-    const event = sortedEvents[0];
-    
-    // Decrypt VaultObj with password key
+    // Try to decrypt with storage private key
     const { decrypt } = await import('nostr-tools/nip04');
-    const decryptedContent = await decrypt(passwordKey, userPublicKey, event.content);
-    const vaultData = JSON.parse(decryptedContent) as VaultData;
     
-    console.log('✅ [getVaultFromNostr] Retrieved password-encrypted vault from Nostr:', {
-      username: vaultData.username,
-      identitiesCount: vaultData.identities?.length || 0,
-      hasXprivEncrypted: !!vaultData.xprivEncrypted,
-      updatedAt: vaultData.updatedAt ? new Date(vaultData.updatedAt).toISOString() : 'N/A',
-      eventCreatedAt: new Date(event.created_at * 1000).toISOString(),
-      encryption: 'password-aes'
-    });
-    return vaultData;
+    for (const event of sortedEvents) {
+      try {
+        const decryptedContent = await decrypt(storagePrivateKey, userPublicKey, event.content);
+        const vaultData = JSON.parse(decryptedContent) as VaultData;
+        
+        console.log('✅ [getVaultFromNostrWithStorageKey] Retrieved NIP-04 encrypted vault from Nostr:', {
+          username: vaultData.username,
+          identitiesCount: vaultData.identities?.length || 0,
+          hasXprivEncrypted: !!vaultData.xprivEncrypted,
+          updatedAt: vaultData.updatedAt ? new Date(vaultData.updatedAt).toISOString() : 'N/A',
+          eventCreatedAt: new Date(event.created_at * 1000).toISOString(),
+          encryption: 'nip04',
+          eventId: event.id.slice(0, 8)
+        });
+        return vaultData;
+      } catch (decryptError) {
+        console.log('⚠️ [getVaultFromNostrWithStorageKey] Failed to decrypt with storage key, trying next event...');
+        continue;
+      }
+    }
+    
+    console.error('❌ [getVaultFromNostrWithStorageKey] Failed to decrypt any sync vault events with storage key');
+    return null;
   } catch (error) {
-    console.error('Error retrieving vault from Nostr:', error);
+    console.error('Error retrieving sync vault from Nostr:', error);
     return null;
   }
 }

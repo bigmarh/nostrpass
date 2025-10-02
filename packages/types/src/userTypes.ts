@@ -29,6 +29,9 @@ export interface UserProfile {
   
   /** Security settings */
   security: SecuritySettings;
+  
+  /** Storage public key for vault operations */
+  storagePublicKey?: string;
 }
 
 /**

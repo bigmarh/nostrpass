@@ -1482,7 +1482,154 @@ export const handlers = {
     }
   },
 
-  // Build a minimal vault event for Nostr publishing (fallback if WASM builder missing)
+  // Create initial vault event for Nostr (PASSWORD-ENCRYPTED for account creation)
+  createInitialVaultForNostr: async (params: { username: string; passwordKey: string }): Promise<{ event: any }> => {
+    const crypto = await ensureCryptoReady();
+    const vaultRaw = await vaultDB.getVault(params.username);
+    if (!vaultRaw) throw new Error('No vault to save');
+    
+    // Map from IndexedDB field names to VaultData interface field names
+    const vault = {
+      ...vaultRaw,
+      xprivEncrypted: (vaultRaw as any).encryptedVault || (vaultRaw as any).xprivEncrypted
+    };
+    
+    console.log('📤 [createInitialVaultForNostr] Creating initial password-encrypted vault:', {
+      username: vault.username,
+      identitiesCount: vault.identities?.length || 0,
+      hasXprivEncrypted: !!vault.xprivEncrypted,
+      updatedAt: new Date(vault.updatedAt || Date.now()).toISOString()
+    });
+    
+    const session = (activeSessions as any).get(params.username);
+    const pub = vault.storagePublicKey || vault.publicKey;
+    
+    // Ensure we have a storage private key available for signing. Derive it if missing.
+    let priv = session?.storagePrivateKey as string | undefined;
+    if (!priv && session?.xpriv) {
+      try {
+        const { STORAGE_INDEX } = await import('@nostrpass/types');
+        const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
+        if (derived instanceof Map) {
+          priv = derived.get('privateKey');
+          (session as any).storagePrivateKey = priv;
+          (session as any).storagePublicKey = derived.get('publicKey');
+        } else {
+          priv = (derived as any).privateKey;
+          (session as any).storagePrivateKey = priv;
+          (session as any).storagePublicKey = (derived as any).publicKey;
+        }
+        console.log('🔑 [createInitialVaultForNostr] Derived storage keypair via STORAGE_INDEX for signing');
+      } catch (e) {
+        console.error('❌ [createInitialVaultForNostr] Failed to derive storage keypair:', e);
+      }
+    }
+    
+    if (!pub) {
+      throw new Error('No storage public key available for vault creation');
+    }
+    
+    const payload = {
+      username: vault.username,
+      publicKey: vault.publicKey,
+      xprivEncrypted: vault.xprivEncrypted,
+      salt: vault.salt,
+      passwordSalt: vault.passwordSalt,
+      passwordVerifier: vault.passwordVerifier,
+      identities: vault.identities || [],
+      activeIdentityByApp: vault.activeIdentityByApp || {},
+      recovery: vault.recovery || null,
+      customRelays: vault.customRelays || [],
+      appPermissions: (vault as any).appPermissions || {},
+      updatedAt: Date.now(),
+      version: 1
+    };
+    
+    console.log('✅ [createInitialVaultForNostr] Payload created:', {
+      identitiesCount: payload.identities.length,
+      hasXprivEncrypted: !!payload.xprivEncrypted,
+      xprivEncryptedLength: payload.xprivEncrypted?.length
+    });
+    
+    // CRITICAL: Encrypt the payload with PASSWORD KEY for initial vault creation
+    // This implements double encryption: PIN-encrypted xpriv → Password-encrypted VaultObj
+    const payloadJson = JSON.stringify(payload);
+    let encryptedContent: string;
+    
+    console.log('🔐 [createInitialVaultForNostr] Starting password encryption...');
+    console.log('🔐 [createInitialVaultForNostr] Using password key for initial vault');
+    
+    try {
+      // Use PASSWORD encryption for initial vault creation
+      const { encrypt } = await import('nostr-tools/nip04');
+      encryptedContent = await encrypt(params.passwordKey, String(pub), payloadJson);
+      console.log('✅ [createInitialVaultForNostr] Payload encrypted with password key!', {
+        encryptedSize: encryptedContent.length,
+        identities: payload.identities.length
+      });
+    } catch (encErr) {
+      console.error('❌ [createInitialVaultForNostr] Password encryption failed:', encErr);
+      throw new Error('Failed to encrypt initial vault data with password');
+    }
+    
+    // Get the actual environment
+    const env = getEnvironment();
+    console.log('🌍 [createInitialVaultForNostr] Using environment:', env);
+    
+    // Build the event with password encryption
+    const dTag = String(`nostrpass.com_vault_${pub}_${env}`);
+    
+    console.log('🏷️ [createInitialVaultForNostr] Event metadata:', {
+      dTag,
+      pubkey: pub,
+      vaultPublicKey: vault.publicKey,
+      keysMatch: pub === vault.publicKey,
+      env
+    });
+    
+    const event = {
+      kind: 30078 as number,
+      content: String(encryptedContent),
+      tags: [[String('d'), dTag], [String('encryption'), String('password-aes')]] as string[][],
+      created_at: Math.floor(Date.now() / 1000),
+      pubkey: String(pub),
+      id: '',
+      sig: ''
+    };
+    
+    // Resolve signing key with detailed diagnostics
+    const signingKey = (priv || session?.storagePrivateKey || session?.privateKey) as string | undefined;
+    console.log('🧾 [createInitialVaultForNostr] Signing key check:', {
+      hasPrivLocal: !!priv,
+      hasSession: !!session,
+      hasSessionStoragePriv: !!(session && (session as any).storagePrivateKey),
+      hasSessionPrivKey: !!(session && (session as any).privateKey)
+    });
+    if (!signingKey) {
+      console.error('❌ [createInitialVaultForNostr] Missing signing key', {
+        username: params.username,
+        haveLocalPriv: !!priv,
+        haveSession: !!session,
+        haveSessionStoragePrivateKey: !!(session && (session as any).storagePrivateKey),
+        haveSessionPrivateKey: !!(session && (session as any).privateKey)
+      });
+      throw new Error('No signing key available for initial vault event');
+    }
+    const signed = await crypto.signEvent(event, signingKey);
+    event.id = signed.id;
+    event.sig = signed.sig;
+    
+    console.log('✅ [createInitialVaultForNostr] Initial vault event created:', {
+      eventId: event.id.slice(0, 8),
+      pubkey: event.pubkey.slice(0, 16),
+      encryption: 'password-aes',
+      identities: payload.identities.length
+    });
+    
+    return { event };
+  },
+
+  // Build a minimal vault event for Nostr publishing (STORAGE KEY-ENCRYPTED for sync operations)
   saveVaultToNostr: async (params: { username: string }): Promise<{ event: any }> => {
     const crypto = await ensureCryptoReady();
     const vaultRaw = await vaultDB.getVault(params.username);
@@ -1570,31 +1717,25 @@ export const handlers = {
       xprivEncryptedLength: payload.xprivEncrypted?.length
     });
     
-    // CRITICAL: Encrypt the payload with PASSWORD KEY before storing to Nostr
-    // This protects sensitive data (identities, permissions, recovery) from public relays
+    // CRITICAL: Encrypt the payload with STORAGE PRIVATE KEY (NIP-04) for sync operations
+    // This allows cross-tab sync without requiring the password
     const payloadJson = JSON.stringify(payload);
     let encryptedContent: string;
     
-    // Get password key from session
-    const passwordKey = session?.passwordKey;
-    if (!passwordKey) {
-      throw new Error('Password key not available in session. Cannot encrypt vault.');
-    }
-    
-    console.log('🔐 [WORKER saveVaultToNostr] Starting password encryption...');
-    console.log('🔐 [WORKER saveVaultToNostr] Using password key from session');
+    console.log('🔐 [WORKER saveVaultToNostr] Starting NIP-04 encryption with storage key...');
+    console.log('🔐 [WORKER saveVaultToNostr] Using storage private key from session');
     
     try {
-      // Use PASSWORD encryption (not NIP-04 with storage key!)
+      // Use NIP-04 encryption with storage key for sync operations
       const { encrypt } = await import('nostr-tools/nip04');
-      encryptedContent = await encrypt(passwordKey, String(pub), payloadJson);
-      console.log('✅ [WORKER saveVaultToNostr] Payload encrypted with password key!', {
+      encryptedContent = await encrypt(priv, String(pub), payloadJson);
+      console.log('✅ [WORKER saveVaultToNostr] Payload encrypted with storage key!', {
         encryptedSize: encryptedContent.length,
         identities: payload.identities.length
       });
     } catch (encErr) {
-      console.error('❌ [WORKER saveVaultToNostr] Password encryption failed:', encErr);
-      throw new Error('Failed to encrypt vault data with password');
+      console.error('❌ [WORKER saveVaultToNostr] Storage key encryption failed:', encErr);
+      throw new Error('Failed to encrypt vault data with storage key');
     }
     
     // Get the actual environment (don't hardcode!)
@@ -1614,8 +1755,8 @@ export const handlers = {
     
     const event = {
       kind: 30078 as number, // NIP-78 arbitrary custom app data (replaceable) - MUST match getVaultFromNostr
-      content: String(encryptedContent), // Use password-encrypted content
-      tags: [[String('d'), dTag], [String('encryption'), String('password-aes')]] as string[][], // Mark as password-encrypted
+      content: String(encryptedContent), // Use NIP-04 encrypted content
+      tags: [[String('d'), dTag], [String('encryption'), String('nip04')]] as string[][], // Mark as NIP-04 encrypted
       created_at: Math.floor(Date.now() / 1000),
       pubkey: String(pub),
       id: '',

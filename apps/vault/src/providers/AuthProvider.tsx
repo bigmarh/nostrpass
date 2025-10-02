@@ -6,7 +6,7 @@ import type { User, UserProfile, LoginObj, VaultObj, ErrorCode } from '@nostrpas
 import { createUser, getIdentityKeypair } from '../services/userService';
 import { getCryptoWorker, getCryptoWorkerInstance } from '../services/cryptoWorkerSingleton';
 import type { VaultData } from '@nostrpass/nostrHelpers';
-import { showErrorToast, showSuccessToast, showWarningToast } from '../components/Toast';
+import { showErrorToast, showSuccessToast } from '../components/Toast';
 
 interface AuthContextType {
   user: () => User | null;
@@ -967,23 +967,59 @@ export const AuthProvider: ParentComponent = (props) => {
           throw new Error('Failed to generate random keypair for LoginObj');
         }
         
-        const { saveLoginObj, saveVaultObj } = await import('@nostrpass/nostrHelpers');
+        const { saveLoginObj } = await import('@nostrpass/nostrHelpers');
         const relays = getRelays();
         
         await saveLoginObj(username, loginObj, randomPublicKey, randomPrivateKey, relays);
         console.log('✅ [CREATE ACCOUNT] LoginObj saved to Nostr');
         
-        const { privateKey: storagePrivateKey } = await getStorageKeypair(userMasterKey.xpriv);
-        // Use password key for encrypting VaultObj (double encryption model)
-        await saveVaultObj(vaultObj, storagePublicKey, storagePrivateKey, relays, passwordKey);
-        console.log('✅ [CREATE ACCOUNT] VaultObj saved to Nostr (password-encrypted)');
+        // Create initial vault event using password encryption
+        const vaultEvent = await cryptoWorker.createInitialVaultForNostr({ username, passwordKey });
+        console.log('✅ [CREATE ACCOUNT] Initial vault event created');
+        
+        // Publish the vault event to relays
+        const { publishEvent } = await import('@nostrpass/nostrHelpers');
+        const publishedRelays = await publishEvent(vaultEvent.event, relays);
+        console.log('✅ [CREATE ACCOUNT] VaultObj saved to Nostr (password-encrypted):', publishedRelays);
         
       } catch (error) {
         console.error('❌ [CREATE ACCOUNT] Failed to save to Nostr:', error);
       }
 
-      // Step 12: Send auth status
-      console.log('📡 [CREATE ACCOUNT] Step 12: Sending auth status to parent...');
+      // Step 12: Set up Nostr subscription for real-time vault updates
+      console.log('🔔 [CREATE ACCOUNT] Step 12: Setting up Nostr subscription...');
+      try {
+        const { VaultDataService } = await import('../services/vaultDataService');
+        const vaultDataService = VaultDataService.getInstance();
+        
+        // Get storagePrivateKey from the session (it was derived during unlockVault)
+        const session = await cryptoWorker.getSession({ username });
+        if (!session?.storagePrivateKey) {
+          throw new Error('Storage private key not available in session');
+        }
+        
+        await vaultDataService.subscribeToVaultUpdates(
+          username,
+          storagePublicKey,
+          session.storagePrivateKey,
+          (updatedVaultData) => {
+            console.log('🔔 [CREATE ACCOUNT] Received real-time vault update:', {
+              identities: updatedVaultData.identities?.length || 0,
+              updatedAt: new Date(updatedVaultData.updatedAt || 0).toISOString()
+            });
+            
+            // Update the vault data in the crypto worker
+            cryptoWorker.updateVaultData({ username, vaultData: updatedVaultData })
+              .catch((error: any) => console.error('Failed to update vault data in worker:', error));
+          }
+        );
+        console.log('✅ [CREATE ACCOUNT] Nostr subscription active');
+      } catch (subscriptionError) {
+        console.warn('⚠️ [CREATE ACCOUNT] Failed to set up Nostr subscription (non-critical):', subscriptionError);
+      }
+
+      // Step 13: Send auth status
+      console.log('📡 [CREATE ACCOUNT] Step 13: Sending auth status to parent...');
       messenger.send('AUTH_STATUS', {
         isAuthenticated: true,
         publicKey: personalPublicKey
@@ -1238,7 +1274,7 @@ export const AuthProvider: ParentComponent = (props) => {
           console.log('⏭️ [LOGIN] Skipping background sync (requires password key for decryption)');
           return;
           
-          const { getLoginObj, getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+          const { getLoginObj } = await import('@nostrpass/nostrHelpers');
           const relays = getRelays();
           const env = environmentName ? environmentName() : 'development';
           const loginObj = await getLoginObj(username, env, relays);
@@ -1297,6 +1333,41 @@ export const AuthProvider: ParentComponent = (props) => {
         localStorage.setItem('vaultsession', sessionStatus.sessionId);
       }
       
+      // Set up Nostr subscription for real-time vault updates
+      try {
+        const storagePublicKey = (vaultData as any).storagePublicKey || (vaultData as any).publicKey;
+        if (storagePublicKey) {
+          console.log('🔔 [LOGIN] Setting up Nostr subscription for real-time updates...');
+          
+          // Get storagePrivateKey from the session (it was derived during unlockVault)
+          const session = await cryptoWorker.getSession({ username });
+          if (!session?.storagePrivateKey) {
+            throw new Error('Storage private key not available in session');
+          }
+          
+          await vaultDataService.subscribeToVaultUpdates(
+            username,
+            storagePublicKey,
+            session.storagePrivateKey,
+            (updatedVaultData) => {
+              console.log('🔔 [LOGIN] Received real-time vault update:', {
+                identities: updatedVaultData.identities?.length || 0,
+                updatedAt: new Date(updatedVaultData.updatedAt || 0).toISOString()
+              });
+              
+              // Update the vault data in the crypto worker
+              cryptoWorker.updateVaultData({ username, vaultData: updatedVaultData })
+                .catch((error: any) => console.error('Failed to update vault data in worker:', error));
+            }
+          );
+          console.log('✅ [LOGIN] Nostr subscription active');
+        } else {
+          console.warn('⚠️ [LOGIN] Cannot set up Nostr subscription - missing storage public key');
+        }
+      } catch (subscriptionError) {
+        console.warn('⚠️ [LOGIN] Failed to set up Nostr subscription (non-critical):', subscriptionError);
+      }
+      
       setHasPinVault(true);
       setIsVaultLocked(true);
       
@@ -1349,6 +1420,17 @@ export const AuthProvider: ParentComponent = (props) => {
       try {
         await cryptoWorker.stopNostrSubscription({ username: currentUser.profile.username });
       } catch {}
+      
+      // Stop Nostr subscription
+      try {
+        const { VaultDataService } = await import('../services/vaultDataService');
+        const vaultDataService = VaultDataService.getInstance();
+        await vaultDataService.unsubscribeFromVaultUpdates(currentUser.profile.username);
+        console.log('🔕 [LOGOUT] Unsubscribed from Nostr vault updates');
+      } catch (error) {
+        console.warn('⚠️ [LOGOUT] Failed to unsubscribe from Nostr:', error);
+      }
+      
       try {
         // Logout from worker (clears in-memory session)
         await cryptoWorker.logoutUser({ username: currentUser.profile.username });
