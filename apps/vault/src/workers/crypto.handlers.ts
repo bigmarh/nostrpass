@@ -3,7 +3,7 @@ import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tool
 import { SimplePool, type Event as NostrEvent, type Filter } from 'nostr-tools';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
-import { buildEnvelope, verifyEnvelope, identityStreamId } from './pre.helpers';
+import { buildEnvelope, verifyEnvelope, identityStreamId, permStreamId, deriveIdentityId, deriveAppId } from './pre.helpers';
 
 /**
  * Handler architecture and naming
@@ -303,6 +303,101 @@ export const handlers = {
     await Promise.all(pool.publish(relays, signed));
     pool.close(relays);
     return { eventId: signed.id };
+  },
+
+  // Publish permissions for identity+app as PRE event
+  publishPermissions: async (params: { username: string; path: string; appDomain: string; appPermissions: string[] }): Promise<{ eventId: string }> => {
+    await ensureCryptoReady();
+    const { username, path, appDomain, appPermissions } = params;
+    const session = activeSessions.get(username);
+    if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    const storagePriv = session.storagePrivateKey;
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+    const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
+
+    // Derive opaque IDs
+    const identityId = deriveIdentityId(storagePriv, path);
+    const appId = deriveAppId(storagePriv, appDomain);
+    const streamId = permStreamId(storagePriv, identityId, appId);
+
+    // Build envelope
+    const data = { identityId, appId, appPermissions };
+    const envelope = buildEnvelope({ data });
+    const payloadJson = JSON.stringify(envelope);
+
+    // Encrypt and publish
+    const encryptedContent = await nip04EncryptJS(storagePriv, storagePublicKey, payloadJson);
+    const dTag = `np/perm/${streamId}`;
+    const event = {
+      kind: 30078 as number,
+      pubkey: storagePublicKey,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [["d", dTag]],
+      content: encryptedContent,
+      id: '',
+      sig: ''
+    };
+    const crypto = await ensureCryptoReady();
+    const signed = crypto.signEvent(event, storagePriv);
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080'
+    ];
+    const pool = new SimplePool();
+    await Promise.all(pool.publish(relays, signed));
+    pool.close(relays);
+    return { eventId: signed.id };
+  },
+
+  // Assemble current state from PRE streams (author-only fetch)
+  assembleStateFromAuthor: async (params: { username: string; relays: string[] }): Promise<{ identities: any[]; perms: Record<string, string[]> }> => {
+    await ensureCryptoReady();
+    const { username, relays } = params;
+    const session = activeSessions.get(username);
+    if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    const storagePriv = session.storagePrivateKey;
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+    const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
+
+    const pool = new SimplePool();
+    const filter: Filter = { kinds: [30078], authors: [storagePublicKey], limit: 500 };
+    const events = await pool.querySync(relays, filter);
+    pool.close(relays);
+
+    // Group latest by d-tag
+    const latestByD = new Map<string, any>();
+    for (const ev of events) {
+      const d = (ev.tags.find(t => t[0] === 'd')?.[1]) || '';
+      if (!d) continue;
+      const cur = latestByD.get(d);
+      if (!cur || ev.created_at > cur.created_at) latestByD.set(d, ev);
+    }
+
+    const identities: any[] = [];
+    const perms: Record<string, string[]> = {};
+
+    for (const [d, ev] of latestByD.entries()) {
+      try {
+        const plaintext = await nip04DecryptJS(storagePriv as string, storagePublicKey as string, ev.content);
+        const env = JSON.parse(plaintext);
+        if (!verifyEnvelope(env)) continue;
+        if (d.startsWith('np/identity/')) {
+          const { identityId, nickname, path } = env.data || {};
+          identities.push({ identityId, nickname, path });
+        } else if (d.startsWith('np/perm/')) {
+          const { identityId, appId, appPermissions } = env.data || {};
+          const key = `${identityId}:${appId}`;
+          perms[key] = Array.isArray(appPermissions) ? appPermissions : [];
+        }
+      } catch {}
+    }
+
+    return { identities, perms };
   },
   // Start realtime Nostr subscription for a user's vault
   startNostrSubscription: async (params: { username: string; relays: string[] }): Promise<{ started: boolean }> => {
