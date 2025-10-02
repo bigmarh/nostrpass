@@ -3,6 +3,7 @@ import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tool
 import { SimplePool, type Event as NostrEvent, type Filter } from 'nostr-tools';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
+import { buildEnvelope, verifyEnvelope, identityStreamId } from './pre.helpers';
 
 /**
  * Handler architecture and naming
@@ -254,6 +255,55 @@ import type {
 
 // Define all crypto handlers
 export const handlers = {
+  // Publish identity meta PRE event (encrypted with storage keypair)
+  publishIdentityMeta: async (params: { username: string; nickname: string; path: string }): Promise<{ eventId: string }> => {
+    await ensureCryptoReady();
+    const { username, nickname, path } = params;
+    const session = activeSessions.get(username);
+    if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    const storagePriv = session.storagePrivateKey;
+    const storagePub = session.storagePublicKey || vaultDB.getVault(username).then(v => v?.storagePublicKey || v?.publicKey);
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+    const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
+    const env = getEnvironment();
+
+    // Build envelope
+    const data = { identityId: `npid:${path}`, nickname, path };
+    const envelope = buildEnvelope({ data });
+    const payloadJson = JSON.stringify(envelope);
+
+    // Encrypt via NIP-04 with storage key
+    const encryptedContent = await nip04EncryptJS(storagePriv, storagePublicKey, payloadJson);
+
+    // Build PRE event
+    const dTag = `np/identity/${identityStreamId(storagePriv, data.identityId)}`;
+    const event = {
+      kind: 30078 as number,
+      pubkey: storagePublicKey,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [["d", dTag]],
+      content: encryptedContent,
+      id: '',
+      sig: ''
+    };
+
+    const crypto = await ensureCryptoReady();
+    const signed = crypto.signEvent(event, storagePriv);
+
+    // Publish
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080'
+    ];
+    const pool = new SimplePool();
+    await Promise.all(pool.publish(relays, signed));
+    pool.close(relays);
+    return { eventId: signed.id };
+  },
   // Start realtime Nostr subscription for a user's vault
   startNostrSubscription: async (params: { username: string; relays: string[] }): Promise<{ started: boolean }> => {
     await ensureCryptoReady();
