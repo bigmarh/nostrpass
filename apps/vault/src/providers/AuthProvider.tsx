@@ -1702,6 +1702,28 @@ export const AuthProvider: ParentComponent = (props) => {
       
       // Start realtime subscription now that we have storage key in session
       await startRealtime(currentUser.profile.username);
+
+      // Hydrate from PRE streams (author-only) and reconcile
+      try {
+        const relays = getRelays();
+        const assembled = await cryptoWorker.assembleStateFromAuthor({ username: currentUser.profile.username, relays });
+        if (assembled && Array.isArray(assembled.identities)) {
+          const local = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+          const localCount = local?.identities?.length || 0;
+          const remoteCount = assembled.identities.length || 0;
+          if (remoteCount > localCount) {
+            await cryptoWorker.updateVaultData({
+              username: currentUser.profile.username,
+              vaultData: { ...(local || {}), identities: assembled.identities },
+              skipVersionIncrement: true
+            });
+            window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: { username: currentUser.profile.username, source: 'nostr-pre' } }));
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ [UNLOCK] PRE hydrate failed (non-critical):', e);
+      }
+
       console.log('🎉 [UNLOCK] Vault unlock complete!');
       return true;
     } catch (error) {

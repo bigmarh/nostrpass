@@ -1547,6 +1547,13 @@ export const Dashboard: Component = () => {
                                         await updateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: false });
                                         console.log('✅ [Add Identity] Saved locally');
                                         
+                                        // Publish identity meta as PRE (non-blocking)
+                                        try {
+                                          await cryptoWorker!.publishIdentityMeta({ username: currentUser.profile.username, nickname: identity.nickname, path: identity.path });
+                                        } catch (e) {
+                                          console.warn('⚠️ [Add Identity] Failed to publish identity PRE:', e);
+                                        }
+                                        
                                         setShowAddIdentityModal(false);
                                         setNewIdentityNickname('');
                                         
