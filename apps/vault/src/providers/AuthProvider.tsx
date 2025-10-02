@@ -318,8 +318,7 @@ export const AuthProvider: ParentComponent = (props) => {
     if (!cryptoWorker) return;
     try {
       const { VaultDataService } = await import('../services/vaultDataService');
-      const vaultDataService = VaultDataService.getInstance();
-      const sessionStatus = await vaultDataService.getSessionStatus();
+      const sessionStatus = await VaultDataService.getInstance().getSessionStatus();
       if (sessionStatus.sessionId && sessionStatus.username) {
         localStorage.setItem('vaultsession', sessionStatus.sessionId);
         localStorage.setItem('last-username', sessionStatus.username);
@@ -986,37 +985,8 @@ export const AuthProvider: ParentComponent = (props) => {
         console.error('❌ [CREATE ACCOUNT] Failed to save to Nostr:', error);
       }
 
-      // Step 12: Set up Nostr subscription for real-time vault updates
-      console.log('🔔 [CREATE ACCOUNT] Step 12: Setting up Nostr subscription...');
-      try {
-        const { VaultDataService } = await import('../services/vaultDataService');
-        const vaultDataService = VaultDataService.getInstance();
-        
-        // Get storagePrivateKey from the session (it was derived during unlockVault)
-        const session = await cryptoWorker.getSession({ username });
-        if (!session?.storagePrivateKey) {
-          throw new Error('Storage private key not available in session');
-        }
-        
-        await vaultDataService.subscribeToVaultUpdates(
-          username,
-          storagePublicKey,
-          session.storagePrivateKey,
-          (updatedVaultData) => {
-            console.log('🔔 [CREATE ACCOUNT] Received real-time vault update:', {
-              identities: updatedVaultData.identities?.length || 0,
-              updatedAt: new Date(updatedVaultData.updatedAt || 0).toISOString()
-            });
-            
-            // Update the vault data in the crypto worker
-            cryptoWorker.updateVaultData({ username, vaultData: updatedVaultData })
-              .catch((error: any) => console.error('Failed to update vault data in worker:', error));
-          }
-        );
-        console.log('✅ [CREATE ACCOUNT] Nostr subscription active');
-      } catch (subscriptionError) {
-        console.warn('⚠️ [CREATE ACCOUNT] Failed to set up Nostr subscription (non-critical):', subscriptionError);
-      }
+      // Step 12: Realtime will start after unlock via worker
+      console.log('🔔 [CREATE ACCOUNT] Step 12: Realtime will start after unlock');
 
       // Step 13: Send auth status
       console.log('📡 [CREATE ACCOUNT] Step 13: Sending auth status to parent...');
@@ -1345,22 +1315,8 @@ export const AuthProvider: ParentComponent = (props) => {
             throw new Error('Storage private key not available in session');
           }
           
-          await vaultDataService.subscribeToVaultUpdates(
-            username,
-            storagePublicKey,
-            session.storagePrivateKey,
-            (updatedVaultData) => {
-              console.log('🔔 [LOGIN] Received real-time vault update:', {
-                identities: updatedVaultData.identities?.length || 0,
-                updatedAt: new Date(updatedVaultData.updatedAt || 0).toISOString()
-              });
-              
-              // Update the vault data in the crypto worker
-              cryptoWorker.updateVaultData({ username, vaultData: updatedVaultData })
-                .catch((error: any) => console.error('Failed to update vault data in worker:', error));
-            }
-          );
-          console.log('✅ [LOGIN] Nostr subscription active');
+          // Worker-based author-only subscription is started after unlock
+          console.log('ℹ️ [LOGIN] Realtime subscription will start after unlock');
 
           // One-time catch-up: fetch latest vault via storage key and update if newer
           try {
@@ -1442,15 +1398,7 @@ export const AuthProvider: ParentComponent = (props) => {
         await cryptoWorker.stopNostrSubscription({ username: currentUser.profile.username });
       } catch {}
       
-      // Stop Nostr subscription
-      try {
-        const { VaultDataService } = await import('../services/vaultDataService');
-        const vaultDataService = VaultDataService.getInstance();
-        await vaultDataService.unsubscribeFromVaultUpdates(currentUser.profile.username);
-        console.log('🔕 [LOGOUT] Unsubscribed from Nostr vault updates');
-      } catch (error) {
-        console.warn('⚠️ [LOGOUT] Failed to unsubscribe from Nostr:', error);
-      }
+      // Worker-based sub already stopped; nothing else to do
       
       try {
         // Logout from worker (clears in-memory session)
