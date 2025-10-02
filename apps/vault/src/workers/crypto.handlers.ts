@@ -54,8 +54,8 @@ const activeSessions = new Map<string, ExtendedSession>();
 const nostrSubscriptions = new Map<string, { pool: SimplePool; relays: string[]; unsub: (() => void) | null }>();
 const nostrPollers = new Map<string, number>();
 
-async function pollOnceAndApply(params: { username: string; relays: string[]; pubkey: string; storagePriv: string; env: string }) {
-  const { username, relays, pubkey, storagePriv, env } = params;
+async function pollOnceAndApply(params: { username: string; relays: string[]; pubkey: string; storagePriv: string; storagePub: string; env: string }) {
+  const { username, relays, pubkey, storagePriv, storagePub, env } = params;
   try {
     const pool = new SimplePool();
     const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
@@ -68,10 +68,16 @@ async function pollOnceAndApply(params: { username: string; relays: string[]; pu
     for (const ev of events) {
       try {
         let remote: VaultData | null = null;
+        // Try to decrypt with storage key (for NIP-04 encrypted sync events)
         try {
-          const plaintext = await nip04DecryptJS(storagePriv, pubkey, ev.content);
+          const plaintext = await nip04DecryptJS(storagePriv, storagePub, ev.content);
           remote = JSON.parse(plaintext) as VaultData;
+          console.log('📥 [Worker Poll] Decrypted vault event with storage key:', {
+            identitiesCount: remote.identities?.length,
+            version: (remote as any).version
+          });
         } catch {
+          // Fallback to plain JSON parse for legacy unencrypted events (should not exist anymore)
           try { remote = JSON.parse(ev.content) as VaultData; } catch { remote = null; }
         }
         if (!remote) continue;
@@ -79,7 +85,7 @@ async function pollOnceAndApply(params: { username: string; relays: string[]; pu
         const remoteVersion = (remote as any).version || 0;
         const localVersion = (local as any)?.version || 0;
         if (remoteVersion > localVersion) {
-          console.log('📥 [Worker] Applying newer vault from Nostr (poll):', { remoteVersion, localVersion });
+          console.log('📥 [Worker] Applying newer vault from Nostr (poll):', { remoteVersion, localVersion, remoteIdentities: remote.identities?.length });
           await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
           break;
         }
@@ -255,11 +261,14 @@ export const handlers = {
     const session = activeSessions.get(username);
     const vault = await vaultDB.getVault(username);
     if (!vault) throw new Error('Vault not found');
-    const pubkey = vault.publicKey;
+    
+    // CRITICAL: Use storagePublicKey for vault events (not personal identity publicKey)
+    const pubkey = vault.storagePublicKey || vault.publicKey;
     const env = getEnvironment();
 
     // Require unlocked storage key for decryption
     const storagePriv = session?.storagePrivateKey;
+    const storagePub = session?.storagePublicKey || pubkey;
     if (!storagePriv) {
       throw new Error('Storage key not available. Unlock required.');
     }
@@ -272,63 +281,77 @@ export const handlers = {
       nostrSubscriptions.delete(username);
     }
 
-    const pool = new SimplePool();
-    const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
-    const filter: Filter = { kinds: [30078], authors: [pubkey], '#d': [dTag] };
+    // Try realtime subscription first; fall back to polling on error
+    try {
+      const pool = new SimplePool();
+      const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
+      const filter: Filter = { kinds: [30078], authors: [pubkey], '#d': [dTag] };
 
-    console.log('📡 [Worker] Subscribing to Nostr vault events:', { username, pubkey, dTag, relays });
+      console.log('📡 [Worker] Subscribing to Nostr (author PRE):', { username, pubkey: pubkey.slice(0, 16), dTag, relaysCount: relays.length });
 
-    const sub = (pool as any).subscribeMany ? (pool as any).subscribeMany(relays, [filter]) : (pool as any).sub(relays, [filter]);
-    const onEvent = async (ev: NostrEvent) => {
-      try {
-        // Prefer decrypt path; fallback to JSON parse for legacy (will be ignored by version rules)
-        let remote: VaultData | null = null;
+      const sub: any = (pool as any).subscribeMany
+        ? (pool as any).subscribeMany(relays, [filter])
+        : (pool as any).sub(relays as any, [filter]);
+
+      const onEvent = async (ev: NostrEvent) => {
         try {
-          const plaintext = await nip04DecryptJS(storagePriv as string, pubkey, ev.content);
-          remote = JSON.parse(plaintext) as VaultData;
-        } catch {
-          try { remote = JSON.parse(ev.content) as VaultData; } catch { remote = null; }
-        }
-        if (!remote) return;
+          let remote: VaultData | null = null;
+          try {
+            const plaintext = await nip04DecryptJS(storagePriv as string, storagePub as string, ev.content);
+            remote = JSON.parse(plaintext) as VaultData;
+          } catch {
+            // ignore if not decryptable with storage key
+            remote = null;
+          }
+          if (!remote) return;
 
-        const local = await vaultDB.getVault(username);
-        const remoteVersion = (remote as any).version || 0;
-        const localVersion = (local as any)?.version || 0;
-        if (remoteVersion > localVersion) {
-          console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', { remoteVersion, localVersion });
-          await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
-        } else {
-          // Ignore older/same versions
+          const local = await vaultDB.getVault(username);
+          const remoteVersion = (remote as any).version || 0;
+          const localVersion = (local as any)?.version || 0;
+          if (remoteVersion > localVersion) {
+            console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', { remoteVersion, localVersion });
+            await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
+          }
+        } catch (e) {
+          console.warn('⚠️ [Worker] Failed to process realtime event:', e);
         }
-      } catch (e) {
-        console.warn('⚠️ [Worker] Failed to process incoming Nostr vault event:', e);
+      };
+
+      // Attach listeners using whichever API is available
+      if (sub && typeof sub.on === 'function') {
+        sub.on('event', onEvent);
+        sub.on('eose', () => console.log('📡 [Worker] Nostr EOSE for', username));
+        nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.unsub?.(); } catch {} } });
+      } else if (sub && typeof sub.onEvent === 'function') {
+        sub.onEvent(onEvent);
+        if (typeof sub.onEnd === 'function') sub.onEnd(() => console.log('📡 [Worker] Nostr EOSE for', username));
+        nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.close?.(); } catch {} } });
+      } else {
+        throw new Error('Unknown subscription interface');
       }
-    };
 
-    // Support both subscription interfaces
-    if (sub && typeof sub.on === 'function') {
-      sub.on('event', onEvent);
-      sub.on('eose', () => {
-        console.log('📡 [Worker] Nostr EOSE for', username);
-      });
-      nostrSubscriptions.set(username, { pool, relays, unsub: () => sub.unsub() });
-    } else if (sub && typeof sub === 'object') {
-      // subscribeMany returns an object with onEvent/onEnd in some versions
-      if (typeof sub.onEvent === 'function') sub.onEvent(onEvent);
-      if (typeof sub.onEnd === 'function') sub.onEnd(() => console.log('📡 [Worker] Nostr EOSE for', username));
-      nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.close?.(); } catch {} } });
-    } else {
-      console.warn('⚠️ [Worker] Subscription API not available, falling back to polling');
+      // Light periodic reconcile (author query) as safety net
+      const key = `${username}`;
+      const reconcile = setInterval(() => {
+        pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });
+      }, 60000) as unknown as number;
+      nostrPollers.set(key, reconcile);
+
+      console.log('✅ [Worker] Realtime subscription active');
+      return { started: true };
+    } catch (subErr) {
+      console.warn('⚠️ [Worker] Realtime subscription failed; falling back to polling:', subErr);
+      const pool = new SimplePool();
       nostrSubscriptions.set(username, { pool, relays, unsub: null });
-      // Fire one immediate poll, then set interval
-      await pollOnceAndApply({ username, relays, pubkey, storagePriv, env });
+      await pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });
       const key = `${username}`;
       const timer = setInterval(() => {
-        pollOnceAndApply({ username, relays, pubkey, storagePriv, env });
+        pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });
       }, 5000) as unknown as number;
       nostrPollers.set(key, timer);
+      console.log('✅ [Worker] Vault sync polling started (5s interval)');
+      return { started: true };
     }
-    return { started: true };
   },
 
   // Stop realtime Nostr subscription for a user
