@@ -1361,6 +1361,25 @@ export const AuthProvider: ParentComponent = (props) => {
             }
           );
           console.log('✅ [LOGIN] Nostr subscription active');
+
+          // One-time catch-up: fetch latest vault via storage key and update if newer
+          try {
+            const { getRelays } = await import('../providers/EnvironmentProvider');
+            const relays = getRelays();
+            const { getVaultFromNostrWithStorageKey } = await import('@nostrpass/nostrHelpers');
+            const latest = await getVaultFromNostrWithStorageKey(storagePublicKey, relays, session.storagePrivateKey);
+            if (latest) {
+              const localUpdatedAt = (vaultData as any)?.updatedAt || 0;
+              const remoteUpdatedAt = (latest as any)?.updatedAt || 0;
+              if (remoteUpdatedAt > localUpdatedAt) {
+                console.log('⬆️ [LOGIN] Applying newer vault from Nostr:', new Date(remoteUpdatedAt).toISOString());
+                await cryptoWorker.updateVaultData({ username, vaultData: latest, skipVersionIncrement: true });
+                window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: { username, source: 'nostr-catchup', timestamp: Date.now() } }));
+              }
+            }
+          } catch (e) {
+            console.warn('⚠️ [LOGIN] Nostr catch-up failed (non-critical):', e);
+          }
         } else {
           console.warn('⚠️ [LOGIN] Cannot set up Nostr subscription - missing storage public key');
         }
@@ -1381,7 +1400,9 @@ export const AuthProvider: ParentComponent = (props) => {
           preferences: {},
           security: {
             sessionTimeout: 60
-          }
+          },
+          // Ensure storagePublicKey available for subscriptions
+          storagePublicKey: (vaultData as any).storagePublicKey || (vaultData as any).publicKey
         },
         appPermissions: new Map(),
         isAuthenticated: false,
@@ -1633,17 +1654,20 @@ export const AuthProvider: ParentComponent = (props) => {
           const remoteVersion = remoteVault.version || 0;
           const localVersion = freshVaultData.version || 0;
           
+          const remoteUpdatedAt = Number(remoteVault.updatedAt || 0);
+          const localUpdatedAt = Number(freshVaultData.updatedAt || 0);
           console.log('🔍 [UNLOCK] Comparing vault versions:', {
             remoteVersion,
             localVersion,
             remoteIdentitiesCount: remoteVault.identities?.length || 0,
             localIdentitiesCount: freshVaultData.identities?.length || 0,
-            remoteUpdatedAt: remoteVault.updatedAt,
-            localUpdatedAt: freshVaultData.updatedAt,
-            shouldUpdate: remoteVersion > localVersion
+            remoteUpdatedAt,
+            localUpdatedAt,
+            shouldUpdateByVersion: remoteVersion > localVersion,
+            shouldUpdateByTime: remoteVersion === localVersion && remoteUpdatedAt > localUpdatedAt
           });
           
-          if (remoteVersion > localVersion) {
+          if (remoteVersion > localVersion || (remoteVersion === localVersion && remoteUpdatedAt > localUpdatedAt)) {
             console.log('✅ [UNLOCK] Remote vault is newer (v' + remoteVersion + ' > v' + localVersion + '), updating local...');
             
             // Update local vault with remote data
@@ -1657,7 +1681,7 @@ export const AuthProvider: ParentComponent = (props) => {
             // Broadcast refresh to other tabs/components
             // Broadcast vault data refresh
             window.dispatchEvent(new CustomEvent('vault-data-refresh', {
-              detail: { username: currentUser.profile.username }
+              detail: { username: currentUser.profile.username, source: 'nostr' }
             }));
             
             console.log('✅ [UNLOCK] Local vault updated with Nostr data');
