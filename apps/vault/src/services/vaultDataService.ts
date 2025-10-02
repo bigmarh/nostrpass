@@ -196,13 +196,16 @@ export class VaultDataService {
    * Sync vault data to Nostr
    */
   async syncToNostr(username: string): Promise<void> {
+    console.log('🔄 [syncToNostr] Called for user:', username);
     const cryptoWorker = getCryptoWorker();
+    console.log('🔄 [syncToNostr] Crypto worker status:', !!cryptoWorker);
     if (!cryptoWorker) {
+      console.error('❌ [syncToNostr] Crypto worker not ready');
       throw new Error('Crypto worker not ready');
     }
 
     try {
-      console.log('🔄 Starting Nostr sync for user:', username);
+      console.log('🔄 [syncToNostr] Starting Nostr sync for user:', username);
       
       // Create vault event
       const vaultEvent = await cryptoWorker.saveVaultToNostr({ username });

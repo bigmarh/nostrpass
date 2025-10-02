@@ -69,23 +69,23 @@ const PinPad: Component<PinPadProps> = (props) => {
 
 
   return (
-    <div class="my-8">
+    <div class="w-full flex flex-col items-center">
       {/* PIN Display */}
-      <div class={`flex justify-center gap-3 mb-6 ${isShaking() ? 'shake-animation' : ''}`}>
+      <div class={`flex justify-center gap-1.5 mb-3 ${isShaking() ? 'shake-animation' : ''}`}>
         {Array.from({ length: 6 }).map((_, index) => (
-          <div class={`w-4 h-4 rounded-full border-2 transition-all duration-400 ${index < currentPin().length
-            ? 'bg-gray-900 border-gray-900'
-            : 'bg-gray-200 border-gray-300'
+          <div class={`w-3.5 h-3.5 rounded-full border-2 transition-all duration-400 ${index < currentPin().length
+            ? 'bg-gray-900 dark:bg-gray-100 border-gray-900 dark:border-gray-100'
+            : 'bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
             }`} />
         ))}
       </div>
 
       {/* PIN Pad */}
-      <div class="grid grid-cols-3 gap-3 max-w-[240px] mx-auto">
+      <div class="grid grid-cols-3 gap-1 w-full mx-auto">
 
         {scrambledNumbers().map((num) => (
           <button
-            class="w-16 h-16 border border-gray-300 bg-white text-gray-900 rounded-default text-lg font-semibold cursor-pointer transition-all duration-150 flex items-center justify-center hover:bg-gray-50 hover:border-gray-400 hover:-translate-y-px active:translate-y-0 active:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="aspect-square border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-xl font-semibold cursor-pointer transition-colors flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => addDigit(num)}
             disabled={currentPin().length >= 6}
           >
@@ -96,11 +96,12 @@ const PinPad: Component<PinPadProps> = (props) => {
 
         {/* Backspace button spans 2 columns */}
         <button
-          class="col-span-2 w-full h-16 border border-gray-300 bg-white text-gray-900 rounded-default text-base font-medium cursor-pointer transition-all duration-150 flex items-center justify-center hover:bg-gray-50 hover:border-gray-400 hover:-translate-y-px active:translate-y-0 active:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="col-span-2 w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-2xl font-medium cursor-pointer transition-colors flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          style="aspect-ratio: 2/1;"
           onClick={removeDigit}
           disabled={props.disabled}
         >
-          ← Delete
+          ←
         </button>
 
         {/* Empty cell for 3x4 grid layout */}

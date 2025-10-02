@@ -86,16 +86,23 @@ const UnlockVaultOperation: Component = () => {
         </div>
       }
     >
-      <div class="flex justify-center p-4 text-base">
-        <div class="bg-white black-outline box-shadow rounded-lg shadow-default p-8 text-center relative">
-          {/* Header */}
-          <div class="text-center mb-8">
-            <h2 class="text-xl font-semibold mb-2">Unlock to Continue</h2>
-            <p class="text-gray-600">Enter your PIN to complete the operation</p>
+      <div class="min-h-screen flex items-center justify-center p-2 text-base bg-white dark:bg-gray-900">
+        <div class="w-full max-w-xs bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-3 text-center relative">
+          {/* Compact header with exit */}
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-sm font-medium text-gray-700 dark:text-gray-300">Enter PIN</div>
+            <button
+              onClick={handleCancel}
+              class="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+              aria-label="Close"
+              title="Close"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
           </div>
 
           {/* PIN Entry */}
-          <div class="mb-6">
+          <div class="mb-1">
             <PinPad
               ref={(el: any) => pinPadRef = el}
               onPinChange={handlePinChange}
@@ -105,32 +112,26 @@ const UnlockVaultOperation: Component = () => {
 
           {/* Messages */}
           {error() && (
-            <div class="status-message error text-sm text-center mb-4">
+            <div class="status-message error text-xs text-center mb-2 text-red-600 dark:text-red-400">
               {error()}
             </div>
           )}
 
           {success() && (
-            <div class="status-message success text-sm text-center mb-4 text-green-600">
+            <div class="status-message success text-xs text-center mb-2 text-green-600 dark:text-green-400">
               {success()}
             </div>
           )}
 
           {/* Action buttons */}
           {!success() && (
-            <div class="mt-6 pt-4 border-t border-gray-200 flex flex-col gap-2">
+            <div class="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-1">
               <button
                 onClick={logout}
-                class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                 disabled={isUnlocking()}
               >
                 Can't remember your PIN? Logout
-              </button>
-              <button
-                onClick={handleCancel}
-                class="text-gray-500 hover:text-gray-700 text-sm underline"
-              >
-                Cancel
               </button>
             </div>
           )}

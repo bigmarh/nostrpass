@@ -112,19 +112,19 @@ export const PinUnlock: Component = () => {
 
 
     return (
-        <div class="flex justify-center md:h-screen items-center">
-            <div class="flex min-w-[400px] w-full max-w-2xl h-auto bg-white black-outline flex-col rounded-lg">
+        <div class="flex justify-center md:h-screen items-center bg-white dark:bg-gray-900">
+            <div class="flex min-w-[400px] w-full max-w-2xl h-auto bg-white dark:bg-gray-800 black-outline flex-col rounded-lg">
                 <div class="flex flex-col items-center justify-center p-8">
                   
                     <Show when={error()}>
-                        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-md text-sm mb-4 max-w-md text-center">
+                        <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4 max-w-md text-center">
                             {error()}
                         </div>
                     </Show>
 
                     <Show when={isUnlocking()}>
-                        <div class="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2 rounded-md text-sm mb-4 flex items-center gap-2">
-                            <svg class="animate-spin h-4 w-4 text-blue-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-400 px-4 py-2 rounded-md text-sm mb-4 flex items-center gap-2">
+                            <svg class="animate-spin h-4 w-4 text-blue-700 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
@@ -167,9 +167,9 @@ export const PinUnlock: Component = () => {
                             />
                             
                             <Show when={showPasswordPrompt()}>
-                                <div class="mt-4 p-4 border-t">
-                                    <h3 class="text-lg font-semibold mb-2">Verify Your Password</h3>
-                                    <p class="text-sm text-gray-600 mb-4">
+                                <div class="mt-4 p-4 border-t border-gray-200 dark:border-gray-700">
+                                    <h3 class="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Verify Your Password</h3>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
                                         Please enter your password to complete the PIN reset.
                                     </p>
                                     <input
@@ -177,7 +177,7 @@ export const PinUnlock: Component = () => {
                                         placeholder="Password"
                                         value={passwordForReset()}
                                         onInput={(e) => setPasswordForReset(e.currentTarget.value)}
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
                                         onKeyPress={(e) => {
                                             if (e.key === 'Enter') handlePasswordVerification();
                                         }}
@@ -186,7 +186,7 @@ export const PinUnlock: Component = () => {
                                         <button
                                             onClick={handlePasswordVerification}
                                             disabled={!passwordForReset() || isUnlocking()}
-                                            class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 disabled:bg-gray-400"
+                                            class="flex-1 px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 disabled:bg-gray-400 dark:disabled:bg-gray-600"
                                         >
                                             {isUnlocking() ? 'Resetting PIN...' : 'Complete Reset'}
                                         </button>
@@ -195,7 +195,7 @@ export const PinUnlock: Component = () => {
                                                 setShowPasswordPrompt(false);
                                                 setPasswordForReset('');
                                             }}
-                                            class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                                            class="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
                                         >
                                             Cancel
                                         </button>
@@ -209,14 +209,14 @@ export const PinUnlock: Component = () => {
                         <Show when={!showRecovery() && !showPinReset()}>
                             <button
                                 onClick={() => setShowRecovery(true)}
-                                class="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                                class="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
                             >
                                 Forgot PIN?
                             </button>
                         </Show>
                         <button
                             onClick={handleCancel}
-                            class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                            class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                         >
                             Cancel
                         </button>
@@ -226,7 +226,7 @@ export const PinUnlock: Component = () => {
                                     logout();
                                     navigate(`/${params.app}`);
                                 }}
-                                class="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                                class="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
                             >
                                 Use a different account
                             </button>

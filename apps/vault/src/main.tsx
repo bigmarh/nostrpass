@@ -3,9 +3,7 @@ import { render } from 'solid-js/web';
 import App from './App';
 import './index.css';
 
-// CRITICAL: Set transparent background IMMEDIATELY before anything else
-document.documentElement.style.backgroundColor = 'transparent';
-document.body.style.backgroundColor = 'transparent';
+// Ensure backgrounds follow Tailwind dark/light classes (no forced transparency)
 
 const root = document.getElementById('root');
 
@@ -15,11 +13,6 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
   );
 }
 
-// Ensure backgrounds stay transparent
-document.documentElement.style.backgroundColor = 'transparent';
-document.body.style.backgroundColor = 'transparent';
-if (root) {
-  root.style.backgroundColor = 'transparent';
-}
+// No manual background overrides — CSS controls backgrounds now
 
 render(() => <App />, root!);

@@ -11,7 +11,7 @@ export interface VaultData {
   username: string;
   publicKey: string; // Storage public key for vault identification
   xprivEncrypted: string; // PIN-encrypted only (single encryption)
-  salt: string; // For password key derivation
+  salt: string; // For PIN encryption (embedded in xprivEncrypted)
   
   // Identity management
   identities: any[];
@@ -32,9 +32,12 @@ export interface VaultData {
   
   // Metadata
   updatedAt: number;
-  version: number; // Vault version for migrations
+  version: number; // Increments on every save for sync conflict resolution
+  createdAt?: number; // Account creation timestamp
+  lastSyncedAt?: number; // Last sync with Nostr
   
   // Security
+  passwordSalt?: string; // Salt for password key derivation
   passwordVerifier?: string; // Encrypted known string to verify password
 }
 
@@ -137,16 +140,26 @@ export async function getLoginObj(
 }
 
 /**
- * Save VaultObj to Nostr using storage key
+ * Save VaultObj to Nostr using storage key (PASSWORD-ENCRYPTED)
+ * This implements double encryption: PIN-encrypted xpriv → Password-encrypted VaultObj
  */
 export async function saveVaultObj(
   vaultObj: VaultObj,
   storagePublicKey: string,
   storagePrivateKey: string,
-  relays: string[]
+  relays: string[],
+  passwordKey: string  // Password key for encrypting the entire VaultObj
 ): Promise<string[]> {
   try {
-    const vaultContent = JSON.stringify(vaultObj);
+    const vaultJson = JSON.stringify(vaultObj);
+    
+    // CRITICAL: Encrypt entire VaultObj with password
+    // This protects sensitive data (identities, permissions, recovery) from public relays
+    // Uses AES-256-GCM encryption with password-derived key
+    const { encrypt } = await import('nostr-tools/nip04');
+    const encryptedContent = await encrypt(passwordKey, storagePublicKey, vaultJson);
+    
+    console.log('🔐 [saveVaultObj] VaultObj encrypted with password key');
     
     // Create vault event with storage key as author
     const vaultEvent: Partial<NostrEvent> = {
@@ -156,8 +169,9 @@ export async function saveVaultObj(
         ['d', `nostrpass.com_vault_${storagePublicKey}_${getEnvironment()}`],
         ['client', 'nostrpass.com'],
         ['subject', 'encrypted-vault'],
+        ['encryption', 'password-aes'], // Mark as password-encrypted
       ],
-      content: vaultContent,
+      content: encryptedContent, // Use password-encrypted content
       pubkey: storagePublicKey, // Storage key as author
     };
 
@@ -171,7 +185,7 @@ export async function saveVaultObj(
     for (const relay of relays) {
       try {
         await pool.publish([relay], signedEvent);
-        console.log(`✅ Published VaultObj to ${relay}`);
+        console.log(`✅ Published password-encrypted VaultObj to ${relay}`);
         successfulPublishes.push(relay);
       } catch (error: any) {
         console.error(`❌ Failed to publish VaultObj to ${relay}:`, error.message);
@@ -195,33 +209,45 @@ function hash(input: string): string {
 }
 
 /**
- * Save vault data to Nostr
+ * Save vault data to Nostr (PASSWORD-ENCRYPTED)
+ * NOTE: This is DEPRECATED - use saveVaultObj instead for new code
  * @param vaultData - The vault data to save
- * @param userPrivateKey - User's private key for signing
- * @param userPublicKey - User's public key for encryption
+ * @param userPrivateKey - User's storage private key for signing
+ * @param userPublicKey - User's storage public key
  * @param relays - Relay URLs to publish to
+ * @param passwordKey - Password-derived key for encryption
  * @returns Event IDs from successful publishes
  */
 export async function saveVaultToNostr(
   vaultData: VaultData,
   userPrivateKey: string,
   userPublicKey: string,
-  relays: string[]
+  relays: string[],
+  passwordKey: string  // Password key for encryption
 ): Promise<string[]> {
   try {
-    // Store vault data as JSON
-    const vaultContent = JSON.stringify(vaultData);
+    // Serialize vault data as JSON
+    const vaultJson = JSON.stringify(vaultData);
+    
+    // CRITICAL: Encrypt vault data with PASSWORD before storing to Nostr
+    // This protects sensitive data (identities, permissions, recovery) from public relays
+    // No circular dependency - password key is derived from user input
+    const { encrypt } = await import('nostr-tools/nip04');
+    const encryptedContent = await encrypt(passwordKey, userPublicKey, vaultJson);
+    
+    console.log('🔐 [saveVaultToNostr] Vault data encrypted with password key');
 
     // Create replaceable event (NIP-33)
     const vaultEvent: Partial<NostrEvent> = {
       kind: 30078, // NIP-78 arbitrary custom app data (replaceable)
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['d', `nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`], // Use new VaultObj pattern
+        ['d', `nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`],
         ['client', 'nostrpass.com'],
         ['subject', 'encrypted-vault'],
+        ['encryption', 'password-aes'], // Mark as password-encrypted
       ],
-      content: vaultContent,
+      content: encryptedContent, // Use password-encrypted content
       pubkey: userPublicKey,
     };
 
@@ -236,7 +262,7 @@ export async function saveVaultToNostr(
     for (const relay of relays) {
       try {
         await pool.publish([relay], signedEvent);
-        console.log(`✅ Published to ${relay}`);
+        console.log(`✅ Published password-encrypted vault to ${relay}`);
         successfulPublishes.push(relay);
       } catch (error: any) {
         if (error.message?.includes('pow:')) {
@@ -266,30 +292,47 @@ export async function saveVaultToNostr(
 }
 
 /**
- * Retrieve vault data from Nostr
- * @param userPublicKey - User's public key
- * @param userPrivateKey - User's private key (no longer needed, kept for compatibility)
+ * Retrieve vault data from Nostr (PASSWORD-ENCRYPTED)
+ * @param userPublicKey - User's storage public key
  * @param relays - Relay URLs to query
+ * @param passwordKey - Password-derived key for decrypting VaultObj
  * @returns Vault data or null if not found
  */
 export async function getVaultFromNostr(
   userPublicKey: string,
   relays: string[],
-  storagePrivateKey?: string // Optional - for decrypting NIP-04 encrypted vaults
+  passwordKey: string  // Password key REQUIRED for decryption
 ): Promise<VaultData | null> {
   try {
     const pool = new SimplePool();
+    
+    const env = getEnvironment();
+    const expectedDTag = `nostrpass.com_vault_${userPublicKey}_${env}`;
+    
+    console.log('🔍 [getVaultFromNostr] Searching for vault:', {
+      userPublicKey,
+      expectedDTag,
+      env,
+      hasPasswordKey: !!passwordKey
+    });
     
     // Query for vault events - get multiple to find the right encryption type
     const filter: Filter = {
       kinds: [30078],
       authors: [userPublicKey],
-      '#d': [`nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`],
+      '#d': [expectedDTag],
       limit: 10 // Get multiple versions
     };
 
     const events = await pool.querySync(relays, filter);
     pool.close(relays);
+    
+    console.log('🔍 [getVaultFromNostr] Found events:', {
+      count: events.length,
+      eventIds: events.map(e => e.id.slice(0, 8)),
+      eventAuthors: events.map(e => e.pubkey.slice(0, 16)),
+      eventDTags: events.map(e => e.tags.find(t => t[0] === 'd')?.[1]?.slice(0, 40))
+    });
 
     if (events.length === 0) {
       return null;
@@ -298,38 +341,23 @@ export async function getVaultFromNostr(
     // Sort by created_at to get most recent first
     const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
     
-
-    // Try to find a vault we can decrypt
-    for (const event of sortedEvents) {
-      try {
-        // First try to parse as plain JSON (base encryption)
-        try {
-          const vaultData = JSON.parse(event.content) as VaultData;
-          return vaultData;
-        } catch (jsonError) {
-          // Not plain JSON, might be NIP-04 encrypted
-          if (storagePrivateKey) {
-            
-            // Import crypto functions
-            const nip04 = await import('nostr-tools/nip04');
-            const decryptedContent = nip04.decrypt(storagePrivateKey, userPublicKey, event.content);
-            
-            const vaultData = JSON.parse(decryptedContent) as VaultData;
-            return vaultData;
-          } else {
-            console.log('⚠️ Cannot decrypt - no storage private key provided');
-            // Continue to next event
-          }
-        }
-      } catch (error) {
-        console.error('❌ Failed to process vault event:', error);
-        // Continue to next event
-      }
-    }
-
-    // If we get here, we couldn't decrypt any vault
-    console.error('❌ Could not find a decryptable vault among', sortedEvents.length, 'events');
-    return null;
+    // Get the most recent event
+    const event = sortedEvents[0];
+    
+    // Decrypt VaultObj with password key
+    const { decrypt } = await import('nostr-tools/nip04');
+    const decryptedContent = await decrypt(passwordKey, userPublicKey, event.content);
+    const vaultData = JSON.parse(decryptedContent) as VaultData;
+    
+    console.log('✅ [getVaultFromNostr] Retrieved password-encrypted vault from Nostr:', {
+      username: vaultData.username,
+      identitiesCount: vaultData.identities?.length || 0,
+      hasXprivEncrypted: !!vaultData.xprivEncrypted,
+      updatedAt: vaultData.updatedAt ? new Date(vaultData.updatedAt).toISOString() : 'N/A',
+      eventCreatedAt: new Date(event.created_at * 1000).toISOString(),
+      encryption: 'password-aes'
+    });
+    return vaultData;
   } catch (error) {
     console.error('Error retrieving vault from Nostr:', error);
     return null;

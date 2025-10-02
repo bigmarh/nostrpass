@@ -1,42 +1,52 @@
-import { Component, createSignal, For, Show } from 'solid-js';
+import { Component, createSignal, For, Show, createEffect } from 'solid-js';
 import { useVaultData } from '../hooks/useVaultData';
-import { getRelays } from '../providers/EnvironmentProvider';
+import { getRelays as getDefaultRelays } from '../providers/EnvironmentProvider';
 
 const RelaySettings: Component = () => {
   const { vaultData, updateVaultData } = useVaultData();
   const [newRelay, setNewRelay] = createSignal('');
   const [isAdding, setIsAdding] = createSignal(false);
   const [isSaving, setIsSaving] = createSignal(false);
+  const [currentRelays, setCurrentRelays] = createSignal<string[]>([]);
 
-  const currentRelays = () => {
-    const customRelays = vaultData()?.customRelays;
-    return customRelays && customRelays.length > 0 ? customRelays : getRelays();
-  };
+  const defaultRelays = getDefaultRelays();
+
+  // Sync currentRelays with vaultData
+  createEffect(() => {
+    const custom = vaultData()?.customRelays;
+    if (custom && custom.length > 0) {
+      setCurrentRelays(custom);
+    } else {
+      setCurrentRelays(defaultRelays);
+    }
+  });
 
   const isCustom = () => {
-    return vaultData()?.customRelays && vaultData()!.customRelays!.length > 0;
+    const custom = vaultData()?.customRelays;
+    return custom && custom.length > 0;
   };
 
   const handleAddRelay = async () => {
-    const relay = newRelay().trim();
-    if (!relay) return;
+    const url = newRelay().trim();
+    if (!url) return;
 
-    // Validate relay URL
-    if (!relay.startsWith('wss://') && !relay.startsWith('ws://')) {
+    if (!url.startsWith('wss://') && !url.startsWith('ws://')) {
       alert('Relay URL must start with wss:// or ws://');
+      return;
+    }
+
+    if (currentRelays().includes(url)) {
+      alert('This relay is already in your list');
       return;
     }
 
     setIsSaving(true);
     try {
-      const current = currentRelays();
-      if (current.includes(relay)) {
-        alert('Relay already in list');
-        return;
-      }
-
+      const current = vaultData()?.customRelays || [];
+      const updated = [...current, url];
+      
       await updateVaultData({ 
-        customRelays: [...current, relay] 
+        customRelays: updated 
       });
       
       setNewRelay('');
@@ -83,38 +93,41 @@ const RelaySettings: Component = () => {
   };
 
   return (
-    <div class="relay-settings">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0;">Nostr Relays</h3>
+    <div class="space-y-4">
+      {/* Header with Reset Button */}
+      <div class="flex justify-between items-center">
+        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">Nostr Relays</h3>
         <Show when={isCustom()}>
           <button
             onClick={handleResetToDefaults}
             disabled={isSaving()}
-            style="padding: 0.5rem 1rem; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer;"
+            class="px-3 py-1.5 text-sm bg-gray-600 dark:bg-gray-600 hover:bg-gray-700 dark:hover:bg-gray-500 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Reset to Defaults
           </button>
         </Show>
       </div>
 
-      <p style="color: #666; font-size: 0.9rem; margin-bottom: 1rem;">
+      {/* Status Text */}
+      <p class="text-sm text-gray-600 dark:text-gray-400">
         {isCustom() 
           ? 'Using custom relays (your vault data is published to these relays)'
-          : 'Using default relays (configure custom relays below)'}
+          : 'Using default relays (add custom relays below to override)'}
       </p>
 
-      <div style="background: #f5f5f5; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+      {/* Relays List */}
+      <div class="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 space-y-2">
         <For each={currentRelays()}>
           {(relay) => (
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: white; margin-bottom: 0.5rem; border-radius: 4px;">
-              <span style="font-family: monospace; font-size: 0.9rem; word-break: break-all;">
+            <div class="flex justify-between items-center p-2 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+              <span class="font-mono text-xs text-gray-800 dark:text-gray-200 break-all flex-1 mr-2">
                 {relay}
               </span>
               <Show when={isCustom()}>
                 <button
                   onClick={() => handleRemoveRelay(relay)}
                   disabled={isSaving()}
-                  style="padding: 0.25rem 0.5rem; background: #ff4444; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 0.5rem;"
+                  class="px-2 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   Remove
                 </button>
@@ -124,48 +137,56 @@ const RelaySettings: Component = () => {
         </For>
       </div>
 
+      {/* Add Relay Section */}
       <Show
         when={!isAdding()}
         fallback={
-          <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+          <div class="space-y-2">
             <input
               type="text"
               value={newRelay()}
               onInput={(e) => setNewRelay(e.currentTarget.value)}
               placeholder="wss://relay.example.com"
-              style="flex: 1; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               disabled={isSaving()}
+              autofocus
             />
-            <button
-              onClick={handleAddRelay}
-              disabled={isSaving() || !newRelay().trim()}
-              style="padding: 0.5rem 1rem; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;"
-            >
-              Add
-            </button>
-            <button
-              onClick={() => {
-                setIsAdding(false);
-                setNewRelay('');
-              }}
-              disabled={isSaving()}
-              style="padding: 0.5rem 1rem; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer;"
-            >
-              Cancel
-            </button>
+            <div class="flex gap-2">
+              <button
+                onClick={handleAddRelay}
+                disabled={isSaving() || !newRelay().trim()}
+                class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              >
+                {isSaving() ? 'Adding...' : 'Add Relay'}
+              </button>
+              <button
+                onClick={() => {
+                  setIsAdding(false);
+                  setNewRelay('');
+                }}
+                disabled={isSaving()}
+                class="px-4 py-2 bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         }
       >
         <button
           onClick={() => setIsAdding(true)}
-          style="padding: 0.5rem 1rem; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; width: 100%;"
+          class="w-full px-4 py-2 border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 rounded-md transition-colors font-medium"
         >
           + Add Custom Relay
         </button>
       </Show>
+
+      {/* Info Text */}
+      <p class="text-xs text-gray-500 dark:text-gray-400">
+        Custom relays will be used for all vault operations (backup and sync). If not set, default relays are used.
+      </p>
     </div>
   );
 };
 
 export default RelaySettings;
-

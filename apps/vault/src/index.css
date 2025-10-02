@@ -1,49 +1,41 @@
 
 @import "tailwindcss";
 
+/* Tailwind v4: enable class-based dark mode */
+@theme {
+  --dark-mode: class;
+}
+
+/* Ensure dark: variant uses the `.dark` class on any ancestor (Tailwind v4) */
+@custom-variant dark (&:where(.dark *));
+
+
 .black-outline {
     @apply md:border-2 md:border-black;
 }
 
-/* CRITICAL: Override all backgrounds with transparent - must come AFTER Tailwind */
-html,
-html body,
-body,
-body #root,
-#root {
-    --primary-color: #000000;
-    --secondary-color: #ffffff;
-    background-color: transparent !important;
-    background: transparent !important;
+/* App background: use light/dark page colors on the html element */
+html {
+    background-color: #ffffff; /* light background */
+}
+html.dark {
+    background-color: #0f172a; /* slate-900 for dark mode */
 }
 
 html,
 body {
     min-height: 100vh;
-    width: 100vw;
+    width: 100%;
     padding: 0;
     margin: 0;
+    overflow-x: hidden; /* prevent accidental horizontal scrollbar */
 }
 
-/* Mobile: fill entire screen */
-html,
-body {
-    display: block;
-}
-
-/* Desktop: centered modal with padding */
-@media (min-width: 768px) {
-    html,
-    body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 1rem;
-    }
-}
+/* Do not center on html/body to avoid width overflow */
 
 #root {
     width: 100%;
+    min-height: 100vh; /* ensure root always covers full height */
 }
 
 /* Mobile: full width */
@@ -51,15 +43,7 @@ body {
     display: block;
 }
 
-/* Desktop: centered modal with max width */
-@media (min-width: 768px) {
-    #root {
-        max-width: 900px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-}
+/* Full-width app: no max-width constraints on root */
 
 /* Shake animation for wrong PIN */
 @keyframes shake {

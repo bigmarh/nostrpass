@@ -5,6 +5,7 @@ import { CryptoWorkerProvider } from './CryptoWorkerProvider';
 import { AuthProvider } from './AuthProvider';
 import { DataProvider } from './DataProvider';
 import { NostrCommsProvider } from './NostrCommsProvider';
+import { DarkModeProvider } from './DarkModeProvider';
 
 export const AppProviders: ParentComponent = (props) => {
   return (
@@ -14,7 +15,9 @@ export const AppProviders: ParentComponent = (props) => {
           <NostrCommsProvider>
             <AuthProvider>
               <DataProvider>
-                {props.children}
+                <DarkModeProvider>
+                  {props.children}
+                </DarkModeProvider>
               </DataProvider>
             </AuthProvider>
           </NostrCommsProvider>
@@ -30,4 +33,5 @@ export { MessengerProvider, useMessenger } from './MessengerProvider';
 export { CryptoWorkerProvider, useCryptoWorker, useCryptoWorkerReady } from './CryptoWorkerProvider';
 export { AuthProvider, useAuth } from './AuthProvider';
 export { DataProvider, useData } from './DataProvider';
-export { NostrCommsProvider, useNostrComms } from './NostrCommsProvider'; 
+export { NostrCommsProvider, useNostrComms } from './NostrCommsProvider';
+export { DarkModeProvider, useDarkModeContext } from './DarkModeProvider'; 

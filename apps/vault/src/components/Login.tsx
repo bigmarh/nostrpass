@@ -400,23 +400,23 @@ export const Login: Component = () => {
     };
 
     return (
-        <div class="w-full h-full md:flex md:justify-center md:items-center">
-            <div class="flex w-full md:min-w-[400px] md:max-w-2xl min-h-screen md:min-h-0 md:h-auto bg-white black-outline flex-col md:flex-row md:rounded-lg md:shadow-2xl">
+        <div class="w-full h-full bg-white dark:bg-gray-900">
+            <div class="flex w-full h-full bg-white dark:bg-gray-800 flex-col md:flex-row">
                 <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center  md:rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center pt-8 pb-2 px-4 md:p-4 md:w-48 md:min-w-[12rem]`}>
                     <div class="w-32 h-32 ">
                         <img class="w-full h-full " src="/logo.svg" alt="NostrPass Logo" />
                     </div>
                    
                 </div>
-                <div class="flex flex-1 flex-col items-center  min-w-0 pt-2 pb-6 px-6 md:p-6">
+                <div class="flex flex-1 flex-col items-center justify-center min-w-0 pt-2 pb-6 px-6 md:p-8">
                     <div class="w-full max-w-sm space-y-4">
                         <div class="text-center">
-                            <h1 class="text-xl font-semibold">{isSignup() ? 'Create Account' : 'Welcome Back'}</h1>
-                            <p class="text-sm text-gray-500 mt-1">
+                            <h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">{isSignup() ? 'Create Account' : 'Welcome Back'}</h1>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
                                 {isSignup() ? 'Sign up to get started' : 'Sign in to your account'}
                             </p>
                             {params.app && (
-                                <p class="text-xs text-gray-400 mt-2">App: {desanitizeDomain(params.app)}</p>
+                                <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">App: {desanitizeDomain(params.app)}</p>
                             )}
                         </div>
                         
@@ -430,7 +430,7 @@ export const Login: Component = () => {
                                     placeholder="Username" 
                                     value={username()}
                                     onInput={(e) => setUsername(e.currentTarget.value)}
-                                    class="w-full border-2 border-gray-300 p-2 rounded-md focus:border-blue-500 focus:outline-none" 
+                                    class="w-full border-2 border-gray-300 dark:border-gray-600 p-2 rounded-md focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" 
                                     autocomplete="username"
                                     required
                                     disabled={isLoading()}
@@ -445,7 +445,7 @@ export const Login: Component = () => {
                                     placeholder="Password" 
                                     value={password()}
                                     onInput={(e) => setPassword(e.currentTarget.value)}
-                                    class="w-full p-2 rounded-md border-2 border-gray-300 focus:border-blue-500 focus:outline-none" 
+                                    class="w-full p-2 rounded-md border-2 border-gray-300 dark:border-gray-600 focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" 
                                     autocomplete={isSignup() ? "new-password" : "current-password"}
                                     required
                                     disabled={isLoading()}
@@ -462,7 +462,7 @@ export const Login: Component = () => {
                                         placeholder="Confirm Password" 
                                         value={confirmPassword()}
                                         onInput={(e) => setConfirmPassword(e.currentTarget.value)}
-                                        class="w-full p-2 rounded-md border-2 border-gray-300 focus:border-blue-500 focus:outline-none" 
+                                        class="w-full p-2 rounded-md border-2 border-gray-300 dark:border-gray-600 focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" 
                                         autocomplete="new-password"
                                         required
                                         disabled={isLoading()}
@@ -471,26 +471,26 @@ export const Login: Component = () => {
                             </Show>
                             
                             <Show when={error()}>
-                                <div class="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm">
+                                <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-3 py-2 rounded-md text-sm">
                                     {error()}
                                 </div>
                             </Show>
                             
                             <Show when={!cryptoReady()}>
-                                <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 px-3 py-2 rounded-md text-sm">
+                                <div class="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 px-3 py-2 rounded-md text-sm">
                                     Initializing security module...
                                 </div>
                             </Show>
                             
                             <Show when={!isConnected()}>
-                                <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 px-3 py-2 rounded-md text-sm">
+                                <div class="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 px-3 py-2 rounded-md text-sm">
                                     Connecting to Nostr relays...
                                 </div>
                             </Show>
                             
                             <Show when={isLoading() && loadingStatus()}>
-                                <div class="bg-blue-50 border border-blue-200 text-blue-700 px-3 py-2 rounded-md text-sm flex items-center gap-2">
-                                    <svg class="animate-spin h-4 w-4 text-blue-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-400 px-3 py-2 rounded-md text-sm flex items-center gap-2">
+                                    <svg class="animate-spin h-4 w-4 text-blue-700 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                     </svg>
@@ -500,7 +500,7 @@ export const Login: Component = () => {
                             
                             <button 
                                 type="submit" 
-                                class="w-full p-2 rounded-md bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white transition-colors font-medium flex items-center justify-center gap-2"
+                                class="w-full p-2 rounded-md bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white transition-colors font-medium flex items-center justify-center gap-2"
                                 disabled={isLoading() || !cryptoReady() || !isConnected()}
                             >
                                 <Show when={isLoading()}>
@@ -516,7 +516,7 @@ export const Login: Component = () => {
                         <div class="text-center space-y-2">
                             <button 
                                 onClick={toggleMode}
-                                class="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                                class="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
                                 type="button"
                             >
                                 {isSignup() ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
@@ -525,7 +525,7 @@ export const Login: Component = () => {
                             <div>
                                 <button 
                                     onClick={handleHideVault}
-                                    class="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                                    class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
                                     type="button"
                                 >
                                     Cancel

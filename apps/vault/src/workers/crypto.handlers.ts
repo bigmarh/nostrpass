@@ -1,6 +1,8 @@
 import { NostrCrypto } from './crypto.noble';
 import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tools/nip04';
+import { SimplePool, type Event as NostrEvent, type Filter } from 'nostr-tools';
 import { vaultDB, type VaultData, type UserSession } from './db';
+import { getEnvironment } from '@nostrpass/nostrHelpers';
 
 /**
  * Handler architecture and naming
@@ -41,10 +43,52 @@ interface ExtendedSession extends UserSession {
   // Cache storage keypair derived from xpriv to allow publishing without re-supplying xpriv
   storagePrivateKey?: string;
   storagePublicKey?: string;
+  // Cache password key for vault encryption operations
+  passwordKey?: string;
 }
 
 // In-memory session storage (sensitive data)
 const activeSessions = new Map<string, ExtendedSession>();
+
+// Track active Nostr subscriptions per username
+const nostrSubscriptions = new Map<string, { pool: SimplePool; relays: string[]; unsub: (() => void) | null }>();
+const nostrPollers = new Map<string, number>();
+
+async function pollOnceAndApply(params: { username: string; relays: string[]; pubkey: string; storagePriv: string; env: string }) {
+  const { username, relays, pubkey, storagePriv, env } = params;
+  try {
+    const pool = new SimplePool();
+    const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
+    const filter: Filter = { kinds: [30078], authors: [pubkey], '#d': [dTag], limit: 10 };
+    const events = await pool.querySync(relays, filter);
+    pool.close(relays);
+    if (!events || events.length === 0) return;
+    // Sort newest first by created_at
+    events.sort((a: any, b: any) => (b.created_at || 0) - (a.created_at || 0));
+    for (const ev of events) {
+      try {
+        let remote: VaultData | null = null;
+        try {
+          const plaintext = await nip04DecryptJS(storagePriv, pubkey, ev.content);
+          remote = JSON.parse(plaintext) as VaultData;
+        } catch {
+          try { remote = JSON.parse(ev.content) as VaultData; } catch { remote = null; }
+        }
+        if (!remote) continue;
+        const local = await vaultDB.getVault(username);
+        const remoteVersion = (remote as any).version || 0;
+        const localVersion = (local as any)?.version || 0;
+        if (remoteVersion > localVersion) {
+          console.log('📥 [Worker] Applying newer vault from Nostr (poll):', { remoteVersion, localVersion });
+          await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
+          break;
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.warn('⚠️ [Worker] Poll once failed:', e);
+  }
+}
 
 // Debug helper to log session changes
 function logSessionState(action: string, username: string) {
@@ -204,8 +248,107 @@ import type {
 
 // Define all crypto handlers
 export const handlers = {
+  // Start realtime Nostr subscription for a user's vault
+  startNostrSubscription: async (params: { username: string; relays: string[] }): Promise<{ started: boolean }> => {
+    await ensureCryptoReady();
+    const { username, relays } = params;
+    const session = activeSessions.get(username);
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+    const pubkey = vault.publicKey;
+    const env = getEnvironment();
+
+    // Require unlocked storage key for decryption
+    const storagePriv = session?.storagePrivateKey;
+    if (!storagePriv) {
+      throw new Error('Storage key not available. Unlock required.');
+    }
+
+    // Tear down existing sub if any
+    const existing = nostrSubscriptions.get(username);
+    if (existing) {
+      try { existing.unsub?.(); } catch {}
+      try { existing.pool.close(existing.relays); } catch {}
+      nostrSubscriptions.delete(username);
+    }
+
+    const pool = new SimplePool();
+    const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
+    const filter: Filter = { kinds: [30078], authors: [pubkey], '#d': [dTag] };
+
+    console.log('📡 [Worker] Subscribing to Nostr vault events:', { username, pubkey, dTag, relays });
+
+    const sub = (pool as any).subscribeMany ? (pool as any).subscribeMany(relays, [filter]) : (pool as any).sub(relays, [filter]);
+    const onEvent = async (ev: NostrEvent) => {
+      try {
+        // Prefer decrypt path; fallback to JSON parse for legacy (will be ignored by version rules)
+        let remote: VaultData | null = null;
+        try {
+          const plaintext = await nip04DecryptJS(storagePriv as string, pubkey, ev.content);
+          remote = JSON.parse(plaintext) as VaultData;
+        } catch {
+          try { remote = JSON.parse(ev.content) as VaultData; } catch { remote = null; }
+        }
+        if (!remote) return;
+
+        const local = await vaultDB.getVault(username);
+        const remoteVersion = (remote as any).version || 0;
+        const localVersion = (local as any)?.version || 0;
+        if (remoteVersion > localVersion) {
+          console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', { remoteVersion, localVersion });
+          await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
+        } else {
+          // Ignore older/same versions
+        }
+      } catch (e) {
+        console.warn('⚠️ [Worker] Failed to process incoming Nostr vault event:', e);
+      }
+    };
+
+    // Support both subscription interfaces
+    if (sub && typeof sub.on === 'function') {
+      sub.on('event', onEvent);
+      sub.on('eose', () => {
+        console.log('📡 [Worker] Nostr EOSE for', username);
+      });
+      nostrSubscriptions.set(username, { pool, relays, unsub: () => sub.unsub() });
+    } else if (sub && typeof sub === 'object') {
+      // subscribeMany returns an object with onEvent/onEnd in some versions
+      if (typeof sub.onEvent === 'function') sub.onEvent(onEvent);
+      if (typeof sub.onEnd === 'function') sub.onEnd(() => console.log('📡 [Worker] Nostr EOSE for', username));
+      nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.close?.(); } catch {} } });
+    } else {
+      console.warn('⚠️ [Worker] Subscription API not available, falling back to polling');
+      nostrSubscriptions.set(username, { pool, relays, unsub: null });
+      // Fire one immediate poll, then set interval
+      await pollOnceAndApply({ username, relays, pubkey, storagePriv, env });
+      const key = `${username}`;
+      const timer = setInterval(() => {
+        pollOnceAndApply({ username, relays, pubkey, storagePriv, env });
+      }, 5000) as unknown as number;
+      nostrPollers.set(key, timer);
+    }
+    return { started: true };
+  },
+
+  // Stop realtime Nostr subscription for a user
+  stopNostrSubscription: async (params: { username: string }): Promise<{ stopped: boolean }> => {
+    const { username } = params;
+    const existing = nostrSubscriptions.get(username);
+    if (existing) {
+      try { existing.unsub?.(); } catch {}
+      try { existing.pool.close(existing.relays); } catch {}
+      nostrSubscriptions.delete(username);
+    }
+    const key = `${username}`;
+    if (nostrPollers.has(key)) {
+      clearInterval(nostrPollers.get(key)!);
+      nostrPollers.delete(key);
+    }
+    return { stopped: true };
+  },
   // Initialize a locked session by saving vault data and seeding minimal session state
-  initSession: async (params: { username: string; publicKey: string; vaultData: any }): Promise<{ success: boolean }> => {
+  initSession: async (params: { username: string; publicKey: string; vaultData: any; passwordKey?: string }): Promise<{ success: boolean }> => {
     await ensureCryptoReady();
     
     console.log('🔧 [initSession] Received vault data:', {
@@ -249,7 +392,8 @@ export const handlers = {
       username: params.username,
       publicKey: params.publicKey,
       isUnlocked: false,
-      unlockedAt: Date.now()
+      unlockedAt: Date.now(),
+      passwordKey: params.passwordKey  // Cache password key for vault encryption
     };
     activeSessions.set(params.username, session);
     logSessionState('SESSION_INIT', params.username);
@@ -726,6 +870,29 @@ export const handlers = {
       console.warn('[Unlock] No xpriv in decrypted payload');
     }
     
+    // Derive storage keypair from xpriv for Nostr operations
+    let storagePrivateKey: string | undefined;
+    let storagePublicKey: string | undefined;
+    
+    if (decrypted.xpriv) {
+      try {
+        // IMPORTANT: Use STORAGE_INDEX (8907) to match account creation
+        const { STORAGE_INDEX } = await import('@nostrpass/types');
+        const storageKeypair = await handlers.deriveKeypairFromXpriv({ xpriv: decrypted.xpriv, index: STORAGE_INDEX });
+        if (storageKeypair instanceof Map) {
+          storagePrivateKey = storageKeypair.get('privateKey');
+          storagePublicKey = storageKeypair.get('publicKey');
+        } else {
+          storagePrivateKey = storageKeypair.privateKey;
+          storagePublicKey = storageKeypair.publicKey;
+        }
+        console.log('[Unlock] Storage keypair derived for Nostr operations with STORAGE_INDEX');
+      } catch (error) {
+        console.error('[Unlock] Failed to derive storage keypair:', error);
+        // Continue without storage keypair - will affect Nostr sync but not local operations
+      }
+    }
+    
     // Update session
     const session: ExtendedSession = {
       username: params.username,
@@ -733,11 +900,15 @@ export const handlers = {
       privateKey: decrypted.privateKey,
       xpriv: decrypted.xpriv,
       isUnlocked: true,
-      unlockedAt: Date.now()
+      unlockedAt: Date.now(),
+      // Cache storage keypair for Nostr operations (signing/encryption)
+      storagePrivateKey,
+      storagePublicKey
     };
     console.log('[Unlock] Session seeds:', {
       hasPrivateKey: !!session.privateKey,
-      hasXpriv: !!session.xpriv
+      hasXpriv: !!session.xpriv,
+      hasStorageKeypair: !!(storagePrivateKey && storagePublicKey)
     });
     
     // Store recovery data if available
@@ -781,6 +952,23 @@ export const handlers = {
     if (params.xpriv) (session as any).xpriv = params.xpriv;
     session.isUnlocked = !!(session.privateKey || (session as any).xpriv);
     session.unlockedAt = Date.now();
+    // Derive and cache storage keypair if available
+    if ((session as any).xpriv && !session.storagePrivateKey) {
+      try {
+        const { STORAGE_INDEX } = await import('@nostrpass/types');
+        const derived = await handlers.deriveKeypairFromXpriv({ xpriv: (session as any).xpriv, index: STORAGE_INDEX });
+        if (derived instanceof Map) {
+          session.storagePrivateKey = derived.get('privateKey');
+          session.storagePublicKey = derived.get('publicKey');
+        } else {
+          session.storagePrivateKey = (derived as any).privateKey;
+          session.storagePublicKey = (derived as any).publicKey;
+        }
+        console.log('[UnlockSession] Storage keypair derived and cached');
+      } catch (e) {
+        console.warn('[UnlockSession] Failed to derive storage keypair:', e);
+      }
+    }
     activeSessions.set(params.username, session);
     resetPinAttempts(params.username);
     logSessionState('UNLOCKED_ALIAS', params.username);
@@ -1091,13 +1279,30 @@ export const handlers = {
   },
 
   // Update vault data atomically and broadcast change
-  updateVaultData: async (params: { username: string; vaultData: any }): Promise<void> => {
+  updateVaultData: async (params: { username: string; vaultData: any; skipVersionIncrement?: boolean }): Promise<void> => {
     await ensureCryptoReady();
     const toSave = { ...params.vaultData };
+    
+    // Increment version for sync conflict resolution (unless explicitly skipped for Nostr downloads)
+    if (!params.skipVersionIncrement) {
+      toSave.version = (toSave.version || 0) + 1;
+      toSave.updatedAt = Date.now();
+    }
+    
     // Ensure redundant fields are in sync (write primary -> encryptedVault for storage only)
     if (toSave.xprivEncrypted) {
       toSave.encryptedVault = toSave.xprivEncrypted;
     }
+    
+    console.log('💾 [updateVaultData] Saving vault with:', {
+      username: toSave.username,
+      version: toSave.version,
+      identitiesCount: toSave.identities?.length || 0,
+      hasXprivEncrypted: !!toSave.xprivEncrypted,
+      hasEncryptedVault: !!toSave.encryptedVault,
+      updatedAt: toSave.updatedAt ? new Date(toSave.updatedAt).toISOString() : 'N/A'
+    });
+    
     // Persist
     await vaultDB.saveVault(toSave);
     // Mirror to xprivs store if present
@@ -1280,33 +1485,60 @@ export const handlers = {
   // Build a minimal vault event for Nostr publishing (fallback if WASM builder missing)
   saveVaultToNostr: async (params: { username: string }): Promise<{ event: any }> => {
     const crypto = await ensureCryptoReady();
-    const vault = await vaultDB.getVault(params.username);
-    if (!vault) throw new Error('No vault to save');
+    const vaultRaw = await vaultDB.getVault(params.username);
+    if (!vaultRaw) throw new Error('No vault to save');
+    
+    // Map from IndexedDB field names to VaultData interface field names
+    const vault = {
+      ...vaultRaw,
+      xprivEncrypted: (vaultRaw as any).encryptedVault || (vaultRaw as any).xprivEncrypted
+    };
+    
+    console.log('📤 [saveVaultToNostr] Preparing vault for Nostr sync:', {
+      username: vault.username,
+      identitiesCount: vault.identities?.length || 0,
+      hasXprivEncrypted: !!vault.xprivEncrypted,
+      hasEncryptedVaultInDB: !!(vaultRaw as any).encryptedVault,
+      updatedAt: new Date(vault.updatedAt || Date.now()).toISOString()
+    });
+    
     const session = (activeSessions as any).get(params.username);
     
-    // Prefer storage keypair
-    let pub = session?.storagePublicKey || vault.publicKey;
-    let priv = session?.storagePrivateKey || session?.privateKey;
+    // CRITICAL: Always use the vault's storage public key
+    // During account creation, storage keypair is derived at m/44'/1237'/0'/0/8907 (STORAGE_INDEX)
+    const pub = vault.storagePublicKey || vault.publicKey;  // Prefer storagePublicKey if available
+    let priv = session?.storagePrivateKey;
     
+    // If we don't have the storage private key in session, derive it from xpriv
     if (!priv && session?.xpriv) {
-      const derived = await handlers.deriveStorageKeypairFromXpriv({ xpriv: session.xpriv });
+      console.log('🔑 [saveVaultToNostr] Deriving storage keypair from xpriv with STORAGE_INDEX...');
+      // IMPORTANT: Use deriveKeypairFromXpriv with STORAGE_INDEX (8907), NOT deriveStorageKeypairFromXpriv!
+      // deriveStorageKeypairFromXpriv uses m/44'/1237'/1'/0/0 (wrong path)
+      // Account creation uses m/44'/1237'/0'/0/8907 (correct path)
+      const { STORAGE_INDEX } = await import('@nostrpass/types');
+      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
       priv = (derived as any).privateKey;
-      pub = (derived as any).publicKey;
+      const derivedPub = (derived as any).publicKey;
+      
+      // Cache in session for next time
       (session as any).storagePrivateKey = priv;
-      (session as any).storagePublicKey = pub;
+      (session as any).storagePublicKey = derivedPub;
+      
+      // Verify it matches vault.storagePublicKey
+      if (derivedPub !== pub) {
+        console.error('❌ [saveVaultToNostr] Storage key mismatch!', {
+          derivedPub,
+          vaultStoragePublicKey: pub,
+          usedStorageIndex: STORAGE_INDEX
+        });
+        throw new Error('Storage keypair derivation mismatch');
+      }
+      console.log('✅ [saveVaultToNostr] Storage keypair derived and verified with STORAGE_INDEX');
     }
     
     if (!priv) {
-      throw new Error('No private key available for signing');
+      throw new Error('No storage private key available for signing vault event');
     }
-    
-    // Ensure pubkey corresponds to the private key used for signing
-    try {
-      const derivedPub = crypto.getPublicKey(String(priv));
-      if (derivedPub && typeof derivedPub === 'string') {
-        pub = derivedPub;
-      }
-    } catch {}
     
     // Basic hex sanity checks for pub and priv
     const isHex = (s: string) => typeof s === 'string' && /^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0;
@@ -1320,7 +1552,7 @@ export const handlers = {
     const payload = {
       username: vault.username,
       publicKey: vault.publicKey,
-      encryptedVault: vault.xprivEncrypted || (vault as any).encryptedVault,
+      xprivEncrypted: vault.xprivEncrypted, // Already mapped from encryptedVault above
       salt: vault.salt,
       passwordVerifier: (vault as any).passwordVerifier, // CRITICAL: Include for password verification
       passwordSalt: (vault as any).passwordSalt, // CRITICAL: Include for password verification
@@ -1332,12 +1564,58 @@ export const handlers = {
       version: 1
     };
     
+    console.log('✅ [saveVaultToNostr] Payload created:', {
+      identitiesCount: payload.identities.length,
+      hasXprivEncrypted: !!payload.xprivEncrypted,
+      xprivEncryptedLength: payload.xprivEncrypted?.length
+    });
+    
+    // CRITICAL: Encrypt the payload with PASSWORD KEY before storing to Nostr
+    // This protects sensitive data (identities, permissions, recovery) from public relays
+    const payloadJson = JSON.stringify(payload);
+    let encryptedContent: string;
+    
+    // Get password key from session
+    const passwordKey = session?.passwordKey;
+    if (!passwordKey) {
+      throw new Error('Password key not available in session. Cannot encrypt vault.');
+    }
+    
+    console.log('🔐 [WORKER saveVaultToNostr] Starting password encryption...');
+    console.log('🔐 [WORKER saveVaultToNostr] Using password key from session');
+    
+    try {
+      // Use PASSWORD encryption (not NIP-04 with storage key!)
+      const { encrypt } = await import('nostr-tools/nip04');
+      encryptedContent = await encrypt(passwordKey, String(pub), payloadJson);
+      console.log('✅ [WORKER saveVaultToNostr] Payload encrypted with password key!', {
+        encryptedSize: encryptedContent.length,
+        identities: payload.identities.length
+      });
+    } catch (encErr) {
+      console.error('❌ [WORKER saveVaultToNostr] Password encryption failed:', encErr);
+      throw new Error('Failed to encrypt vault data with password');
+    }
+    
+    // Get the actual environment (don't hardcode!)
+    const env = getEnvironment();
+    console.log('🌍 [WORKER saveVaultToNostr] Using environment:', env);
+    
     // Build the event with strict string coercion for wasm expectations
-    const dTag = String(`nostrpass.com_vault_${pub}_development`);
+    const dTag = String(`nostrpass.com_vault_${pub}_${env}`);
+    
+    console.log('🏷️ [WORKER saveVaultToNostr] Event metadata:', {
+      dTag,
+      pubkey: pub,
+      vaultPublicKey: vault.publicKey,
+      keysMatch: pub === vault.publicKey,
+      env
+    });
+    
     const event = {
       kind: 30078 as number, // NIP-78 arbitrary custom app data (replaceable) - MUST match getVaultFromNostr
-      content: String(JSON.stringify(payload)),
-      tags: [[String('d'), dTag]] as string[][],
+      content: String(encryptedContent), // Use password-encrypted content
+      tags: [[String('d'), dTag], [String('encryption'), String('password-aes')]] as string[][], // Mark as password-encrypted
       created_at: Math.floor(Date.now() / 1000),
       pubkey: String(pub),
       id: '',

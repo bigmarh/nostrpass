@@ -1,7 +1,7 @@
 import { Component, Show, createSignal, For, createMemo, onMount, createEffect } from 'solid-js';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 
-import { useAuth, useMessenger, useCryptoWorker } from '../providers';
+import { useAuth, useMessenger, useCryptoWorker, useDarkModeContext } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
 import { nip19 } from 'nostr-tools';
 import { VaultTestConsole } from './VaultTestConsole';
@@ -19,6 +19,7 @@ export const Dashboard: Component = () => {
     const { send } = useMessenger();
     const params = useParams();
     const navigate = useNavigate();
+    const { isDarkMode, toggleDarkMode } = useDarkModeContext();
     const [searchQuery, setSearchQuery] = createSignal('');
     const [showAddIdentityModal, setShowAddIdentityModal] = createSignal(false);
   const [newIdentityNickname, setNewIdentityNickname] = createSignal('');
@@ -737,7 +738,17 @@ export const Dashboard: Component = () => {
                 ...(currentVault.activeIdentityByApp || {}),
                 [params.app]: identityIndex
             };
-            await updateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: true });
+            // Save locally first (fast, non-blocking)
+            await updateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: false });
+            
+            // Sync to Nostr in background (non-blocking)
+            (async () => {
+                try {
+                    await syncToNostr();
+                } catch (error) {
+                    console.warn('Background sync failed (non-critical):', error);
+                }
+            })();
         } catch (error) {
             console.error('Failed to set active identity for app:', error);
         }
@@ -754,7 +765,17 @@ export const Dashboard: Component = () => {
                 ...(currentVault.activeIdentityByApp || {}),
                 [params.app]: null
             };
-            await updateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: true });
+            // Save locally first (fast, non-blocking)
+            await updateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: false });
+            
+            // Sync to Nostr in background (non-blocking)
+            (async () => {
+                try {
+                    await syncToNostr();
+                } catch (error) {
+                    console.warn('Background sync failed (non-critical):', error);
+                }
+            })();
         } catch (error) {
             console.error('Failed to unset active identity for app:', error);
         }
@@ -953,19 +974,19 @@ export const Dashboard: Component = () => {
 
 
     return (
-        <div class="w-full h-full">
+        <div class="w-full h-full bg-white dark:bg-gray-900">
             <div class="flex flex-col w-full md:max-w-2xl md:mx-auto gap-0 md:gap-4 min-h-screen md:min-h-0">
-                <div class="bg-white text-black border-0 md:border border-gray-700 md:rounded-lg md:shadow-2xl flex-1 md:flex-none">
+                <div class="bg-white dark:bg-gray-800 text-black dark:text-gray-100 border-0 md:border border-gray-700 dark:border-gray-600 md:rounded-lg md:shadow-2xl flex-1 md:flex-none">
                     <header>
                         {/* Top row - Action buttons */}
-                        <div class={`flex justify-between p-2 ${isVaultLocked() ? 'bg-orange-100 border-orange-200' : 'bg-green-100 border-green-200'} rounded-t-lg p-4 items-center gap-2 border-b`}>
+                        <div class={`flex justify-between p-2 ${isVaultLocked() ? 'bg-orange-100 dark:bg-orange-900 border-orange-200 dark:border-orange-700' : 'bg-green-100 dark:bg-green-900 border-green-200 dark:border-green-700'} rounded-t-lg p-4 items-center gap-2 border-b`}>
                             <div class="flex items-center gap-2">
 
                                 {/* Back to App button - only show if app is defined */}
                                 {params.app && (
                                     <button
                                         onClick={backToApp}
-                                        class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
+                                        class="text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 bg-white dark:bg-gray-700 rounded-lg p-2 flex items-center gap-2 transition-all"
                                         title={`Back to ${desanitizeDomain(params.app)}`}
                                     >
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -979,16 +1000,16 @@ export const Dashboard: Component = () => {
                             </div>
                             {/* Lock/Unlock vault slider toggle */}
                             <div class="flex items-center gap-2">
-                                <span class={`text-sm hidden md:block ${isVaultLocked() ? 'text-orange-700' : 'text-green-700'}`}>Lock</span>
+                                <span class={`text-sm hidden md:block ${isVaultLocked() ? 'text-orange-700 dark:text-orange-300' : 'text-green-700 dark:text-green-300'}`}>Lock</span>
                                 <div
                                     onClick={toggleVaultLock}
                                     class="relative inline-flex items-center cursor-pointer"
                                 >
                                     <div class={`w-16 h-8 rounded-full transition-colors duration-300 ${isVaultLocked()
-                                        ? 'bg-red-200 border-2 border-red-300'
-                                        : 'bg-green-200 border-2 border-green-300'
+                                        ? 'bg-red-200 dark:bg-red-900 border-2 border-red-300 dark:border-red-700'
+                                        : 'bg-green-200 dark:bg-green-900 border-2 border-green-300 dark:border-green-700'
                                         }`}>
-                                        <div class={`absolute top-0.5 left-0.5 w-7 h-7 rounded-full bg-white shadow-md transform transition-transform duration-300 flex items-center justify-center ${isVaultLocked() ? 'translate-x-0' : 'translate-x-7'
+                                        <div class={`absolute top-0.5 left-0.5 w-7 h-7 rounded-full bg-white dark:bg-gray-100 shadow-md transform transition-transform duration-300 flex items-center justify-center ${isVaultLocked() ? 'translate-x-0' : 'translate-x-7'
                                             }`}>
                                             <span class="w-5 h-5 text-gray-700">
                                                 {isVaultLocked() ? (
@@ -1004,12 +1025,12 @@ export const Dashboard: Component = () => {
                                         </div>
                                     </div>
                                 </div>
-                                <span class={`text-sm hidden md:block ${isVaultLocked() ? 'text-orange-700' : 'text-green-700'}`}>Unlock</span>
+                                <span class={`text-sm hidden md:block ${isVaultLocked() ? 'text-orange-700 dark:text-orange-300' : 'text-green-700 dark:text-green-300'}`}>Unlock</span>
                             </div>
                             <div class="flex items-center gap-2">
                                 <button
                                     onClick={handleLogout}
-                                    class="text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 bg-white rounded-lg p-2 flex items-center gap-2 transition-all"
+                                    class="text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 bg-white dark:bg-gray-700 rounded-lg p-2 flex items-center gap-2 transition-all"
                                     title="Logout"
                                 >
 
@@ -1023,43 +1044,46 @@ export const Dashboard: Component = () => {
 
                         <div class="flex justify-between items-center gap-2 p-4">
                             <div class="flex flex-col gap-1 w-1/2 flex-2">
-                                <div class="font-semibold text-md">{user()?.profile.username.toUpperCase()}</div>
-                                <span class="text-xs text-gray-500">Digital Passport</span>
+                                <div class="font-semibold text-md text-gray-900 dark:text-gray-100">{user()?.profile.username.toUpperCase()}</div>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">Digital Passport</span>
                             </div>
 
                             <div class="flex items-center">
-                                <button
-                                    onClick={() => setShowSearch(!showSearch())}
-                                    class={`${showSearch() ? 'border-none bg-gray-200 text-black rounded-l-lg   ' : "bg-gray-800 text-white rounded"}  p-3 transition-colors border-none`}
-                                    title="Search"
-                                >
-                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
-                                    </svg>
-                                </button>
-                                <div class={`flex justify-between items-center rounded-r-lg  ${showSearch() ? 'block' : 'hidden'}`}>
-                                    <div class="relative ">
-                                        <input
-                                            type="text"
-                                            placeholder="Search by name or public key..."
-                                            class="w-full bg-white rounded-r-lg text-sm p-2 pr-2  border border-gray-300 focus:outline-none focus:border-gray-700 transition-colors"
-                                            value={searchQuery()}
-                                            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-                                        />
-                                        {searchQuery() && (
-                                            <button
-                                                onClick={() => setSearchQuery('')}
-                                                class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                                            >
-                                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                                                </svg>
-                                            </button>
-                                        )}
-                                    </div>
-
+                                {/* Search */}
+                                <div class={`relative ${showSearch() ? 'w-64 md:w-80' : 'w-10'} transition-all duration-200`}>
+                                    <button
+                                        onClick={() => setShowSearch(s => !s)}
+                                        class={`absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-md transition-colors ${showSearch() ? 'text-gray-600 dark:text-gray-300 hover:bg-transparent' : 'text-white bg-gray-800 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600'}`}
+                                        title="Search"
+                                    >
+                                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+                                        </svg>
+                                    </button>
+                                    <input
+                                        type="text"
+                                        placeholder="Search identities (name, npub, pubkey)"
+                                        class={`pl-9 pr-8 py-2 rounded-md border text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${showSearch() ? 'opacity-100' : 'opacity-0 pointer-events-none'} transition-opacity
+                                            bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400`}
+                                        value={searchQuery()}
+                                        onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                                        onBlur={() => {
+                                            if (!searchQuery()) setShowSearch(false);
+                                        }}
+                                        autofocus
+                                    />
+                                    <Show when={searchQuery()}>
+                                        <button
+                                            onClick={() => setSearchQuery('')}
+                                            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-300 dark:hover:text-gray-100 p-1"
+                                            title="Clear"
+                                        >
+                                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                            </svg>
+                                        </button>
+                                    </Show>
                                 </div>
-
                             </div>
                         </div>
 
@@ -1071,13 +1095,13 @@ export const Dashboard: Component = () => {
                             </p>
                         </div> */}
                     </header>
-                    <hr class="border-gray-300" />
+                    <hr class="border-gray-300 dark:border-gray-700" />
                     <main>
                         {/* Identity list */}
                         <div class="flex flex-col gap-2 p-4">
                             <header class="flex justify-between items-center">
-                                <h4 class="text-gray-500 text-sm font-bold">Identities</h4>
-                                <button class="text-gray-500 text-sm font-bold" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
+                                <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
+                                <button class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
                                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                                         <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
                                     </svg>
@@ -1087,20 +1111,20 @@ export const Dashboard: Component = () => {
                             <For each={filteredIdentities()}>
                                 {(identity) => (
                                     <div
-                                        class={`flex flex-col  cursor-pointer border rounded-lg p-4 justify-between items-center hover:shadow-md transition-all ${identity.isActive ? 'border-gray-700 bg-gray-200' : 'border-gray-300 bg-white hover:bg-gray-50'
+                                        class={`flex flex-col cursor-pointer border rounded-lg p-4 justify-between items-center hover:shadow-md dark:hover:shadow-lg transition-all ${identity.isActive ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
                                             }`}
                                     >
                                         <div class="flex flex-row justify-between w-full items-center ">
                                             <div class="flex flex-col justify-start gap-2">
                                                 <div class="flex items-center gap-2">
-                                                    <span class="font-medium text-gray-900">{identity.nickname}</span>
+                                                    <span class="font-medium text-gray-900 dark:text-gray-100">{identity.nickname}</span>
                                                     <Show when={identity.isActive}>
-                                                        <span class="text-xs text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">
+                                                        <span class="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded">
                                                             Active
                                                         </span>
                                                     </Show>
                                                 </div>
-                                                <span class="text-gray-500 text-xs font-mono">
+                                                <span class="text-gray-500 dark:text-gray-400 text-xs font-mono">
                                                     ({identity.npub.substring(0, 8)}...)
                                                 </span>
                                             </div>
@@ -1123,17 +1147,17 @@ export const Dashboard: Component = () => {
                                                                     setShowSettingsPanel(true);
                                                                 }
                                                             }}
-                                                            class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700' : 'bg-gray-300'
+                                                            class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'
                                                                 } hover:opacity-80`}
                                                             title={identity.isActive ? 'Active identity for this app' : (identity.hasAppPermissions ? 'Make active for this app' : 'Authorize before making active')}
                                                         >
-                                                            <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
+                                                            <span class={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-gray-100 transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
                                                                 }`} />
                                                         </button>
                                                     </Show>
                                                     <Show when={isVaultLocked()}>
-                                                        <div class="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 opacity-50">
-                                                            <span class="inline-block h-4 w-4 transform rounded-full bg-white translate-x-1" />
+                                                        <div class="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 dark:bg-gray-700 opacity-50">
+                                                            <span class="inline-block h-4 w-4 transform rounded-full bg-white dark:bg-gray-100 translate-x-1" />
                                                         </div>
                                                     </Show>
 
@@ -1146,7 +1170,7 @@ export const Dashboard: Component = () => {
                                         <div class="flex flex-row justify-between w-full mt-4 items-center">
                                             <div>
                                                 <Show when={identity.hasAppPermissions}>
-                                                    <span class="text-green-600 text-xs font-medium">
+                                                    <span class="text-green-600 dark:text-green-400 text-xs font-medium">
                                                         Authorized for {desanitizeDomain(params.app)}
                                                     </span>
                                                 </Show>
@@ -1165,7 +1189,7 @@ export const Dashboard: Component = () => {
                                                     </button>
                                                 </Show>
                                                 <Show when={!identity.hasAppPermissions && params.app && isVaultLocked()}>
-                                                    <span class="text-gray-400 text-xs">
+                                                    <span class="text-gray-400 dark:text-gray-500 text-xs">
                                                         Unlock vault to authorize
                                                     </span>
                                                 </Show>
@@ -1178,10 +1202,10 @@ export const Dashboard: Component = () => {
                                                             setSelectedIdentityKey(identity.publicKey);
                                                             setShowSettingsPanel(true);
                                                         }}
-                                                        class="p-1 hover:bg-gray-100 rounded transition-colors border border-gray-200 hover:border-gray-300"
+                                                        class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors border border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500"
                                                         title="Settings"
                                                     >
-                                                        <svg class="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                                                        <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
                                                             <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
                                                         </svg>
                                                     </button>
@@ -1222,12 +1246,12 @@ export const Dashboard: Component = () => {
 
                     </main>
 
-                    <footer class="text-sm py-4 px-4 border-t border-gray-200 flex justify-between items-center relative">
+                    <footer class="text-sm py-4 px-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center relative">
                         <div class="flex items-center gap-4">
                             {/* Settings button */}
                             <button
                                 onClick={() => setShowGlobalSettings(true)}
-                                class="text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+                                class="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1 transition-colors"
                                 title="Vault Settings"
                             >
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1237,21 +1261,44 @@ export const Dashboard: Component = () => {
                                 <span class="text-xs">Settings</span>
                             </button>
                         </div>
-                        <div class="text-gray-400">
+                        
+                        {/* Middle section - Search results */}
+                        <div class="text-gray-400 dark:text-gray-500">
                             {searchQuery() && (
                                 <span>
                                     Found {filteredIdentities().length} of {identities().length} Identities
                                 </span>
                             )}
                         </div>
-                        {/* Spinner-only sync indicator at bottom-right */}
-                        <Show when={isRefreshing() || syncQueueStatus().isProcessing}>
-                            <div class="absolute right-4 bottom-3">
-                                <svg class="w-4 h-4 animate-spin text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                            </div>
-                        </Show>
+                        
+                        {/* Right side - Dark mode toggle and sync indicator */}
+                        <div class="flex items-center gap-3">
+                            {/* Dark Mode Toggle */}
+                            <button
+                                onClick={toggleDarkMode}
+                                class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                title={isDarkMode() ? 'Switch to light mode' : 'Switch to dark mode'}
+                            >
+                                <Show when={isDarkMode()} fallback={
+                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                                    </svg>
+                                }>
+                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                                    </svg>
+                                </Show>
+                            </button>
+                            
+                            {/* Sync indicator */}
+                            <Show when={isRefreshing() || syncQueueStatus().isProcessing}>
+                                <div>
+                                    <svg class="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                </div>
+                            </Show>
+                        </div>
                     </footer>
                 </div>
             </div>
@@ -1445,13 +1492,13 @@ export const Dashboard: Component = () => {
             {/* Add Identity Modal */}
             <Show when={showAddIdentityModal()}>
                 <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div class="bg-white rounded-lg shadow-xl border-2 border-gray-300 p-6 text-center relative max-w-md w-full mx-4">
-                        <h2 class="text-xl font-semibold mb-4">Add New Identity</h2>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-gray-300 dark:border-gray-600 p-6 text-center relative max-w-md w-full mx-4">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Add New Identity</h2>
                         <div class="mb-4 text-left">
-                            <label class="block text-sm text-gray-600 mb-1">Nickname</label>
+                            <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Nickname</label>
                             <input
                                 type="text"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                                 placeholder="e.g., Work, Social, Trading"
                                 value={newIdentityNickname()}
                                 onInput={(e) => setNewIdentityNickname(e.currentTarget.value)}
@@ -1459,7 +1506,7 @@ export const Dashboard: Component = () => {
                         </div>
                         <div class="flex gap-3">
                             <button
-                                class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 disabled:bg-gray-400"
+                                class="flex-1 px-4 py-2 bg-black dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 disabled:bg-gray-400 dark:disabled:bg-gray-600"
                                 disabled={!newIdentityNickname() || isVaultLocked()}
                                 onClick={async () => {
                                     try {
@@ -1495,11 +1542,16 @@ export const Dashboard: Component = () => {
                                         // Sync to Nostr in background (non-blocking)
                                         (async () => {
                                             try {
-                                                console.log('📡 [Add Identity] Syncing to Nostr in background...');
+                                                console.log('📡 [Add Identity] Starting background Nostr sync...');
+                                                console.log('📡 [Add Identity] syncToNostr function:', typeof syncToNostr);
                                                 await syncToNostr();
-                                                console.log('✅ [Add Identity] Synced to Nostr');
+                                                console.log('✅ [Add Identity] Synced to Nostr successfully');
                                             } catch (error) {
-                                                console.warn('⚠️ [Add Identity] Nostr sync failed (non-critical):', error);
+                                                console.error('❌ [Add Identity] Nostr sync failed:', error);
+                                                console.error('❌ [Add Identity] Error details:', {
+                                                    message: error instanceof Error ? error.message : String(error),
+                                                    stack: error instanceof Error ? error.stack : undefined
+                                                });
                                             }
                                         })();
                                     } catch (e) {
@@ -1536,15 +1588,15 @@ export const Dashboard: Component = () => {
                     />
 
                     {/* Side Panel */}
-                    <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+                    <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
                         {/* Panel Header */}
-                        <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-                            <h2 class="text-xl font-semibold text-gray-900">Identity Settings</h2>
+                        <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Identity Settings</h2>
                             <button
                                 onClick={() => setShowSettingsPanel(false)}
-                                class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                             >
-                                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                             </button>
@@ -1560,26 +1612,26 @@ export const Dashboard: Component = () => {
                                     <div class="space-y-6">
                                         {/* Identity Information Section */}
                                         <div>
-                                            <h3 class="text-lg font-medium text-gray-900 mb-3">Identity</h3>
+                                            <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Identity</h3>
                                             <div class="space-y-3">
                                                 <div class="flex items-center justify-between">
                                                     <div class="flex items-center gap-4">
-                                                        <span class="text-sm text-gray-600">Name:</span>
-                                                        <span class="text-sm font-medium text-gray-900">{identity().nickname}</span>
+                                                        <span class="text-sm text-gray-600 dark:text-gray-400">Name:</span>
+                                                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{identity().nickname}</span>
                                                     </div>
                                                     <div class="flex items-center gap-2">
-                                                        <span class="text-sm text-gray-600">Created:</span>
-                                                        <span class="text-sm text-gray-900">{new Date(identity().createdAt).toLocaleDateString()}</span>
+                                                        <span class="text-sm text-gray-600 dark:text-gray-400">Created:</span>
+                                                        <span class="text-sm text-gray-900 dark:text-gray-100">{new Date(identity().createdAt).toLocaleDateString()}</span>
                                                     </div>
                                                 </div>
 
                                                 <div class="flex items-center justify-between gap-2">
-                                                    <span class="text-sm text-gray-600">Public Key</span>
+                                                    <span class="text-sm text-gray-600 dark:text-gray-400">Public Key</span>
                                                     <div class="flex items-center gap-2">
-                                                        <span class="text-xs font-mono text-gray-500">{identity().publicKey.slice(0, 8)}...</span>
+                                                        <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{identity().publicKey.slice(0, 8)}...</span>
                                                         <button
                                                             onClick={() => navigator.clipboard.writeText(identity().publicKey)}
-                                                            class="text-xs text-blue-600 hover:text-blue-700"
+                                                            class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                                                         >
                                                             Copy
                                                         </button>
@@ -1587,9 +1639,9 @@ export const Dashboard: Component = () => {
                                                 </div>
 
                                                 <div class="flex items-center justify-between gap-2">
-                                                    <span class="text-sm text-gray-600">Npub</span>
+                                                    <span class="text-sm text-gray-600 dark:text-gray-400">Npub</span>
                                                     <div class="flex items-center gap-2">
-                                                        <span class="text-xs font-mono text-gray-500">{identity().npub.slice(0, 16)}...</span>
+                                                        <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{identity().npub.slice(0, 16)}...</span>
                                                         <button
                                                             onClick={() => navigator.clipboard.writeText(identity().npub)}
                                                             class="text-xs text-blue-600 hover:text-blue-700"
@@ -1684,15 +1736,15 @@ export const Dashboard: Component = () => {
                     />
 
                     {/* Side Panel */}
-                    <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+                    <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
                         {/* Panel Header */}
-                        <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-                            <h2 class="text-xl font-semibold text-gray-900">Vault Settings</h2>
+                        <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Vault Settings</h2>
                             <button
                                 onClick={() => setShowGlobalSettings(false)}
-                                class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                             >
-                                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                             </button>
@@ -1702,22 +1754,22 @@ export const Dashboard: Component = () => {
                         <div class="p-6 space-y-6">
                             {/* Account Info */}
                             <div>
-                                <h3 class="text-lg font-medium text-gray-900 mb-3">Account</h3>
+                                <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Account</h3>
                                 <div class="space-y-2">
                                     <div class="flex items-center justify-between">
-                                        <span class="text-sm text-gray-600">Username:</span>
-                                        <span class="text-sm font-medium text-gray-900">{user()?.profile.username}</span>
+                                        <span class="text-sm text-gray-600 dark:text-gray-400">Username:</span>
+                                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{user()?.profile.username}</span>
                                     </div>
                                     <div class="flex items-center justify-between">
-                                        <span class="text-sm text-gray-600">Identities:</span>
-                                        <span class="text-sm font-medium text-gray-900">{identities().length}</span>
+                                        <span class="text-sm text-gray-600 dark:text-gray-400">Identities:</span>
+                                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{identities().length}</span>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Nostr Sync Actions */}
                             <div>
-                                <h3 class="text-lg font-medium text-gray-900 mb-3">Nostr Sync</h3>
+                                <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Nostr Sync</h3>
                                 <div class="space-y-3">
                                     <button
                                         onClick={handleManualSync}
@@ -1762,18 +1814,18 @@ export const Dashboard: Component = () => {
                                     <Show when={syncMessage()}>
                                         <div class={`p-3 rounded-lg ${
                                             syncStatus() === 'success' 
-                                                ? 'bg-green-50 border border-green-200' 
-                                                : 'bg-red-50 border border-red-200'
+                                                ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700' 
+                                                : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700'
                                         }`}>
                                             <p class={`text-sm ${
-                                                syncStatus() === 'success' ? 'text-green-700' : 'text-red-700'
+                                                syncStatus() === 'success' ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
                                             }`}>
                                                 {syncMessage()}
                                             </p>
                                         </div>
                                     </Show>
                                     
-                                    <p class="text-xs text-gray-500 mt-2">
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
                                         Use these to manually sync your vault data with Nostr relays. Auto-sync happens on changes.
                                     </p>
                                 </div>

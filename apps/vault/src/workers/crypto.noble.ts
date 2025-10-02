@@ -408,17 +408,33 @@ export class NostrCrypto {
   }
 
   /**
-   * NIP-04 encryption (handled by nostr-tools in handlers)
+   * NIP-04 encryption
+   * Encrypts plaintext using sender's private key and recipient's public key
    */
-  nip04Encrypt(plaintext: string, senderPrivateKey: string, recipientPublicKey: string): string {
-    throw new Error('NIP-04 encryption should be handled by nostr-tools in handlers');
+  async nip04Encrypt(plaintext: string, senderPrivateKey: string, recipientPublicKey: string): Promise<string> {
+    try {
+      // Import nostr-tools nip04
+      const nip04Module = await import('nostr-tools/nip04');
+      return await nip04Module.encrypt(senderPrivateKey, recipientPublicKey, plaintext);
+    } catch (error) {
+      console.error('NIP-04 encryption failed:', error);
+      throw new Error(`NIP-04 encryption failed: ${error}`);
+    }
   }
 
   /**
-   * NIP-04 decryption (handled by nostr-tools in handlers)
+   * NIP-04 decryption
+   * Decrypts ciphertext using recipient's private key and sender's public key
    */
-  nip04Decrypt(ciphertext: string, recipientPrivateKey: string, senderPublicKey: string): string {
-    throw new Error('NIP-04 decryption should be handled by nostr-tools in handlers');
+  async nip04Decrypt(ciphertext: string, recipientPrivateKey: string, senderPublicKey: string): Promise<string> {
+    try {
+      // Import nostr-tools nip04
+      const nip04Module = await import('nostr-tools/nip04');
+      return await nip04Module.decrypt(recipientPrivateKey, senderPublicKey, ciphertext);
+    } catch (error) {
+      console.error('NIP-04 decryption failed:', error);
+      throw new Error(`NIP-04 decryption failed: ${error}`);
+    }
   }
 }
 

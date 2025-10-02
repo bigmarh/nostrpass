@@ -17,6 +17,7 @@ export interface LoginObj {
   username: string;
   createdAt: number;
   version: number;
+  passwordSalt: string;  // Salt for deriving password key (needed for decryption)
 }
 
 export interface VaultObj {
