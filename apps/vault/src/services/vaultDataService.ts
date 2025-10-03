@@ -203,49 +203,8 @@ export class VaultDataService {
    * Sync vault data to Nostr
    */
   async syncToNostr(username: string): Promise<void> {
-    console.log('🔄 [syncToNostr] Called for user:', username);
-    const cryptoWorker = getCryptoWorker();
-    console.log('🔄 [syncToNostr] Crypto worker status:', !!cryptoWorker);
-    if (!cryptoWorker) {
-      console.error('❌ [syncToNostr] Crypto worker not ready');
-      throw new Error('Crypto worker not ready');
-    }
-
-    try {
-      console.log('🔄 [syncToNostr] Starting Nostr sync for user:', username);
-      
-      // Create vault event
-      const vaultEvent = await cryptoWorker.saveVaultToNostr({ username });
-      console.log('✅ Vault event created:', vaultEvent.event.id);
-      
-      // Get relays - prefer user's custom relays if set
-      const { publishEvent } = await import('@nostrpass/nostrHelpers');
-      const { getRelays } = await import('../providers/EnvironmentProvider');
-      const vaultData = await this.getVaultData(username);
-      const relays = vaultData?.customRelays && vaultData.customRelays.length > 0 
-        ? vaultData.customRelays 
-        : getRelays();
-      console.log('📡 Publishing to relays:', relays, vaultData?.customRelays ? '(custom)' : '(default)');
-      
-      // For background syncs, don't use worker for PoW (keeps worker free for user operations)
-      // PoW runs in main thread, but it's OK since this is already a background operation
-      const publishedRelays = await publishEvent(vaultEvent.event, relays);
-      console.log('✅ Vault synced to Nostr successfully:', publishedRelays);
-      
-      // Broadcast vault update to other tabs
-      try {
-        const refreshEvent = new CustomEvent('vault-data-refresh', { 
-          detail: { username, timestamp: Date.now() } 
-        });
-        window.dispatchEvent(refreshEvent);
-        console.log('📡 [syncToNostr] Broadcasted vault update to other tabs');
-      } catch (broadcastError) {
-        console.warn('⚠️ [syncToNostr] Failed to broadcast vault update:', broadcastError);
-      }
-    } catch (error) {
-      console.error('❌ Failed to sync vault to Nostr:', error);
-      throw new Error(`Failed to sync to Nostr: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    // No-op in PRE model; operational changes publish per-stream events directly
+    console.log('ℹ️ [syncToNostr] No-op under PRE model');
   }
 
   /**
