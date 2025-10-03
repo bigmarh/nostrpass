@@ -242,8 +242,30 @@ export async function getVaultFromNostr(
   relays: string[],
   passwordKey: string  // Password key for initial vault decryption
 ): Promise<VaultData | null> {
-  console.warn('[getVaultFromNostr] Deprecated under PRE model. Returning null.');
-  return null;
+  try {
+    const pool = new SimplePool();
+    const env = getEnvironment();
+    const expectedDTag = `nostrpass.com_vault_${userPublicKey}_${env}`;
+    const filter: Filter = { kinds: [30078], authors: [userPublicKey], '#d': [expectedDTag], limit: 10 };
+    const events = await pool.querySync(relays, filter);
+    pool.close(relays);
+    if (events.length === 0) return null;
+    const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
+    const { decrypt } = await import('nostr-tools/nip04');
+    for (const event of sortedEvents) {
+      try {
+        const decryptedContent = await decrypt(passwordKey, userPublicKey, event.content);
+        const vaultData = JSON.parse(decryptedContent) as VaultData;
+        return vaultData;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Error retrieving vault from Nostr:', error);
+    return null;
+  }
 }
 
 /**

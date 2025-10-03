@@ -255,14 +255,14 @@ import type {
 
 // Define all crypto handlers
 export const handlers = {
-  // Publish identity meta PRE event (encrypted with storage keypair)
+  // Publish identity meta PRE event (encrypted + signed with storage keypair)
   publishIdentityMeta: async (params: { username: string; nickname: string; path: string }): Promise<{ eventId: string }> => {
     await ensureCryptoReady();
     const { username, nickname, path } = params;
     const session = activeSessions.get(username);
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    
     const storagePriv = session.storagePrivateKey;
-    const storagePub = session.storagePublicKey || vaultDB.getVault(username).then(v => v?.storagePublicKey || v?.publicKey);
     const vault = await vaultDB.getVault(username);
     if (!vault) throw new Error('Vault not found');
     const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
@@ -273,10 +273,10 @@ export const handlers = {
     const envelope = buildEnvelope({ data });
     const payloadJson = JSON.stringify(envelope);
 
-    // Encrypt via NIP-04 with storage key
+    // Encrypt via NIP-04 with storage key (so only user can decrypt)
     const encryptedContent = await nip04EncryptJS(storagePriv, storagePublicKey, payloadJson);
 
-    // Build PRE event
+    // Build PRE event SIGNED BY STORAGE KEY (deterministic, so all instances can query by same author)
     const dTag = `np/identity/${identityStreamId(storagePriv, data.identityId)}`;
     const event = {
       kind: 30078 as number,
@@ -353,17 +353,19 @@ export const handlers = {
     return { eventId: signed.id };
   },
 
-  // Assemble current state from PRE streams (author-only fetch)
+  // Assemble current state from PRE streams (author-only fetch by storage pubkey)
   assembleStateFromAuthor: async (params: { username: string; relays: string[] }): Promise<{ identities: any[]; perms: Record<string, string[]> }> => {
     await ensureCryptoReady();
     const { username, relays } = params;
     const session = activeSessions.get(username);
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    
     const storagePriv = session.storagePrivateKey;
     const vault = await vaultDB.getVault(username);
     if (!vault) throw new Error('Vault not found');
     const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
 
+    // All PRE events are signed by storage key (deterministic from xpriv)
     const pool = new SimplePool();
     const filter: Filter = { kinds: [30078], authors: [storagePublicKey], limit: 500 };
     const events = await pool.querySync(relays, filter);
@@ -428,50 +430,91 @@ export const handlers = {
 
     // Try realtime subscription first; fall back to polling on error
     try {
-      const pool = new SimplePool();
-      const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
-      const filter: Filter = { kinds: [30078], authors: [pubkey], '#d': [dTag] };
+    const pool = new SimplePool();
+    const filter: Filter = { kinds: [30078], authors: [pubkey] };
 
-      console.log('📡 [Worker] Subscribing to Nostr (author PRE):', { username, pubkey: pubkey.slice(0, 16), dTag, relaysCount: relays.length });
+    console.log('📡 [Worker] Subscribing to Nostr (author PRE):', { username, pubkey: pubkey.slice(0, 16), relaysCount: relays.length });
 
       const sub: any = (pool as any).subscribeMany
         ? (pool as any).subscribeMany(relays, [filter])
         : (pool as any).sub(relays as any, [filter]);
 
-      const onEvent = async (ev: NostrEvent) => {
-        try {
-          let remote: VaultData | null = null;
-          try {
-            const plaintext = await nip04DecryptJS(storagePriv as string, storagePub as string, ev.content);
-            remote = JSON.parse(plaintext) as VaultData;
-          } catch {
-            // ignore if not decryptable with storage key
-            remote = null;
-          }
-          if (!remote) return;
+    const onEvent = async (ev: NostrEvent) => {
+      try {
+          const d = (ev.tags.find(t => t[0] === 'd')?.[1]) || '';
+          if (!d) return;
 
-          const local = await vaultDB.getVault(username);
-          const remoteVersion = (remote as any).version || 0;
-          const localVersion = (local as any)?.version || 0;
-          if (remoteVersion > localVersion) {
-            console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', { remoteVersion, localVersion });
-            await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
+          // Identity PRE stream
+          if (d.startsWith('np/identity/')) {
+            console.log('📥 [Worker] Received identity PRE event:', { d: d.slice(0, 30), eventId: ev.id.slice(0, 8) });
+            try {
+              const plaintext = await nip04DecryptJS(storagePriv as string, storagePub as string, ev.content);
+              const env = JSON.parse(plaintext);
+              if (!verifyEnvelope(env)) {
+                console.warn('⚠️ [Worker] Identity envelope verification failed');
+                return;
+              }
+              const { identityId, nickname, path } = env.data || {};
+              if (!path) {
+                console.warn('⚠️ [Worker] Identity event missing path');
+                return;
+              }
+              const local = await vaultDB.getVault(username);
+              const identities = [...(local?.identities || [])];
+              const existingIdx = identities.findIndex((i: any) => i?.path === path);
+              if (existingIdx >= 0) {
+                // Update nickname if changed
+                if (nickname && identities[existingIdx]?.nickname !== nickname) {
+                  console.log('📝 [Worker] Updating identity nickname:', { path, oldNickname: identities[existingIdx].nickname, newNickname: nickname });
+                  identities[existingIdx] = { ...identities[existingIdx], nickname };
+                  await handlers.updateVaultData({ username, vaultData: { ...local, identities }, skipVersionIncrement: true });
+                  console.log('✅ [Worker] Identity updated');
+                } else {
+                  console.log('ℹ️ [Worker] Identity already exists with same nickname, skipping');
+                }
+              } else {
+                console.log('📝 [Worker] Adding new identity:', { nickname, path });
+                identities.push({ nickname, path, index: identities.length, createdAt: Date.now() });
+                await handlers.updateVaultData({ username, vaultData: { ...local, identities }, skipVersionIncrement: true });
+                console.log('✅ [Worker] New identity added');
+              }
+            } catch (e) {
+              console.error('❌ [Worker] Failed to process identity PRE event:', e);
+            }
+            return;
           }
-        } catch (e) {
-          console.warn('⚠️ [Worker] Failed to process realtime event:', e);
+
+          // Legacy/full-vault stream (initial snapshot or older clients)
+          if (d.startsWith(`nostrpass.com_vault_`)) {
+        let remote: VaultData | null = null;
+        try {
+              const plaintext = await nip04DecryptJS(storagePriv as string, storagePub as string, ev.content);
+          remote = JSON.parse(plaintext) as VaultData;
+            } catch { remote = null; }
+        if (!remote) return;
+        const local = await vaultDB.getVault(username);
+        const remoteVersion = (remote as any).version || 0;
+        const localVersion = (local as any)?.version || 0;
+        if (remoteVersion > localVersion) {
+          console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', { remoteVersion, localVersion });
+          await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
+            }
         }
-      };
+      } catch (e) {
+          console.warn('⚠️ [Worker] Failed to process realtime event:', e);
+      }
+    };
 
       // Attach listeners using whichever API is available
-      if (sub && typeof sub.on === 'function') {
-        sub.on('event', onEvent);
+    if (sub && typeof sub.on === 'function') {
+      sub.on('event', onEvent);
         sub.on('eose', () => console.log('📡 [Worker] Nostr EOSE for', username));
         nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.unsub?.(); } catch {} } });
       } else if (sub && typeof sub.onEvent === 'function') {
         sub.onEvent(onEvent);
-        if (typeof sub.onEnd === 'function') sub.onEnd(() => console.log('📡 [Worker] Nostr EOSE for', username));
-        nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.close?.(); } catch {} } });
-      } else {
+      if (typeof sub.onEnd === 'function') sub.onEnd(() => console.log('📡 [Worker] Nostr EOSE for', username));
+      nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.close?.(); } catch {} } });
+    } else {
         throw new Error('Unknown subscription interface');
       }
 
@@ -495,7 +538,7 @@ export const handlers = {
       }, 5000) as unknown as number;
       nostrPollers.set(key, timer);
       console.log('✅ [Worker] Vault sync polling started (5s interval)');
-      return { started: true };
+    return { started: true };
     }
   },
 
