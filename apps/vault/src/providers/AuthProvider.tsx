@@ -1583,62 +1583,10 @@ export const AuthProvider: ParentComponent = (props) => {
       // This allows us to decrypt encrypted vault events that were published earlier
       console.log('🔄 [UNLOCK] Re-fetching vault from Nostr with storage key...');
       try {
-        const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
-        
         // Derive storage keypair to decrypt Nostr events
-        const storageKeypair = await cryptoWorker.deriveKeypairFromXpriv({
-          xpriv,
-          index: 8907 // STORAGE_INDEX
-        });
+        await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index: 8907 }); // STORAGE_INDEX
         
-        const storagePrivateKey = storageKeypair.privateKey;
-        const remoteVault = await getVaultFromNostr(
-          currentUser.publicKey,
-          getRelays(),
-          storagePrivateKey // Now we have the storage key!
-        );
-        
-        if (remoteVault) {
-          const remoteVersion = remoteVault.version || 0;
-          const localVersion = freshVaultData.version || 0;
-          
-          const remoteUpdatedAt = Number(remoteVault.updatedAt || 0);
-          const localUpdatedAt = Number(freshVaultData.updatedAt || 0);
-          console.log('🔍 [UNLOCK] Comparing vault versions:', {
-            remoteVersion,
-            localVersion,
-            remoteIdentitiesCount: remoteVault.identities?.length || 0,
-            localIdentitiesCount: freshVaultData.identities?.length || 0,
-            remoteUpdatedAt,
-            localUpdatedAt,
-            shouldUpdateByVersion: remoteVersion > localVersion,
-            shouldUpdateByTime: remoteVersion === localVersion && remoteUpdatedAt > localUpdatedAt
-          });
-          
-          if (remoteVersion > localVersion || (remoteVersion === localVersion && remoteUpdatedAt > localUpdatedAt)) {
-            console.log('✅ [UNLOCK] Remote vault is newer (v' + remoteVersion + ' > v' + localVersion + '), updating local...');
-            
-            // Update local vault with remote data
-            // Skip version increment since we're downloading, not creating new changes
-            await cryptoWorker.updateVaultData({
-              username: currentUser.profile.username,
-              vaultData: remoteVault,
-              skipVersionIncrement: true
-            });
-            
-            // Broadcast refresh to other tabs/components
-            // Broadcast vault data refresh
-            window.dispatchEvent(new CustomEvent('vault-data-refresh', {
-              detail: { username: currentUser.profile.username, source: 'nostr' }
-            }));
-            
-            console.log('✅ [UNLOCK] Local vault updated with Nostr data');
-          } else if (remoteVersion < localVersion) {
-            console.log('ℹ️ [UNLOCK] Local vault is newer (v' + localVersion + ' > v' + remoteVersion + '), keeping local');
-          } else {
-            console.log('ℹ️ [UNLOCK] Vaults are at same version (v' + localVersion + '), keeping local');
-          }
-        }
+        // PRE model: blob fetch deprecated; state hydration handled below
       } catch (nostrError) {
         console.warn('⚠️ [UNLOCK] Failed to fetch from Nostr (non-critical):', nostrError);
       }

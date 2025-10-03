@@ -248,20 +248,9 @@ export class VaultDataService {
    * Get vault data from Nostr
    */
   async getVaultFromNostr(username: string): Promise<{ vaultData: any; eventId: string; timestamp: number } | null> {
-    const cryptoWorker = getCryptoWorker();
-    if (!cryptoWorker) {
-      throw new Error('Crypto worker not ready');
-    }
-
-    try {
-      console.log('🔄 Getting vault from Nostr for user:', username);
-      const result = await cryptoWorker.getVaultFromNostr({ username });
-      console.log('✅ Vault retrieved from Nostr:', result ? `event ${result.eventId}` : 'not found');
-      return result;
-    } catch (error) {
-      console.error('❌ Failed to get vault from Nostr:', error);
-      throw new Error(`Failed to get vault from Nostr: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    // PRE model: use author-only PRE assembly via worker instead
+    console.warn('getVaultFromNostr is deprecated under PRE model.');
+    return null;
   }
 
   /**
