@@ -1000,9 +1000,10 @@ export const AuthProvider: ParentComponent = (props) => {
         
         const { saveLoginObj } = await import('@nostrpass/nostrHelpers');
         const relays = getRelays();
-        
-        await saveLoginObj(username, loginObj, randomPublicKey, randomPrivateKey, relays);
-        console.log('✅ [CREATE ACCOUNT] LoginObj saved to Nostr');
+        const env = environmentName ? environmentName() : 'development';
+
+        await saveLoginObj(username, loginObj, randomPublicKey, randomPrivateKey, relays, env);
+        console.log(`✅ [CREATE ACCOUNT] LoginObj saved to Nostr with environment: ${env}`);
         
         // Create initial vault event using password encryption
         const vaultEvent = await cryptoWorker.createInitialVaultForNostr({ username, passwordKey });
