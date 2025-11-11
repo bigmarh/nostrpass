@@ -57,6 +57,25 @@ Object.defineProperty(global, 'Worker', {
   writable: true
 });
 
+// Mock SharedWorker
+class MockSharedWorker {
+  port = {
+    start: vi.fn(),
+    postMessage: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    onmessage: null,
+    close: vi.fn()
+  };
+
+  constructor(public scriptURL: string | URL, public options?: any) {}
+}
+
+Object.defineProperty(global, 'SharedWorker', {
+  value: MockSharedWorker,
+  writable: true
+});
+
 // Mock crypto.getRandomValues
 Object.defineProperty(global, 'crypto', {
   value: {

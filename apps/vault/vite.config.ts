@@ -26,7 +26,7 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
-    plugins: [wasmPlugin()],
+    plugins: () => [wasmPlugin()],
   },
   optimizeDeps: {
     exclude: ['@nostrpass/worker-messenger'],

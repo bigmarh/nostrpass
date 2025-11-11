@@ -1,6 +1,6 @@
 import { SimplePool, Event as NostrEvent, Filter } from 'nostr-tools';
 import { finalizeEvent, getPublicKey as nostrGetPublicKey } from 'nostr-tools/pure';
-import { getEnvironment } from './index';
+import { getEnvironment, getNamespace } from './config';
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 
@@ -67,12 +67,13 @@ export async function saveLoginObj(
     const pubkeyToUse = derivedPublicKey || randomPublicKey;
 
     // Create login event with random key for privacy
+    const namespace = getNamespace();
     const loginEvent: Partial<NostrEvent> = {
       kind: 30078,
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['d', `nostrpass.com_login_${hash(username)}_${getEnvironment()}`],
-        ['client', 'nostrpass.com'],
+        ['d', `${namespace}_login_${hash(username)}_${getEnvironment()}`],
+        ['client', namespace],
         ['subject', 'login-lookup'],
       ],
       content: loginContent,
@@ -117,11 +118,12 @@ export async function getLoginObj(
 ): Promise<LoginObj | null> {
   try {
     const pool = new SimplePool();
-    
+    const namespace = getNamespace();
+
     // Create filter for login event
     const filter: Filter = {
       kinds: [30078],
-      '#d': [`nostrpass.com_login_${hash(username)}_${environment}`],
+      '#d': [`${namespace}_login_${hash(username)}_${environment}`],
       limit: 1
     };
 
@@ -161,14 +163,15 @@ export async function saveVaultObj(
     const encryptedContent = await encrypt(passwordKey, storagePublicKey, vaultJson);
     
     console.log('🔐 [saveVaultObj] VaultObj encrypted with password key');
-    
+
+    const namespace = getNamespace();
     // Create vault event with storage key as author
     const vaultEvent: Partial<NostrEvent> = {
       kind: 30078,
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['d', `nostrpass.com_vault_${storagePublicKey}_${getEnvironment()}`],
-        ['client', 'nostrpass.com'],
+        ['d', `${namespace}_vault_${storagePublicKey}_${getEnvironment()}`],
+        ['client', namespace],
         ['subject', 'encrypted-vault'],
         ['encryption', 'password-aes'], // Mark as password-encrypted
       ],
@@ -220,11 +223,11 @@ function hash(input: string): string {
  * @returns Event IDs from successful publishes
  */
 export async function saveVaultToNostr(
-  vaultData: VaultData,
-  userPrivateKey: string,
-  userPublicKey: string,
-  relays: string[],
-  passwordKey: string  // Password key for encryption
+  _vaultData: VaultData,
+  _userPrivateKey: string,
+  _userPublicKey: string,
+  _relays: string[],
+  _passwordKey: string  // Password key for encryption
 ): Promise<string[]> {
   console.warn('[saveVaultToNostr] Deprecated under PRE model. Returning empty list.');
   return [];
@@ -245,7 +248,8 @@ export async function getVaultFromNostr(
   try {
     const pool = new SimplePool();
     const env = getEnvironment();
-    const expectedDTag = `nostrpass.com_vault_${userPublicKey}_${env}`;
+    const namespace = getNamespace();
+    const expectedDTag = `${namespace}_vault_${userPublicKey}_${env}`;
     const filter: Filter = { kinds: [30078], authors: [userPublicKey], '#d': [expectedDTag], limit: 10 };
     const events = await pool.querySync(relays, filter);
     pool.close(relays);
@@ -276,9 +280,9 @@ export async function getVaultFromNostr(
  * @returns Vault data or null if not found
  */
 export async function getVaultFromNostrWithStorageKey(
-  userPublicKey: string,
-  relays: string[],
-  storagePrivateKey: string
+  _userPublicKey: string,
+  _relays: string[],
+  _storagePrivateKey: string
 ): Promise<VaultData | null> {
   console.warn('[getVaultFromNostrWithStorageKey] Deprecated under PRE model. Returning null.');
   return null;
@@ -296,11 +300,12 @@ export async function vaultExistsOnNostr(
 ): Promise<boolean> {
   try {
     const pool = new SimplePool();
-    
+    const namespace = getNamespace();
+
     const filter: Filter = {
       kinds: [30078],
       authors: [userPublicKey],
-      '#d': [`nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`],
+      '#d': [`${namespace}_vault_${userPublicKey}_${getEnvironment()}`],
       limit: 1
     };
 
@@ -326,12 +331,13 @@ export async function deleteVaultFromNostr(
   relays: string[]
 ): Promise<void> {
   try {
+    const namespace = getNamespace();
     // Create deletion event (NIP-09)
     const deletionEvent: Partial<NostrEvent> = {
       kind: 5, // Deletion
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['e', `nostrpass.com_vault_${getEnvironment()}_${userPublicKey}`],
+        ['e', `${namespace}_vault_${getEnvironment()}_${userPublicKey}`],
         ['k', '30078']
       ],
       content: 'Vault deleted',

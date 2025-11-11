@@ -24,13 +24,15 @@ export const permissionHandlers: MessageHandler[] = [
       if (identityIndex !== authorizedIndex) {
         return { granted: false, action, origin };
       }
-      const hasPermission = await deps.checkPermission(action, origin, eventKind, identityIndex);
-      const needsPrompt = !hasPermission;
+      const permissionResult = await deps.checkPermission(action, origin, eventKind, identityIndex);
+      const granted = !!permissionResult?.allowed || permissionResult?.sessionGranted === true;
+      const needsPrompt = permissionResult?.level === 'ASK_EVERYTIME';
       return {
-        granted: hasPermission,
+        granted,
         needsPrompt,
         action,
-        origin
+        origin,
+        level: permissionResult?.level
       };
     }
   },

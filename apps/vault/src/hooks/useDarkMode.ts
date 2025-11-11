@@ -57,9 +57,7 @@ export function useDarkMode() {
   });
 
   const toggleDarkMode = () => {
-    const newValue = !isDarkMode();
-    console.log('[useDarkMode] Toggling dark mode:', isDarkMode(), '->', newValue);
-    setIsDarkMode(newValue);
+    setIsDarkMode(!isDarkMode());
   };
 
   return {

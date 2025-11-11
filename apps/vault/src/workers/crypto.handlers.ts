@@ -3,6 +3,7 @@ import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tool
 import { SimplePool, type Event as NostrEvent, type Filter } from 'nostr-tools';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
+import { PERMISSION_KINDS, type PermissionLevel } from '@nostrpass/types';
 import { buildEnvelope, verifyEnvelope, identityStreamId, permStreamId, deriveIdentityId, deriveAppId } from './pre.helpers';
 
 /**
@@ -306,9 +307,9 @@ export const handlers = {
   },
 
   // Publish permissions for identity+app as PRE event
-  publishPermissions: async (params: { username: string; path: string; appDomain: string; appPermissions: string[] }): Promise<{ eventId: string }> => {
+  publishPermissions: async (params: { username: string; path: string; appDomain: string; permissions: any }): Promise<{ eventId: string }> => {
     await ensureCryptoReady();
-    const { username, path, appDomain, appPermissions } = params;
+    const { username, path, appDomain, permissions } = params;
     const session = activeSessions.get(username);
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
     const storagePriv = session.storagePrivateKey;
@@ -322,7 +323,7 @@ export const handlers = {
     const streamId = permStreamId(storagePriv, identityId, appId);
 
     // Build envelope
-    const data = { identityId, appId, appPermissions };
+    const data = { identityId, appId, permissions };
     const envelope = buildEnvelope({ data });
     const payloadJson = JSON.stringify(envelope);
 
@@ -1588,10 +1589,101 @@ export const handlers = {
   },
 
   // Check permission for an operation
-  checkPermission: async (params: { method: string; origin?: string; username?: string }): Promise<{ allowed: boolean }> => {
-    // For now, allow all operations from the same origin
-    // This can be enhanced with more granular permission checks
-    return { allowed: true };
+  checkPermission: async (params: { username: string; origin: string; action: 'signEvent' | 'signData' | 'getPublicKey' | 'nip04' | 'getRelays'; eventKind?: number; identityIndex?: number }): Promise<{ allowed: boolean; level: PermissionLevel; needsPrompt: boolean; sessionGranted?: boolean }> => {
+    await ensureCryptoReady();
+    const { username, origin, action, eventKind } = params;
+
+    const vault = await vaultDB.getVault(username);
+    if (!vault || !vault.identities || vault.identities.length === 0) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
+    }
+
+    const identityIndex = Math.max(0, Math.min(
+      (params.identityIndex ?? (vault as any).activeIdentityByApp?.[origin] ?? 0),
+      (vault.identities.length - 1)
+    ));
+    const identity = vault.identities[identityIndex] as any;
+    const appPerms = identity?.appPermissions?.[origin];
+
+    if (!appPerms) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
+    }
+
+    const resolveLevel = (level?: PermissionLevel): PermissionLevel => {
+      if (level === 'ALLOW' || level === 'DENY') return level;
+      return 'ASK_EVERYTIME';
+    };
+
+    const determineCategoryLevel = (kind?: number): PermissionLevel => {
+      const kindNumber = kind !== undefined ? Number(kind) : undefined;
+      if (kindNumber !== undefined && !Number.isNaN(kindNumber) && appPerms.kinds) {
+        const explicit = appPerms.kinds[String(kindNumber)] ?? appPerms.kinds[kindNumber];
+        if (explicit) {
+          return resolveLevel(explicit as PermissionLevel);
+        }
+      }
+
+      if (kindNumber !== undefined && !Number.isNaN(kindNumber)) {
+        const entries = Object.entries(PERMISSION_KINDS) as Array<[keyof typeof PERMISSION_KINDS, readonly number[]]>;
+        for (const [category, kinds] of entries) {
+          if (kinds.includes(kindNumber)) {
+            const level = appPerms.permissions?.[category] as PermissionLevel | undefined;
+            if (level) {
+              return resolveLevel(level);
+            }
+          }
+        }
+      }
+
+      return 'ASK_EVERYTIME';
+    };
+
+    let level: PermissionLevel = 'ASK_EVERYTIME';
+
+    switch (action) {
+      case 'getPublicKey':
+        level = resolveLevel(appPerms.getPublicKey as PermissionLevel | undefined);
+        break;
+      case 'signData':
+        // Check nested permissions.signData FIRST (more specific), then fall back to root level
+        level = resolveLevel(
+          (appPerms.permissions?.signData as PermissionLevel | undefined) ??
+          (appPerms.signData as PermissionLevel | undefined)
+        );
+        break;
+      case 'nip04':
+        // Check nested permissions.messaging FIRST (more specific), then fall back to root level
+        level = resolveLevel(
+          (appPerms.permissions?.messaging as PermissionLevel | undefined) ??
+          (appPerms.nip04 as PermissionLevel | undefined)
+        );
+        break;
+      case 'getRelays':
+        // Check nested permissions.financial FIRST (more specific), then fall back to root level
+        level = resolveLevel(
+          (appPerms.permissions?.financial as PermissionLevel | undefined) ??
+          (appPerms.getRelays as PermissionLevel | undefined)
+        );
+        break;
+      case 'signEvent':
+        {
+          const normalizedKind = eventKind !== undefined ? Number(eventKind) : undefined;
+          level = determineCategoryLevel(
+            normalizedKind !== undefined && !Number.isNaN(normalizedKind) ? normalizedKind : undefined
+          );
+        }
+        break;
+      default:
+        level = 'ASK_EVERYTIME';
+    }
+
+    const allowed = level === 'ALLOW';
+    return {
+      allowed,
+      level,
+      needsPrompt: level === 'ASK_EVERYTIME',
+      sessionGranted: false
+    };
   },
 
   // Get app permissions for a specific origin using the active identity for that app
@@ -1648,15 +1740,39 @@ export const handlers = {
     };
     
     // Merge top-level and nested permission categories
+    const basePermissions = {
+      social: (existing.permissions && existing.permissions.social) || 'ASK_EVERYTIME',
+      messaging: (existing.permissions && existing.permissions.messaging) || 'ASK_EVERYTIME',
+      signData: (existing.permissions && existing.permissions.signData) || 'ASK_EVERYTIME',
+      financial: (existing.permissions && existing.permissions.financial) || 'ASK_EVERYTIME',
+    };
+
+    if (permissions.permissions) {
+      Object.assign(basePermissions, permissions.permissions);
+    }
+    if (permissions.social) basePermissions.social = permissions.social;
+    if (permissions.messaging) basePermissions.messaging = permissions.messaging;
+    if (permissions.signData) basePermissions.signData = permissions.signData;
+    if (permissions.financial) basePermissions.financial = permissions.financial;
+    if (permissions.nip04) basePermissions.messaging = permissions.nip04;
+    if (permissions.getRelays) basePermissions.financial = permissions.getRelays;
+
+    const mergedKinds = {
+      ...(existing.kinds || {}),
+      ...(permissions.kinds || {}),
+    };
+
+    // Build clean permission object without legacy root-level fields
     const merged = {
-      ...existing,
-      ...(appName ? { appName } : {}),
+      appId: existing.appId || origin,
+      appName: appName || existing.appName || origin,
+      grantedAt: existing.grantedAt || Date.now(),
       lastUsedAt: Date.now(),
-      ...(permissions.getPublicKey ? { getPublicKey: permissions.getPublicKey } : {}),
-      permissions: {
-        ...existing.permissions,
-        ...(permissions.permissions || {}),
-      },
+      getPublicKey: permissions.getPublicKey ?? existing.getPublicKey ?? 'ASK_EVERYTIME',
+      kinds: Object.keys(mergedKinds).length > 0 ? mergedKinds : existing.kinds,
+      permissions: basePermissions,
+      // Note: Legacy root-level fields (signData, nip04, getRelays) removed
+      // All permission checks now use the nested permissions object
     };
     
     identity.appPermissions[origin] = merged;

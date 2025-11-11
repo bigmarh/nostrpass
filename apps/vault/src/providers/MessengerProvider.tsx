@@ -3,6 +3,8 @@ import { IframeMessenger } from '@nostrpass/messenger';
 import { setupMessageHandlers } from '../messageHandlers';
 import { useEnvironment } from './EnvironmentProvider';
 import { useAuth } from './AuthProvider';
+import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import type { PermissionLevel } from '@nostrpass/types';
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
@@ -27,6 +29,15 @@ export const MessengerProvider: ParentComponent = (props) => {
       return useAuth();
     } catch {
       return null;
+    }
+  };
+
+  const toAppKey = (origin: string): string => {
+    try {
+      const url = new URL(origin);
+      return sanitizeDomain(url.host);
+    } catch {
+      return sanitizeDomain(origin);
     }
   };
 
@@ -129,21 +140,30 @@ export const MessengerProvider: ParentComponent = (props) => {
     const deps = {
       getUser: () => auth.user(),
       getCryptoWorker: () => (auth as any).cryptoWorker || null,
-      checkPermission: async (action: string, origin: string, eventKind?: number) => {
+      checkPermission: async (action: string, origin: string, eventKind?: number, identityIndex?: number) => {
+        const fallback: { allowed: boolean; level: PermissionLevel; sessionGranted?: boolean } = {
+          allowed: false,
+          level: 'ASK_EVERYTIME'
+        };
         try {
           const cw = (auth as any).cryptoWorker;
           const current = auth.user();
-          if (!cw || !current) return false;
-          const appKey = origin; // already sanitized by middleware
+          if (!cw || !current) return fallback;
+          const appKey = toAppKey(origin);
           const result = await cw.checkPermission({
             username: current.profile.username,
             origin: appKey,
             action,
-            eventKind
+            eventKind,
+            identityIndex
           });
-          return !!result?.granted || result?.level === 'ALLOW' || result?.sessionGranted === true;
+          return {
+            allowed: !!result?.allowed,
+            level: (result?.level as PermissionLevel) ?? (result?.allowed ? 'ALLOW' : 'ASK_EVERYTIME'),
+            sessionGranted: result?.sessionGranted === true
+          };
         } catch {
-          return false;
+          return fallback;
         }
       },
       isVaultLocked: () => auth.isVaultLocked(),
@@ -152,7 +172,7 @@ export const MessengerProvider: ParentComponent = (props) => {
         const current = auth.user();
         if (!cw || !current) throw new Error('Crypto not ready');
         const vaultData = await cw.getVaultData({ username: current.profile.username });
-        const appKey = origin; // middleware provides sanitized key
+        const appKey = toAppKey(origin);
         let activeIndex = vaultData.activeIdentityByApp?.[appKey];
         if (activeIndex === undefined || activeIndex === null) {
           activeIndex = vaultData.identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);

@@ -153,7 +153,7 @@ describe('Crypto Worker', () => {
       const result = await worker.deriveKeyFromPassword(password);
       
       expect(result).toEqual(expectedDerived);
-      expect(mockCryptoWorker.deriveKeyFromPassword).toHaveBeenCalledWith(password, undefined);
+      expect(mockCryptoWorker.deriveKeyFromPassword).toHaveBeenCalledWith(password);
     });
 
     it('should derive keypair from xpriv', async () => {

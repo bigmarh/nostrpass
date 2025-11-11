@@ -15,6 +15,7 @@ interface EmbassyConfig {
   appDomain?: string;
   permissions?: string[];
   vaultUrl?: string;
+  trustedOrigins?: string[]; // Custom trusted vault origins
   theme?: 'light' | 'dark' | 'auto';
   debug?: boolean;
   parentPinOverlay?: boolean; // if true, show parent PIN UI (default false)
@@ -258,6 +259,7 @@ class NostrPassEmbassy {
       appDomain: config.appDomain || window.location.host,
       permissions: config.permissions || ['getPublicKey', 'signEvent'],
       vaultUrl: config.vaultUrl || 'http://localhost:3001',
+      trustedOrigins: config.trustedOrigins, // Keep as-is, will handle defaults in initializeMessenger
       theme: config.theme || 'auto',
       debug: config.debug || false,
       parentPinOverlay: config.parentPinOverlay ?? false
@@ -556,19 +558,44 @@ class NostrPassEmbassy {
       this.iframe.contentWindow.postMessage(message, iframeOrigin);
     };
 
-    // Initialize with trusted vault origins only
-    // The Embassy (parent) should only accept messages from our trusted vault domain
-    const trustedOrigins = [
-      'https://nostrpass.com',
-      'https://app.nostrpass.com',
-      'https://www.nostrpass.com'
-    ];
-    
+    // Initialize with trusted vault origins
+    // The Embassy (parent) should only accept messages from trusted vault domains
+    let trustedOrigins: string[];
+
+    if (this.config.trustedOrigins && this.config.trustedOrigins.length > 0) {
+      // Use custom trusted origins if provided
+      trustedOrigins = [...this.config.trustedOrigins];
+    } else {
+      // Use default trusted origins for nostrpass.com
+      trustedOrigins = [
+        'https://nostrpass.com',
+        'https://app.nostrpass.com',
+        'https://www.nostrpass.com'
+      ];
+    }
+
+    // Auto-detect and add the vaultUrl origin to trusted origins
+    if (this.config.vaultUrl) {
+      try {
+        const vaultOrigin = new URL(this.config.vaultUrl).origin;
+        if (!trustedOrigins.includes(vaultOrigin)) {
+          trustedOrigins.push(vaultOrigin);
+        }
+      } catch (err) {
+        console.warn('Failed to parse vaultUrl origin:', err);
+      }
+    }
+
     // In development, also allow localhost for testing
     if (this.iframe.src.includes('localhost') || this.iframe.src.includes('127.0.0.1')) {
-      trustedOrigins.push('http://localhost:3001', 'http://127.0.0.1:3001');
+      if (!trustedOrigins.includes('http://localhost:3001')) {
+        trustedOrigins.push('http://localhost:3001');
+      }
+      if (!trustedOrigins.includes('http://127.0.0.1:3001')) {
+        trustedOrigins.push('http://127.0.0.1:3001');
+      }
     }
-    
+
     this.messenger.init(trustedOrigins);
 
     // Set up message handlers
@@ -603,12 +630,14 @@ class NostrPassEmbassy {
     }
 
     try {
+      const identityIndex = options?.identityIndex ?? 0;
+
       // Preflight: check if a prompt is needed
       let unlockPromise: Promise<void> | null = null;
       try {
         const preflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'getPublicKey',
-          identityIndex: options?.identityIndex
+          identityIndex
         });
         const needsPin = preflight?.isLocked === true;
         const needsPrompt = preflight?.needsPrompt === true;
@@ -643,7 +672,7 @@ class NostrPassEmbassy {
       const response = await this.messenger!.request(Msg.GET_PUBLIC_KEY, {
         appName: this.config.appName,
         appDomain: this.config.appDomain,
-        identityIndex: options?.identityIndex
+        identityIndex
       });
 
       if (this.config.debug) console.log('Public key received:', response);
@@ -667,13 +696,15 @@ class NostrPassEmbassy {
     }
 
     try {
+      const identityIndex = options?.identityIndex ?? 0;
+
       // Preflight: prompt for PIN first if needed, so the op can proceed without error
       let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signEvent',
           eventKind: event?.kind,
-          identityIndex: options?.identityIndex
+          identityIndex
         });
         const needsPin = pre?.isLocked === true;
         const needsPrompt = pre?.needsPrompt === true;
@@ -709,7 +740,7 @@ class NostrPassEmbassy {
         event,
         appName: this.config.appName,
         appDomain: this.config.appDomain,
-        identityIndex: options?.identityIndex
+        identityIndex
       });
 
       try {
@@ -751,12 +782,14 @@ class NostrPassEmbassy {
     }
 
     try {
+      const identityIndex = options?.identityIndex ?? 0;
+
       // Preflight: prompt for PIN first if needed so the op can proceed
       let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signData',
-          identityIndex: options?.identityIndex
+          identityIndex
         });
         const needsPin = pre?.isLocked === true;
         const needsPrompt = pre?.needsPrompt === true;
@@ -791,7 +824,7 @@ class NostrPassEmbassy {
         data: message,
         appName: this.config.appName,
         appDomain: this.config.appDomain,
-        identityIndex: options?.identityIndex
+        identityIndex
       });
 
       try {
@@ -835,12 +868,14 @@ class NostrPassEmbassy {
     }
 
     try {
+      const identityIndex = options?.identityIndex ?? 0;
+
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
-          identityIndex: options?.identityIndex
+          identityIndex
         });
         const needsPin = pre?.isLocked === true;
         const needsPrompt = pre?.needsPrompt === true;
@@ -877,7 +912,7 @@ class NostrPassEmbassy {
         recipientPubkey: pubkey,
         appName: this.config.appName,
         appDomain: this.config.appDomain,
-        identityIndex: options?.identityIndex
+        identityIndex
       });
 
       try {
@@ -920,12 +955,14 @@ class NostrPassEmbassy {
     }
 
     try {
+      const identityIndex = options?.identityIndex ?? 0;
+
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
-          identityIndex: options?.identityIndex
+          identityIndex
         });
         const needsPin = pre?.isLocked === true;
         const needsPrompt = pre?.needsPrompt === true;
@@ -962,7 +999,7 @@ class NostrPassEmbassy {
         senderPubkey: pubkey,
         appName: this.config.appName,
         appDomain: this.config.appDomain,
-        identityIndex: options?.identityIndex
+        identityIndex
       });
 
       try {

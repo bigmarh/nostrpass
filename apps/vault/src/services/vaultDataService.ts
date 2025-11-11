@@ -359,19 +359,33 @@ export class VaultDataService {
       throw new Error('Crypto worker not ready');
     }
 
-    // Determine active identity path
+    // Determine active identity path prior to saving
     const vaultData = await this.getVaultData(username);
     const identities = vaultData?.identities || [];
     const idx = typeof identityIndex === 'number' ? identityIndex : 0;
     const path = identities[idx]?.path || `m/44'/1237'/0'/0/${idx}`;
 
-    // Publish permissions PRE via worker
+    // Persist permissions inside the worker/vault
+    await cryptoWorker.saveAppPermissions({
+      username,
+      origin,
+      permissions,
+      appName: _appName,
+      identityIndex: idx
+    });
+
+    // Publish permissions PRE via worker (best effort)
     try {
+      const latestPermissions = await cryptoWorker.getAppPermissions({
+        username,
+        origin,
+        identityIndex: idx
+      });
       await (cryptoWorker as any).publishPermissions({
         username,
         path,
         appDomain: origin,
-        appPermissions: permissions?.allowed || []
+        permissions: latestPermissions || permissions || {}
       });
     } catch (e) {
       console.warn('[saveAppPermissions] Failed to publish PRE permissions (non-critical):', e);

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { NostrPassEmbassy } from '../../../packages/provider/src/embassy';
+import { NostrPassEmbassy } from '@nostrpass/provider';
 
 // Mock the iframe and postMessage
 const mockIframe = {
