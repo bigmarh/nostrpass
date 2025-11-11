@@ -109,11 +109,8 @@ export const Settings: Component = () => {
         
         // Sync to Nostr
         try {
-          const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
-            username: currentUser.profile.username 
-          });
-          const { publishEvent } = await import('@nostrpass/nostrHelpers');
-          await publishEvent(vaultEvent.event, env.getRelays());
+          // PRE model: identity nickname updates will be event-sourced soon
+          console.log('[Settings] PRE model: nickname updated locally');
         } catch (error) {
         }
       }
@@ -134,9 +131,8 @@ export const Settings: Component = () => {
       setActiveIndexForApp(index);
       // Optionally sync to Nostr in background
       try {
-        const vaultEvent = await cryptoWorker.saveVaultToNostr({ username: currentUser.profile.username });
-        const { publishEvent } = await import('@nostrpass/nostrHelpers');
-        await publishEvent(vaultEvent.event, env.getRelays());
+        // PRE model: active identity will be event-sourced soon
+        console.log('[Settings] PRE model: active identity updated locally');
       } catch {}
     } catch {}
   };
@@ -413,7 +409,7 @@ export const Settings: Component = () => {
                     onClick={async () => {
                       if (confirm('⚠️ DELETE ACCOUNT?\n\nThis will permanently delete your vault from this device.\n\nYour data on Nostr relays will remain (can be recovered with username).')) {
                         try {
-                          await logout(true);
+                          await logout();
                           // Wait for deletion to complete
                           await new Promise(resolve => setTimeout(resolve, 200));
                           navigate(`/${params.app}`);

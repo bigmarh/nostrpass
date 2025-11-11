@@ -4,6 +4,7 @@ import type { PermissionLevel } from '@nostrpass/types';
 import { useAuth } from '../providers/AuthProvider';
 import { permissionService } from '../services/permissionService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { permissionPromptManager } from '../utils/permissionPromptManager';
 
 interface PermissionEventDetail {
   appOrigin: string;
@@ -11,6 +12,7 @@ interface PermissionEventDetail {
   action: 'signEvent' | 'signData' | 'getPublicKey' | 'nip04' | 'getRelays';
   eventKind?: number;
   identityIndex?: number;
+  requestId?: string; // Added for async tracking
 }
 
 export const PermissionPromptController: Component = () => {
@@ -41,7 +43,12 @@ export const PermissionPromptController: Component = () => {
     }
 
     const username = currentUser.profile.username;
-    const appKey = sanitizeDomain(new URL(d.appOrigin).host || d.appOrigin);
+    let appKey = d.appOrigin;
+    try {
+      appKey = sanitizeDomain(new URL(d.appOrigin).host || d.appOrigin);
+    } catch {
+      appKey = sanitizeDomain(d.appOrigin);
+    }
 
     try {
       if (level === 'ASK_PER_SESSION') {
@@ -69,8 +76,17 @@ export const PermissionPromptController: Component = () => {
         }
         await permissionService.saveAppPermissions(username, appKey, perms, d.appName, d.identityIndex);
       }
+
+      // Notify the permission manager that permission was granted
+      if (d.requestId) {
+        permissionPromptManager.resolvePermission(d.requestId, { granted: true, level });
+      }
     } catch (e) {
       console.error('Failed to save permission:', e);
+      // Reject the permission request on error
+      if (d.requestId) {
+        permissionPromptManager.rejectPermission(d.requestId, 'Failed to save permission');
+      }
     } finally {
       setVisible(false);
       setDetail(null);
@@ -86,7 +102,12 @@ export const PermissionPromptController: Component = () => {
     }
 
     const username = currentUser.profile.username;
-    const appKey = sanitizeDomain(new URL(d.appOrigin).host || d.appOrigin);
+    let appKey = d.appOrigin;
+    try {
+      appKey = sanitizeDomain(new URL(d.appOrigin).host || d.appOrigin);
+    } catch {
+      appKey = sanitizeDomain(d.appOrigin);
+    }
 
     try {
       // Persist DENY for the requested action
@@ -109,8 +130,17 @@ export const PermissionPromptController: Component = () => {
           break;
       }
       await permissionService.saveAppPermissions(username, appKey, perms, d.appName, d.identityIndex);
+
+      // Notify the permission manager that permission was denied
+      if (d.requestId) {
+        permissionPromptManager.rejectPermission(d.requestId, 'Permission denied by user');
+      }
     } catch (e) {
       console.error('Failed to save deny:', e);
+      // Still reject the permission request on error
+      if (d.requestId) {
+        permissionPromptManager.rejectPermission(d.requestId, 'Failed to save denial');
+      }
     } finally {
       setVisible(false);
       setDetail(null);

@@ -3,6 +3,8 @@ import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tool
 import { SimplePool, type Event as NostrEvent, type Filter } from 'nostr-tools';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
+import { PERMISSION_KINDS, type PermissionLevel } from '@nostrpass/types';
+import { buildEnvelope, verifyEnvelope, identityStreamId, permStreamId, deriveIdentityId, deriveAppId } from './pre.helpers';
 
 /**
  * Handler architecture and naming
@@ -54,8 +56,8 @@ const activeSessions = new Map<string, ExtendedSession>();
 const nostrSubscriptions = new Map<string, { pool: SimplePool; relays: string[]; unsub: (() => void) | null }>();
 const nostrPollers = new Map<string, number>();
 
-async function pollOnceAndApply(params: { username: string; relays: string[]; pubkey: string; storagePriv: string; env: string }) {
-  const { username, relays, pubkey, storagePriv, env } = params;
+async function pollOnceAndApply(params: { username: string; relays: string[]; pubkey: string; storagePriv: string; storagePub: string; env: string }) {
+  const { username, relays, pubkey, storagePriv, storagePub, env } = params;
   try {
     const pool = new SimplePool();
     const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
@@ -68,10 +70,16 @@ async function pollOnceAndApply(params: { username: string; relays: string[]; pu
     for (const ev of events) {
       try {
         let remote: VaultData | null = null;
+        // Try to decrypt with storage key (for NIP-04 encrypted sync events)
         try {
-          const plaintext = await nip04DecryptJS(storagePriv, pubkey, ev.content);
+          const plaintext = await nip04DecryptJS(storagePriv, storagePub, ev.content);
           remote = JSON.parse(plaintext) as VaultData;
+          console.log('📥 [Worker Poll] Decrypted vault event with storage key:', {
+            identitiesCount: remote.identities?.length,
+            version: (remote as any).version
+          });
         } catch {
+          // Fallback to plain JSON parse for legacy unencrypted events (should not exist anymore)
           try { remote = JSON.parse(ev.content) as VaultData; } catch { remote = null; }
         }
         if (!remote) continue;
@@ -79,7 +87,7 @@ async function pollOnceAndApply(params: { username: string; relays: string[]; pu
         const remoteVersion = (remote as any).version || 0;
         const localVersion = (local as any)?.version || 0;
         if (remoteVersion > localVersion) {
-          console.log('📥 [Worker] Applying newer vault from Nostr (poll):', { remoteVersion, localVersion });
+          console.log('📥 [Worker] Applying newer vault from Nostr (poll):', { remoteVersion, localVersion, remoteIdentities: remote.identities?.length });
           await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
           break;
         }
@@ -248,6 +256,152 @@ import type {
 
 // Define all crypto handlers
 export const handlers = {
+  // Publish identity meta PRE event (encrypted + signed with storage keypair)
+  publishIdentityMeta: async (params: { username: string; nickname: string; path: string }): Promise<{ eventId: string }> => {
+    await ensureCryptoReady();
+    const { username, nickname, path } = params;
+    const session = activeSessions.get(username);
+    if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    
+    const storagePriv = session.storagePrivateKey;
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+    const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
+    const env = getEnvironment();
+
+    // Build envelope
+    const data = { identityId: `npid:${path}`, nickname, path };
+    const envelope = buildEnvelope({ data });
+    const payloadJson = JSON.stringify(envelope);
+
+    // Encrypt via NIP-04 with storage key (so only user can decrypt)
+    const encryptedContent = await nip04EncryptJS(storagePriv, storagePublicKey, payloadJson);
+
+    // Build PRE event SIGNED BY STORAGE KEY (deterministic, so all instances can query by same author)
+    const dTag = `np/identity/${identityStreamId(storagePriv, data.identityId)}`;
+    const event = {
+      kind: 30078 as number,
+      pubkey: storagePublicKey,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [["d", dTag]],
+      content: encryptedContent,
+      id: '',
+      sig: ''
+    };
+
+    const crypto = await ensureCryptoReady();
+    const signed = crypto.signEvent(event, storagePriv);
+
+    // Publish
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080'
+    ];
+    const pool = new SimplePool();
+    await Promise.all(pool.publish(relays, signed));
+    pool.close(relays);
+    return { eventId: signed.id };
+  },
+
+  // Publish permissions for identity+app as PRE event
+  publishPermissions: async (params: { username: string; path: string; appDomain: string; permissions: any }): Promise<{ eventId: string }> => {
+    await ensureCryptoReady();
+    const { username, path, appDomain, permissions } = params;
+    const session = activeSessions.get(username);
+    if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    const storagePriv = session.storagePrivateKey;
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+    const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
+
+    // Derive opaque IDs
+    const identityId = deriveIdentityId(storagePriv, path);
+    const appId = deriveAppId(storagePriv, appDomain);
+    const streamId = permStreamId(storagePriv, identityId, appId);
+
+    // Build envelope
+    const data = { identityId, appId, permissions };
+    const envelope = buildEnvelope({ data });
+    const payloadJson = JSON.stringify(envelope);
+
+    // Encrypt and publish
+    const encryptedContent = await nip04EncryptJS(storagePriv, storagePublicKey, payloadJson);
+    const dTag = `np/perm/${streamId}`;
+    const event = {
+      kind: 30078 as number,
+      pubkey: storagePublicKey,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [["d", dTag]],
+      content: encryptedContent,
+      id: '',
+      sig: ''
+    };
+    const crypto = await ensureCryptoReady();
+    const signed = crypto.signEvent(event, storagePriv);
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080'
+    ];
+    const pool = new SimplePool();
+    await Promise.all(pool.publish(relays, signed));
+    pool.close(relays);
+    return { eventId: signed.id };
+  },
+
+  // Assemble current state from PRE streams (author-only fetch by storage pubkey)
+  assembleStateFromAuthor: async (params: { username: string; relays: string[] }): Promise<{ identities: any[]; perms: Record<string, string[]> }> => {
+    await ensureCryptoReady();
+    const { username, relays } = params;
+    const session = activeSessions.get(username);
+    if (!session?.storagePrivateKey) throw new Error('Storage key not available');
+    
+    const storagePriv = session.storagePrivateKey;
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+    const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
+
+    // All PRE events are signed by storage key (deterministic from xpriv)
+    const pool = new SimplePool();
+    const filter: Filter = { kinds: [30078], authors: [storagePublicKey], limit: 500 };
+    const events = await pool.querySync(relays, filter);
+    pool.close(relays);
+
+    // Group latest by d-tag
+    const latestByD = new Map<string, any>();
+    for (const ev of events) {
+      const d = (ev.tags.find(t => t[0] === 'd')?.[1]) || '';
+      if (!d) continue;
+      const cur = latestByD.get(d);
+      if (!cur || ev.created_at > cur.created_at) latestByD.set(d, ev);
+    }
+
+    const identities: any[] = [];
+    const perms: Record<string, string[]> = {};
+
+    for (const [d, ev] of latestByD.entries()) {
+      try {
+        const plaintext = await nip04DecryptJS(storagePriv as string, storagePublicKey as string, ev.content);
+        const env = JSON.parse(plaintext);
+        if (!verifyEnvelope(env)) continue;
+        if (d.startsWith('np/identity/')) {
+          const { identityId, nickname, path } = env.data || {};
+          identities.push({ identityId, nickname, path });
+        } else if (d.startsWith('np/perm/')) {
+          const { identityId, appId, appPermissions } = env.data || {};
+          const key = `${identityId}:${appId}`;
+          perms[key] = Array.isArray(appPermissions) ? appPermissions : [];
+        }
+      } catch {}
+    }
+
+    return { identities, perms };
+  },
   // Start realtime Nostr subscription for a user's vault
   startNostrSubscription: async (params: { username: string; relays: string[] }): Promise<{ started: boolean }> => {
     await ensureCryptoReady();
@@ -255,11 +409,14 @@ export const handlers = {
     const session = activeSessions.get(username);
     const vault = await vaultDB.getVault(username);
     if (!vault) throw new Error('Vault not found');
-    const pubkey = vault.publicKey;
+    
+    // CRITICAL: Use storagePublicKey for vault events (not personal identity publicKey)
+    const pubkey = vault.storagePublicKey || vault.publicKey;
     const env = getEnvironment();
 
     // Require unlocked storage key for decryption
     const storagePriv = session?.storagePrivateKey;
+    const storagePub = session?.storagePublicKey || pubkey;
     if (!storagePriv) {
       throw new Error('Storage key not available. Unlock required.');
     }
@@ -272,63 +429,118 @@ export const handlers = {
       nostrSubscriptions.delete(username);
     }
 
+    // Try realtime subscription first; fall back to polling on error
+    try {
     const pool = new SimplePool();
-    const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
-    const filter: Filter = { kinds: [30078], authors: [pubkey], '#d': [dTag] };
+    const filter: Filter = { kinds: [30078], authors: [pubkey] };
 
-    console.log('📡 [Worker] Subscribing to Nostr vault events:', { username, pubkey, dTag, relays });
+    console.log('📡 [Worker] Subscribing to Nostr (author PRE):', { username, pubkey: pubkey.slice(0, 16), relaysCount: relays.length });
 
-    const sub = (pool as any).subscribeMany ? (pool as any).subscribeMany(relays, [filter]) : (pool as any).sub(relays, [filter]);
+      const sub: any = (pool as any).subscribeMany
+        ? (pool as any).subscribeMany(relays, [filter])
+        : (pool as any).sub(relays as any, [filter]);
+
     const onEvent = async (ev: NostrEvent) => {
       try {
-        // Prefer decrypt path; fallback to JSON parse for legacy (will be ignored by version rules)
+          const d = (ev.tags.find(t => t[0] === 'd')?.[1]) || '';
+          if (!d) return;
+
+          // Identity PRE stream
+          if (d.startsWith('np/identity/')) {
+            console.log('📥 [Worker] Received identity PRE event:', { d: d.slice(0, 30), eventId: ev.id.slice(0, 8) });
+            try {
+              const plaintext = await nip04DecryptJS(storagePriv as string, storagePub as string, ev.content);
+              const env = JSON.parse(plaintext);
+              if (!verifyEnvelope(env)) {
+                console.warn('⚠️ [Worker] Identity envelope verification failed');
+                return;
+              }
+              const { identityId, nickname, path } = env.data || {};
+              if (!path) {
+                console.warn('⚠️ [Worker] Identity event missing path');
+                return;
+              }
+              const local = await vaultDB.getVault(username);
+              const identities = [...(local?.identities || [])];
+              const existingIdx = identities.findIndex((i: any) => i?.path === path);
+              if (existingIdx >= 0) {
+                // Update nickname if changed
+                if (nickname && identities[existingIdx]?.nickname !== nickname) {
+                  console.log('📝 [Worker] Updating identity nickname:', { path, oldNickname: identities[existingIdx].nickname, newNickname: nickname });
+                  identities[existingIdx] = { ...identities[existingIdx], nickname };
+                  await handlers.updateVaultData({ username, vaultData: { ...local, identities }, skipVersionIncrement: true });
+                  console.log('✅ [Worker] Identity updated');
+                } else {
+                  console.log('ℹ️ [Worker] Identity already exists with same nickname, skipping');
+                }
+              } else {
+                console.log('📝 [Worker] Adding new identity:', { nickname, path });
+                identities.push({ nickname, path, index: identities.length, createdAt: Date.now() });
+                await handlers.updateVaultData({ username, vaultData: { ...local, identities }, skipVersionIncrement: true });
+                console.log('✅ [Worker] New identity added');
+              }
+            } catch (e) {
+              console.error('❌ [Worker] Failed to process identity PRE event:', e);
+            }
+            return;
+          }
+
+          // Legacy/full-vault stream (initial snapshot or older clients)
+          if (d.startsWith(`nostrpass.com_vault_`)) {
         let remote: VaultData | null = null;
         try {
-          const plaintext = await nip04DecryptJS(storagePriv as string, pubkey, ev.content);
+              const plaintext = await nip04DecryptJS(storagePriv as string, storagePub as string, ev.content);
           remote = JSON.parse(plaintext) as VaultData;
-        } catch {
-          try { remote = JSON.parse(ev.content) as VaultData; } catch { remote = null; }
-        }
+            } catch { remote = null; }
         if (!remote) return;
-
         const local = await vaultDB.getVault(username);
         const remoteVersion = (remote as any).version || 0;
         const localVersion = (local as any)?.version || 0;
         if (remoteVersion > localVersion) {
           console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', { remoteVersion, localVersion });
           await handlers.updateVaultData({ username, vaultData: remote, skipVersionIncrement: true });
-        } else {
-          // Ignore older/same versions
+            }
         }
       } catch (e) {
-        console.warn('⚠️ [Worker] Failed to process incoming Nostr vault event:', e);
+          console.warn('⚠️ [Worker] Failed to process realtime event:', e);
       }
     };
 
-    // Support both subscription interfaces
+      // Attach listeners using whichever API is available
     if (sub && typeof sub.on === 'function') {
       sub.on('event', onEvent);
-      sub.on('eose', () => {
-        console.log('📡 [Worker] Nostr EOSE for', username);
-      });
-      nostrSubscriptions.set(username, { pool, relays, unsub: () => sub.unsub() });
-    } else if (sub && typeof sub === 'object') {
-      // subscribeMany returns an object with onEvent/onEnd in some versions
-      if (typeof sub.onEvent === 'function') sub.onEvent(onEvent);
+        sub.on('eose', () => console.log('📡 [Worker] Nostr EOSE for', username));
+        nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.unsub?.(); } catch {} } });
+      } else if (sub && typeof sub.onEvent === 'function') {
+        sub.onEvent(onEvent);
       if (typeof sub.onEnd === 'function') sub.onEnd(() => console.log('📡 [Worker] Nostr EOSE for', username));
       nostrSubscriptions.set(username, { pool, relays, unsub: () => { try { sub.close?.(); } catch {} } });
     } else {
-      console.warn('⚠️ [Worker] Subscription API not available, falling back to polling');
+        throw new Error('Unknown subscription interface');
+      }
+
+      // Light periodic reconcile (author query) as safety net
+      const key = `${username}`;
+      const reconcile = setInterval(() => {
+        pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });
+      }, 60000) as unknown as number;
+      nostrPollers.set(key, reconcile);
+
+      console.log('✅ [Worker] Realtime subscription active');
+      return { started: true };
+    } catch (subErr) {
+      console.warn('⚠️ [Worker] Realtime subscription failed; falling back to polling:', subErr);
+      const pool = new SimplePool();
       nostrSubscriptions.set(username, { pool, relays, unsub: null });
-      // Fire one immediate poll, then set interval
-      await pollOnceAndApply({ username, relays, pubkey, storagePriv, env });
+      await pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });
       const key = `${username}`;
       const timer = setInterval(() => {
-        pollOnceAndApply({ username, relays, pubkey, storagePriv, env });
+        pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });
       }, 5000) as unknown as number;
       nostrPollers.set(key, timer);
-    }
+      console.log('✅ [Worker] Vault sync polling started (5s interval)');
     return { started: true };
+    }
   },
 
   // Stop realtime Nostr subscription for a user
@@ -1377,10 +1589,101 @@ export const handlers = {
   },
 
   // Check permission for an operation
-  checkPermission: async (params: { method: string; origin?: string; username?: string }): Promise<{ allowed: boolean }> => {
-    // For now, allow all operations from the same origin
-    // This can be enhanced with more granular permission checks
-    return { allowed: true };
+  checkPermission: async (params: { username: string; origin: string; action: 'signEvent' | 'signData' | 'getPublicKey' | 'nip04' | 'getRelays'; eventKind?: number; identityIndex?: number }): Promise<{ allowed: boolean; level: PermissionLevel; needsPrompt: boolean; sessionGranted?: boolean }> => {
+    await ensureCryptoReady();
+    const { username, origin, action, eventKind } = params;
+
+    const vault = await vaultDB.getVault(username);
+    if (!vault || !vault.identities || vault.identities.length === 0) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
+    }
+
+    const identityIndex = Math.max(0, Math.min(
+      (params.identityIndex ?? (vault as any).activeIdentityByApp?.[origin] ?? 0),
+      (vault.identities.length - 1)
+    ));
+    const identity = vault.identities[identityIndex] as any;
+    const appPerms = identity?.appPermissions?.[origin];
+
+    if (!appPerms) {
+      return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
+    }
+
+    const resolveLevel = (level?: PermissionLevel): PermissionLevel => {
+      if (level === 'ALLOW' || level === 'DENY') return level;
+      return 'ASK_EVERYTIME';
+    };
+
+    const determineCategoryLevel = (kind?: number): PermissionLevel => {
+      const kindNumber = kind !== undefined ? Number(kind) : undefined;
+      if (kindNumber !== undefined && !Number.isNaN(kindNumber) && appPerms.kinds) {
+        const explicit = appPerms.kinds[String(kindNumber)] ?? appPerms.kinds[kindNumber];
+        if (explicit) {
+          return resolveLevel(explicit as PermissionLevel);
+        }
+      }
+
+      if (kindNumber !== undefined && !Number.isNaN(kindNumber)) {
+        const entries = Object.entries(PERMISSION_KINDS) as Array<[keyof typeof PERMISSION_KINDS, readonly number[]]>;
+        for (const [category, kinds] of entries) {
+          if (kinds.includes(kindNumber)) {
+            const level = appPerms.permissions?.[category] as PermissionLevel | undefined;
+            if (level) {
+              return resolveLevel(level);
+            }
+          }
+        }
+      }
+
+      return 'ASK_EVERYTIME';
+    };
+
+    let level: PermissionLevel = 'ASK_EVERYTIME';
+
+    switch (action) {
+      case 'getPublicKey':
+        level = resolveLevel(appPerms.getPublicKey as PermissionLevel | undefined);
+        break;
+      case 'signData':
+        // Check nested permissions.signData FIRST (more specific), then fall back to root level
+        level = resolveLevel(
+          (appPerms.permissions?.signData as PermissionLevel | undefined) ??
+          (appPerms.signData as PermissionLevel | undefined)
+        );
+        break;
+      case 'nip04':
+        // Check nested permissions.messaging FIRST (more specific), then fall back to root level
+        level = resolveLevel(
+          (appPerms.permissions?.messaging as PermissionLevel | undefined) ??
+          (appPerms.nip04 as PermissionLevel | undefined)
+        );
+        break;
+      case 'getRelays':
+        // Check nested permissions.financial FIRST (more specific), then fall back to root level
+        level = resolveLevel(
+          (appPerms.permissions?.financial as PermissionLevel | undefined) ??
+          (appPerms.getRelays as PermissionLevel | undefined)
+        );
+        break;
+      case 'signEvent':
+        {
+          const normalizedKind = eventKind !== undefined ? Number(eventKind) : undefined;
+          level = determineCategoryLevel(
+            normalizedKind !== undefined && !Number.isNaN(normalizedKind) ? normalizedKind : undefined
+          );
+        }
+        break;
+      default:
+        level = 'ASK_EVERYTIME';
+    }
+
+    const allowed = level === 'ALLOW';
+    return {
+      allowed,
+      level,
+      needsPrompt: level === 'ASK_EVERYTIME',
+      sessionGranted: false
+    };
   },
 
   // Get app permissions for a specific origin using the active identity for that app
@@ -1437,15 +1740,39 @@ export const handlers = {
     };
     
     // Merge top-level and nested permission categories
+    const basePermissions = {
+      social: (existing.permissions && existing.permissions.social) || 'ASK_EVERYTIME',
+      messaging: (existing.permissions && existing.permissions.messaging) || 'ASK_EVERYTIME',
+      signData: (existing.permissions && existing.permissions.signData) || 'ASK_EVERYTIME',
+      financial: (existing.permissions && existing.permissions.financial) || 'ASK_EVERYTIME',
+    };
+
+    if (permissions.permissions) {
+      Object.assign(basePermissions, permissions.permissions);
+    }
+    if (permissions.social) basePermissions.social = permissions.social;
+    if (permissions.messaging) basePermissions.messaging = permissions.messaging;
+    if (permissions.signData) basePermissions.signData = permissions.signData;
+    if (permissions.financial) basePermissions.financial = permissions.financial;
+    if (permissions.nip04) basePermissions.messaging = permissions.nip04;
+    if (permissions.getRelays) basePermissions.financial = permissions.getRelays;
+
+    const mergedKinds = {
+      ...(existing.kinds || {}),
+      ...(permissions.kinds || {}),
+    };
+
+    // Build clean permission object without legacy root-level fields
     const merged = {
-      ...existing,
-      ...(appName ? { appName } : {}),
+      appId: existing.appId || origin,
+      appName: appName || existing.appName || origin,
+      grantedAt: existing.grantedAt || Date.now(),
       lastUsedAt: Date.now(),
-      ...(permissions.getPublicKey ? { getPublicKey: permissions.getPublicKey } : {}),
-      permissions: {
-        ...existing.permissions,
-        ...(permissions.permissions || {}),
-      },
+      getPublicKey: permissions.getPublicKey ?? existing.getPublicKey ?? 'ASK_EVERYTIME',
+      kinds: Object.keys(mergedKinds).length > 0 ? mergedKinds : existing.kinds,
+      permissions: basePermissions,
+      // Note: Legacy root-level fields (signData, nip04, getRelays) removed
+      // All permission checks now use the nested permissions object
     };
     
     identity.appPermissions[origin] = merged;

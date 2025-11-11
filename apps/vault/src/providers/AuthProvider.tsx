@@ -318,8 +318,7 @@ export const AuthProvider: ParentComponent = (props) => {
     if (!cryptoWorker) return;
     try {
       const { VaultDataService } = await import('../services/vaultDataService');
-      const vaultDataService = VaultDataService.getInstance();
-      const sessionStatus = await vaultDataService.getSessionStatus();
+      const sessionStatus = await VaultDataService.getInstance().getSessionStatus();
       if (sessionStatus.sessionId && sessionStatus.username) {
         localStorage.setItem('vaultsession', sessionStatus.sessionId);
         localStorage.setItem('last-username', sessionStatus.username);
@@ -384,7 +383,39 @@ export const AuthProvider: ParentComponent = (props) => {
           activeIndex = (vaultData as any).identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
         }
         if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {
-          throw new Error('No active identity selected for this application');
+          // Instead of throwing, trigger account picker
+          const requestId = `account-picker-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+          return new Promise((resolve, reject) => {
+            const handleSelected = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === requestId) {
+                cleanup();
+                resolve(ce.detail.identityIndex);
+              }
+            };
+
+            const handleRejected = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === requestId) {
+                cleanup();
+                reject(new Error(ce.detail.error || 'Account selection cancelled'));
+              }
+            };
+
+            const cleanup = () => {
+              window.removeEventListener('account-picker-selected', handleSelected as EventListener);
+              window.removeEventListener('account-picker-rejected', handleRejected as EventListener);
+            };
+
+            window.addEventListener('account-picker-selected', handleSelected as EventListener);
+            window.addEventListener('account-picker-rejected', handleRejected as EventListener);
+
+            // Trigger account picker
+            window.dispatchEvent(new CustomEvent('vault-account-picker', {
+              detail: { appOrigin: origin, requestId }
+            }));
+          });
         }
         const identity = (vaultData as any).identities[activeIndex];
         if (!identity?.appPermissions || !identity.appPermissions[appKey]) {
@@ -986,37 +1017,8 @@ export const AuthProvider: ParentComponent = (props) => {
         console.error('❌ [CREATE ACCOUNT] Failed to save to Nostr:', error);
       }
 
-      // Step 12: Set up Nostr subscription for real-time vault updates
-      console.log('🔔 [CREATE ACCOUNT] Step 12: Setting up Nostr subscription...');
-      try {
-        const { VaultDataService } = await import('../services/vaultDataService');
-        const vaultDataService = VaultDataService.getInstance();
-        
-        // Get storagePrivateKey from the session (it was derived during unlockVault)
-        const session = await cryptoWorker.getSession({ username });
-        if (!session?.storagePrivateKey) {
-          throw new Error('Storage private key not available in session');
-        }
-        
-        await vaultDataService.subscribeToVaultUpdates(
-          username,
-          storagePublicKey,
-          session.storagePrivateKey,
-          (updatedVaultData) => {
-            console.log('🔔 [CREATE ACCOUNT] Received real-time vault update:', {
-              identities: updatedVaultData.identities?.length || 0,
-              updatedAt: new Date(updatedVaultData.updatedAt || 0).toISOString()
-            });
-            
-            // Update the vault data in the crypto worker
-            cryptoWorker.updateVaultData({ username, vaultData: updatedVaultData })
-              .catch((error: any) => console.error('Failed to update vault data in worker:', error));
-          }
-        );
-        console.log('✅ [CREATE ACCOUNT] Nostr subscription active');
-      } catch (subscriptionError) {
-        console.warn('⚠️ [CREATE ACCOUNT] Failed to set up Nostr subscription (non-critical):', subscriptionError);
-      }
+      // Step 12: Realtime will start after unlock via worker
+      console.log('🔔 [CREATE ACCOUNT] Step 12: Realtime will start after unlock');
 
       // Step 13: Send auth status
       console.log('📡 [CREATE ACCOUNT] Step 13: Sending auth status to parent...');
@@ -1345,22 +1347,8 @@ export const AuthProvider: ParentComponent = (props) => {
             throw new Error('Storage private key not available in session');
           }
           
-          await vaultDataService.subscribeToVaultUpdates(
-            username,
-            storagePublicKey,
-            session.storagePrivateKey,
-            (updatedVaultData) => {
-              console.log('🔔 [LOGIN] Received real-time vault update:', {
-                identities: updatedVaultData.identities?.length || 0,
-                updatedAt: new Date(updatedVaultData.updatedAt || 0).toISOString()
-              });
-              
-              // Update the vault data in the crypto worker
-              cryptoWorker.updateVaultData({ username, vaultData: updatedVaultData })
-                .catch((error: any) => console.error('Failed to update vault data in worker:', error));
-            }
-          );
-          console.log('✅ [LOGIN] Nostr subscription active');
+          // Worker-based author-only subscription is started after unlock
+          console.log('ℹ️ [LOGIN] Realtime subscription will start after unlock');
 
           // One-time catch-up: fetch latest vault via storage key and update if newer
           try {
@@ -1442,15 +1430,7 @@ export const AuthProvider: ParentComponent = (props) => {
         await cryptoWorker.stopNostrSubscription({ username: currentUser.profile.username });
       } catch {}
       
-      // Stop Nostr subscription
-      try {
-        const { VaultDataService } = await import('../services/vaultDataService');
-        const vaultDataService = VaultDataService.getInstance();
-        await vaultDataService.unsubscribeFromVaultUpdates(currentUser.profile.username);
-        console.log('🔕 [LOGOUT] Unsubscribed from Nostr vault updates');
-      } catch (error) {
-        console.warn('⚠️ [LOGOUT] Failed to unsubscribe from Nostr:', error);
-      }
+      // Worker-based sub already stopped; nothing else to do
       
       try {
         // Logout from worker (clears in-memory session)
@@ -1635,62 +1615,10 @@ export const AuthProvider: ParentComponent = (props) => {
       // This allows us to decrypt encrypted vault events that were published earlier
       console.log('🔄 [UNLOCK] Re-fetching vault from Nostr with storage key...');
       try {
-        const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
-        
         // Derive storage keypair to decrypt Nostr events
-        const storageKeypair = await cryptoWorker.deriveKeypairFromXpriv({
-          xpriv,
-          index: 8907 // STORAGE_INDEX
-        });
+        await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index: 8907 }); // STORAGE_INDEX
         
-        const storagePrivateKey = storageKeypair.privateKey;
-        const remoteVault = await getVaultFromNostr(
-          currentUser.publicKey,
-          getRelays(),
-          storagePrivateKey // Now we have the storage key!
-        );
-        
-        if (remoteVault) {
-          const remoteVersion = remoteVault.version || 0;
-          const localVersion = freshVaultData.version || 0;
-          
-          const remoteUpdatedAt = Number(remoteVault.updatedAt || 0);
-          const localUpdatedAt = Number(freshVaultData.updatedAt || 0);
-          console.log('🔍 [UNLOCK] Comparing vault versions:', {
-            remoteVersion,
-            localVersion,
-            remoteIdentitiesCount: remoteVault.identities?.length || 0,
-            localIdentitiesCount: freshVaultData.identities?.length || 0,
-            remoteUpdatedAt,
-            localUpdatedAt,
-            shouldUpdateByVersion: remoteVersion > localVersion,
-            shouldUpdateByTime: remoteVersion === localVersion && remoteUpdatedAt > localUpdatedAt
-          });
-          
-          if (remoteVersion > localVersion || (remoteVersion === localVersion && remoteUpdatedAt > localUpdatedAt)) {
-            console.log('✅ [UNLOCK] Remote vault is newer (v' + remoteVersion + ' > v' + localVersion + '), updating local...');
-            
-            // Update local vault with remote data
-            // Skip version increment since we're downloading, not creating new changes
-            await cryptoWorker.updateVaultData({
-              username: currentUser.profile.username,
-              vaultData: remoteVault,
-              skipVersionIncrement: true
-            });
-            
-            // Broadcast refresh to other tabs/components
-            // Broadcast vault data refresh
-            window.dispatchEvent(new CustomEvent('vault-data-refresh', {
-              detail: { username: currentUser.profile.username, source: 'nostr' }
-            }));
-            
-            console.log('✅ [UNLOCK] Local vault updated with Nostr data');
-          } else if (remoteVersion < localVersion) {
-            console.log('ℹ️ [UNLOCK] Local vault is newer (v' + localVersion + ' > v' + remoteVersion + '), keeping local');
-          } else {
-            console.log('ℹ️ [UNLOCK] Vaults are at same version (v' + localVersion + '), keeping local');
-          }
-        }
+        // PRE model: blob fetch deprecated; state hydration handled below
       } catch (nostrError) {
         console.warn('⚠️ [UNLOCK] Failed to fetch from Nostr (non-critical):', nostrError);
       }
@@ -1702,6 +1630,28 @@ export const AuthProvider: ParentComponent = (props) => {
       
       // Start realtime subscription now that we have storage key in session
       await startRealtime(currentUser.profile.username);
+
+      // Hydrate from PRE streams (author-only) and reconcile
+      try {
+        const relays = getRelays();
+        const assembled = await cryptoWorker.assembleStateFromAuthor({ username: currentUser.profile.username, relays });
+        if (assembled && Array.isArray(assembled.identities)) {
+          const local = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+          const localCount = local?.identities?.length || 0;
+          const remoteCount = assembled.identities.length || 0;
+          if (remoteCount > localCount) {
+            await cryptoWorker.updateVaultData({
+              username: currentUser.profile.username,
+              vaultData: { ...(local || {}), identities: assembled.identities },
+              skipVersionIncrement: true
+            });
+            window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: { username: currentUser.profile.username, source: 'nostr-pre' } }));
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ [UNLOCK] PRE hydrate failed (non-critical):', e);
+      }
+
       console.log('🎉 [UNLOCK] Vault unlock complete!');
       return true;
     } catch (error) {

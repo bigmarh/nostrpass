@@ -11,6 +11,10 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { generateSecretKey } from 'nostr-tools';
 import { npubEncode } from 'nostr-tools/nip19';
+import { getEnvironment } from './config';
+
+// Export configuration system
+export * from './config';
 
 // Export user data helpers
 export * from './userDataHelpers';
@@ -20,27 +24,6 @@ export * from './vaultHelpers';
 
 export function hello() {
   return 'Hello from @nostrpass/nostr';
-}
-
-/**
- * Get the current environment from NODE_ENV or default to development
- * @returns Environment string (development, staging, production)
- */
-export function getEnvironment(): string {
-  // In browser environments, we might need to detect differently
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV) {
-    return process.env.NODE_ENV;
-  }
-  
-  // For Vite/browser, check import.meta.env
-  if (typeof globalThis !== 'undefined' && typeof (globalThis as any).window !== 'undefined') {
-    // In browser, we'll default to development
-    // You can customize this based on your deployment setup
-    return 'development';
-  }
-  
-  // Default to development
-  return 'development';
 }
 
 /**

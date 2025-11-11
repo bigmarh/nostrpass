@@ -1,5 +1,5 @@
 import { IframeMessenger } from '@nostrpass/messenger';
-import { Msg } from '@nostrpass/types';
+import { Msg, type PermissionLevel } from '@nostrpass/types';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { authHandlers } from './authHandlers';
 import { vaultHandlers } from './vaultHandlers';
@@ -115,7 +115,12 @@ export function setupMessageHandlers(
 export interface MessageHandlerDependencies {
   getUser: () => any;
   getCryptoWorker: () => any;
-  checkPermission: (action: string, origin: string, eventKind?: number) => Promise<boolean>;
+  checkPermission: (
+    action: string,
+    origin: string,
+    eventKind?: number,
+    identityIndex?: number
+  ) => Promise<{ allowed: boolean; level: PermissionLevel; sessionGranted?: boolean }>;
   isVaultLocked: () => boolean;
   getAppIdentityIndex: (origin: string) => Promise<number>;
 }

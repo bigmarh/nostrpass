@@ -3,6 +3,8 @@ import { IframeMessenger } from '@nostrpass/messenger';
 import { setupMessageHandlers } from '../messageHandlers';
 import { useEnvironment } from './EnvironmentProvider';
 import { useAuth } from './AuthProvider';
+import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import type { PermissionLevel } from '@nostrpass/types';
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
@@ -27,6 +29,15 @@ export const MessengerProvider: ParentComponent = (props) => {
       return useAuth();
     } catch {
       return null;
+    }
+  };
+
+  const toAppKey = (origin: string): string => {
+    try {
+      const url = new URL(origin);
+      return sanitizeDomain(url.host);
+    } catch {
+      return sanitizeDomain(origin);
     }
   };
 
@@ -129,21 +140,30 @@ export const MessengerProvider: ParentComponent = (props) => {
     const deps = {
       getUser: () => auth.user(),
       getCryptoWorker: () => (auth as any).cryptoWorker || null,
-      checkPermission: async (action: string, origin: string, eventKind?: number) => {
+      checkPermission: async (action: string, origin: string, eventKind?: number, identityIndex?: number) => {
+        const fallback: { allowed: boolean; level: PermissionLevel; sessionGranted?: boolean } = {
+          allowed: false,
+          level: 'ASK_EVERYTIME'
+        };
         try {
           const cw = (auth as any).cryptoWorker;
           const current = auth.user();
-          if (!cw || !current) return false;
-          const appKey = origin; // already sanitized by middleware
+          if (!cw || !current) return fallback;
+          const appKey = toAppKey(origin);
           const result = await cw.checkPermission({
             username: current.profile.username,
             origin: appKey,
             action,
-            eventKind
+            eventKind,
+            identityIndex
           });
-          return !!result?.granted || result?.level === 'ALLOW' || result?.sessionGranted === true;
+          return {
+            allowed: !!result?.allowed,
+            level: (result?.level as PermissionLevel) ?? (result?.allowed ? 'ALLOW' : 'ASK_EVERYTIME'),
+            sessionGranted: result?.sessionGranted === true
+          };
         } catch {
-          return false;
+          return fallback;
         }
       },
       isVaultLocked: () => auth.isVaultLocked(),
@@ -152,13 +172,45 @@ export const MessengerProvider: ParentComponent = (props) => {
         const current = auth.user();
         if (!cw || !current) throw new Error('Crypto not ready');
         const vaultData = await cw.getVaultData({ username: current.profile.username });
-        const appKey = origin; // middleware provides sanitized key
+        const appKey = toAppKey(origin);
         let activeIndex = vaultData.activeIdentityByApp?.[appKey];
         if (activeIndex === undefined || activeIndex === null) {
           activeIndex = vaultData.identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
         }
         if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {
-          throw new Error('No active identity selected for this application');
+          // Instead of throwing, trigger account picker
+          const requestId = `account-picker-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+          return new Promise((resolve, reject) => {
+            const handleSelected = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === requestId) {
+                cleanup();
+                resolve(ce.detail.identityIndex);
+              }
+            };
+
+            const handleRejected = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === requestId) {
+                cleanup();
+                reject(new Error(ce.detail.error || 'Account selection cancelled'));
+              }
+            };
+
+            const cleanup = () => {
+              window.removeEventListener('account-picker-selected', handleSelected as EventListener);
+              window.removeEventListener('account-picker-rejected', handleRejected as EventListener);
+            };
+
+            window.addEventListener('account-picker-selected', handleSelected as EventListener);
+            window.addEventListener('account-picker-rejected', handleRejected as EventListener);
+
+            // Trigger account picker
+            window.dispatchEvent(new CustomEvent('vault-account-picker', {
+              detail: { appOrigin: origin, requestId }
+            }));
+          });
         }
         return activeIndex;
       }

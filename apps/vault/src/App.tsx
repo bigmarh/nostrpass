@@ -4,6 +4,8 @@ import './index.css';
 import { Router, Route } from '@solidjs/router';
 import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, UnlockVaultOperation } from './components';
 import PermissionPromptController from './components/PermissionPromptController';
+import AccountPickerController from './components/AccountPickerController';
+import SimpleAuthPromptController from './components/SimpleAuthPromptController';
 import { ToastProvider } from './components/Toast';
 import { I18nProvider } from './i18n';
 
@@ -26,6 +28,8 @@ const App: Component = () => {
         <AppProviders>
           <AppContent />
           <PermissionPromptController />
+          <AccountPickerController />
+          <SimpleAuthPromptController />
         </AppProviders>
       </ToastProvider>
     </I18nProvider>

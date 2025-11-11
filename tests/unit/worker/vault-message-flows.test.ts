@@ -2,11 +2,10 @@
  * Unit tests for Vault message flows and handlers
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Msg } from '@nostrpass/types';
 import { authHandlers, vaultHandlers } from '../../../apps/vault/src/messageHandlers';
 
-// Mock dependencies
 const mockCryptoWorker = {
   getPublicKey: vi.fn(),
   signMessageWithSession: vi.fn(),

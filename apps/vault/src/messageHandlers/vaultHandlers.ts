@@ -32,8 +32,8 @@ export const vaultHandlers: MessageHandler[] = [
       const origin = context?.origin || 'unknown';
       
       if (!BYPASS_GATES) {
-        const hasPermission = await deps.checkPermission('getRelays', origin);
-        if (!hasPermission) {
+        const permission = await deps.checkPermission('getRelays', origin);
+        if (!permission.allowed) {
           throw new Error('Permission denied');
         }
       }

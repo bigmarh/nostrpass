@@ -4,6 +4,7 @@ import { Msg } from '@nostrpass/types';
 import { vaultError, ErrorCode } from './errors';
 import { showErrorToast, showSuccessToast } from '../components/Toast';
 import { addAuditEvent } from '../components/AuditLog';
+import { permissionPromptManager } from '../utils/permissionPromptManager';
 
 function originToAppKey(origin: string): string {
   try {
@@ -26,44 +27,59 @@ export const authHandlers: MessageHandler[] = [
 
       // Get origin from context
       const origin = context?.origin || 'unknown';
-      
-      const hasPermission = await deps.checkPermission('getPublicKey', origin);
-      if (!hasPermission) {
-        try {
-          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
-            detail: {
-              appOrigin: origin,
-              appName: data?.appName,
-              action: 'getPublicKey',
-              identityIndex: data?.identityIndex
-            }
-          }));
-        } catch {}
-        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
-      }
 
-      // Require explicit identityIndex and validate authorization for this origin
       const requestedIndex = data?.identityIndex;
       if (requestedIndex === undefined || requestedIndex === null) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
+
+      // Validate identity authorization FIRST (before permission check)
       const cryptoWorker = deps.getCryptoWorker();
       if (!cryptoWorker || !currentUser.profile?.username) {
         throw vaultError(ErrorCode.INTERNAL, 'Crypto not ready');
       }
+
       const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
       const appKey = originToAppKey(origin);
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
+
+      // Check if requested identity matches authorized identity for this origin
       if (requestedIndex !== authorizedIndex) {
         throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
       }
+
       const appIdentity = vaultData?.identities?.[requestedIndex];
-      if (!appIdentity?.appPermissions || !appIdentity.appPermissions[appKey]) {
-        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Selected identity is not authorized for this application');
+      if (!appIdentity) {
+        throw vaultError(ErrorCode.INTERNAL, 'Identity not found');
       }
+
+      // Now check permissions (may trigger async prompt)
+      const permissionResult = await deps.checkPermission('getPublicKey', origin, undefined, requestedIndex);
+
+      if (!permissionResult.allowed) {
+        // Request permission with async wait for user response
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: data?.appName,
+            action: 'getPublicKey',
+            identityIndex: requestedIndex
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+
+          // Permission granted, proceed (will be checked again on next line)
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
+        }
+      }
+
+      // Verify the identity has public key
       if (appIdentity?.publicKey) {
         showSuccessToast('Public Key Retrieved', `Public key provided to ${data?.appName || 'app'}`);
-        
+
         // Log audit event
         addAuditEvent({
           type: 'permission',
@@ -74,7 +90,7 @@ export const authHandlers: MessageHandler[] = [
           identityIndex: requestedIndex,
           severity: 'low'
         });
-        
+
         return appIdentity.publicKey;
       }
       throw vaultError(ErrorCode.INTERNAL, 'No identity available');
@@ -86,7 +102,7 @@ export const authHandlers: MessageHandler[] = [
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
-      
+
       if (!currentUser || !cryptoWorker) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
       }
@@ -97,39 +113,48 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Session rehydrated without keys; unlock with PIN');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
-      
-      const eventKind = data.event?.kind;
-      const hasPermission = await deps.checkPermission('signEvent', origin, eventKind);
-      if (!hasPermission) {
-        try {
-          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
-            detail: {
-              appOrigin: origin,
-              appName: data?.appName,
-              action: 'signEvent',
-              eventKind,
-              identityIndex: data?.identityIndex
-            }
-          }));
-        } catch {}
-        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
-      }
-
       // Check if vault is locked
       if (deps.isVaultLocked()) {
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Require explicit identity and validate authorization
+      // Get origin from context
+      const origin = context?.origin || 'unknown';
+
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
+
+      // Validate identity authorization FIRST
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
         throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
+      }
+
+      // Now check permissions (may trigger async prompt)
+      const eventKind = data.event?.kind;
+      const permissionResult = await deps.checkPermission('signEvent', origin, eventKind, identityIndex);
+
+      if (!permissionResult.allowed) {
+        // Request permission with async wait for user response
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: data?.appName,
+            action: 'signEvent',
+            eventKind,
+            identityIndex
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+
+          // Permission granted, proceed
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
+        }
       }
 
       // Use session-based signing in worker with the correct identity
@@ -149,7 +174,7 @@ export const authHandlers: MessageHandler[] = [
     handler: async (data: { data: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
-      
+
       if (!currentUser || !cryptoWorker) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
       }
@@ -160,37 +185,45 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Session rehydrated without keys; unlock with PIN');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
-      
-      const hasPermission2 = await deps.checkPermission('signData', origin);
-      if (!hasPermission2) {
-        try {
-          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
-            detail: {
-              appOrigin: origin,
-              appName: (data as any)?.appName,
-              action: 'signData',
-              identityIndex: (data as any)?.identityIndex
-            }
-          }));
-        } catch {}
-        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
-      }
-
       // Check if vault is locked
       if (deps.isVaultLocked()) {
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Require explicit identity and validate authorization
+      // Get origin from context
+      const origin = context?.origin || 'unknown';
+
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
+
+      // Validate identity authorization FIRST
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
         throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
+      }
+
+      // Now check permissions (may trigger async prompt)
+      const permissionResult2 = await deps.checkPermission('signData', origin, undefined, identityIndex);
+      if (!permissionResult2.allowed) {
+        // Request permission with async wait for user response
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: (data as any)?.appName,
+            action: 'signData',
+            identityIndex
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+
+          // Permission granted, proceed
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
+        }
       }
 
       // Use session-based signing with correct identity
@@ -202,7 +235,7 @@ export const authHandlers: MessageHandler[] = [
 
       // Return just the signature string (NIP-07 format)
       showSuccessToast('Event Signed', `Event signed for ${data?.appName || 'app'}`);
-      
+
       // Log audit event
       addAuditEvent({
         type: 'crypto',
@@ -213,7 +246,7 @@ export const authHandlers: MessageHandler[] = [
         identityIndex: identityIndex,
         severity: 'medium'
       });
-      
+
       return signature;
     }
   },
@@ -223,7 +256,7 @@ export const authHandlers: MessageHandler[] = [
     handler: async (data: { plaintext: string; recipientPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
-      
+
       if (!currentUser || !cryptoWorker) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
       }
@@ -234,37 +267,45 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Session rehydrated without keys; unlock with PIN');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
-      
-      const hasPermission3 = await deps.checkPermission('nip04', origin);
-      if (!hasPermission3) {
-        try {
-          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
-            detail: {
-              appOrigin: origin,
-              appName: (data as any)?.appName,
-              action: 'nip04',
-              identityIndex: (data as any)?.identityIndex
-            }
-          }));
-        } catch {}
-        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
-      }
-
       // Check if vault is locked
       if (deps.isVaultLocked()) {
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Require explicit identity and validate authorization
+      // Get origin from context
+      const origin = context?.origin || 'unknown';
+
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
+
+      // Validate identity authorization FIRST
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
         throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
+      }
+
+      // Now check permissions (may trigger async prompt)
+      const permissionResult3 = await deps.checkPermission('nip04', origin, undefined, identityIndex);
+      if (!permissionResult3.allowed) {
+        // Request permission with async wait for user response
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: (data as any)?.appName,
+            action: 'nip04',
+            identityIndex
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+
+          // Permission granted, proceed
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
+        }
       }
 
       // Use app-specific identity for encryption
@@ -285,27 +326,9 @@ export const authHandlers: MessageHandler[] = [
     handler: async (data: { ciphertext: string; senderPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
-      
+
       if (!currentUser || !cryptoWorker) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
-      }
-
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
-      
-      const hasPermission4 = await deps.checkPermission('nip04', origin);
-      if (!hasPermission4) {
-        try {
-          window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
-            detail: {
-              appOrigin: origin,
-              appName: (data as any)?.appName,
-              action: 'nip04',
-              identityIndex: (data as any)?.identityIndex
-            }
-          }));
-        } catch {}
-        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
       }
 
       // Check if vault is locked
@@ -313,14 +336,40 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Require explicit identity and validate authorization
+      // Get origin from context
+      const origin = context?.origin || 'unknown';
+
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
+
+      // Validate identity authorization FIRST
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
       if (identityIndex !== authorizedIndex) {
         throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
+      }
+
+      // Now check permissions (may trigger async prompt)
+      const permissionResult4 = await deps.checkPermission('nip04', origin, undefined, identityIndex);
+      if (!permissionResult4.allowed) {
+        // Request permission with async wait for user response
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: (data as any)?.appName,
+            action: 'nip04',
+            identityIndex
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+
+          // Permission granted, proceed
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
+        }
       }
 
       // Use app-specific identity for decryption

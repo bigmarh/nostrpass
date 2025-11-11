@@ -1,8 +1,8 @@
 import { getCryptoWorker } from './cryptoWorkerSingleton';
 import type { VaultData } from '../workers/db';
 import type { Identity } from '@nostrpass/types';
-import { SimplePool, NostrEvent } from 'nostr-tools';
-import NDK from '@nostr-dev-kit/ndk';
+import { SimplePool } from 'nostr-tools';
+// NDK removed: worker handles realtime subscriptions via nostr-tools
 
 export interface VaultDataOptions {
   forceRefresh?: boolean;
@@ -20,7 +20,6 @@ export class VaultDataService {
   
   // Nostr subscription management
   private pool: SimplePool | null = null;
-  private ndk: NDK | null = null;
   private activeSubscriptions = new Map<string, { unsubscribe: any; relays: string[] }>();
   private vaultUpdateCallbacks = new Map<string, Set<(vaultData: VaultData) => void>>();
 
@@ -204,49 +203,8 @@ export class VaultDataService {
    * Sync vault data to Nostr
    */
   async syncToNostr(username: string): Promise<void> {
-    console.log('🔄 [syncToNostr] Called for user:', username);
-    const cryptoWorker = getCryptoWorker();
-    console.log('🔄 [syncToNostr] Crypto worker status:', !!cryptoWorker);
-    if (!cryptoWorker) {
-      console.error('❌ [syncToNostr] Crypto worker not ready');
-      throw new Error('Crypto worker not ready');
-    }
-
-    try {
-      console.log('🔄 [syncToNostr] Starting Nostr sync for user:', username);
-      
-      // Create vault event
-      const vaultEvent = await cryptoWorker.saveVaultToNostr({ username });
-      console.log('✅ Vault event created:', vaultEvent.event.id);
-      
-      // Get relays - prefer user's custom relays if set
-      const { publishEvent } = await import('@nostrpass/nostrHelpers');
-      const { getRelays } = await import('../providers/EnvironmentProvider');
-      const vaultData = await this.getVaultData(username);
-      const relays = vaultData?.customRelays && vaultData.customRelays.length > 0 
-        ? vaultData.customRelays 
-        : getRelays();
-      console.log('📡 Publishing to relays:', relays, vaultData?.customRelays ? '(custom)' : '(default)');
-      
-      // For background syncs, don't use worker for PoW (keeps worker free for user operations)
-      // PoW runs in main thread, but it's OK since this is already a background operation
-      const publishedRelays = await publishEvent(vaultEvent.event, relays);
-      console.log('✅ Vault synced to Nostr successfully:', publishedRelays);
-      
-      // Broadcast vault update to other tabs
-      try {
-        const refreshEvent = new CustomEvent('vault-data-refresh', { 
-          detail: { username, timestamp: Date.now() } 
-        });
-        window.dispatchEvent(refreshEvent);
-        console.log('📡 [syncToNostr] Broadcasted vault update to other tabs');
-      } catch (broadcastError) {
-        console.warn('⚠️ [syncToNostr] Failed to broadcast vault update:', broadcastError);
-      }
-    } catch (error) {
-      console.error('❌ Failed to sync vault to Nostr:', error);
-      throw new Error(`Failed to sync to Nostr: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    // No-op in PRE model; operational changes publish per-stream events directly
+    console.log('ℹ️ [syncToNostr] No-op under PRE model');
   }
 
   /**
@@ -290,20 +248,9 @@ export class VaultDataService {
    * Get vault data from Nostr
    */
   async getVaultFromNostr(username: string): Promise<{ vaultData: any; eventId: string; timestamp: number } | null> {
-    const cryptoWorker = getCryptoWorker();
-    if (!cryptoWorker) {
-      throw new Error('Crypto worker not ready');
-    }
-
-    try {
-      console.log('🔄 Getting vault from Nostr for user:', username);
-      const result = await cryptoWorker.getVaultFromNostr({ username });
-      console.log('✅ Vault retrieved from Nostr:', result ? `event ${result.eventId}` : 'not found');
-      return result;
-    } catch (error) {
-      console.error('❌ Failed to get vault from Nostr:', error);
-      throw new Error(`Failed to get vault from Nostr: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    // PRE model: use author-only PRE assembly via worker instead
+    console.warn('getVaultFromNostr is deprecated under PRE model.');
+    return null;
   }
 
   /**
@@ -404,7 +351,7 @@ export class VaultDataService {
     username: string,
     origin: string,
     permissions: any,
-    appName?: string,
+    _appName?: string,
     identityIndex?: number
   ): Promise<void> {
     const cryptoWorker = getCryptoWorker();
@@ -412,193 +359,51 @@ export class VaultDataService {
       throw new Error('Crypto worker not ready');
     }
 
-    await cryptoWorker.saveAppPermissions({ username, origin, permissions, appName, identityIndex });
+    // Determine active identity path prior to saving
+    const vaultData = await this.getVaultData(username);
+    const identities = vaultData?.identities || [];
+    const idx = typeof identityIndex === 'number' ? identityIndex : 0;
+    const path = identities[idx]?.path || `m/44'/1237'/0'/0/${idx}`;
+
+    // Persist permissions inside the worker/vault
+    await cryptoWorker.saveAppPermissions({
+      username,
+      origin,
+      permissions,
+      appName: _appName,
+      identityIndex: idx
+    });
+
+    // Publish permissions PRE via worker (best effort)
+    try {
+      const latestPermissions = await cryptoWorker.getAppPermissions({
+        username,
+        origin,
+        identityIndex: idx
+      });
+      await (cryptoWorker as any).publishPermissions({
+        username,
+        path,
+        appDomain: origin,
+        permissions: latestPermissions || permissions || {}
+      });
+    } catch (e) {
+      console.warn('[saveAppPermissions] Failed to publish PRE permissions (non-critical):', e);
+    }
     
     // Clear cache to ensure fresh data is loaded next time
     this.clearCache(username);
   }
 
-  /**
-   * Subscribe to real-time vault updates via Nostr using NDK
-   */
-  async subscribeToVaultUpdates(
-    username: string,
-    storagePublicKey: string,
-    storagePrivateKey: string,
-    onUpdate: (vaultData: VaultData) => void
-  ): Promise<void> {
-    console.log('🔔 [subscribeToVaultUpdates] Setting up NDK subscription for:', username);
-    
-    // Initialize NDK if needed
-    if (!this.ndk) {
-      const { getRelays } = await import('../providers/EnvironmentProvider');
-      const relays = getRelays();
-      
-      this.ndk = new NDK({
-        explicitRelayUrls: relays,
-        enableOutboxModel: false
-      });
-      
-      await this.ndk.connect();
-      console.log('🔔 [subscribeToVaultUpdates] NDK connected to relays:', relays);
-    }
+  // NDK subscription removed. Realtime is managed in the worker via nostr-tools.
 
-    // Get relays
-    const { getRelays } = await import('../providers/EnvironmentProvider');
-    const { getEnvironment } = await import('@nostrpass/nostrHelpers');
-    const vaultData = await this.getVaultData(username);
-    const relays = vaultData?.customRelays && vaultData.customRelays.length > 0 
-      ? vaultData.customRelays 
-      : getRelays();
-
-    // Store callback
-    if (!this.vaultUpdateCallbacks.has(username)) {
-      this.vaultUpdateCallbacks.set(username, new Set());
-    }
-    this.vaultUpdateCallbacks.get(username)!.add(onUpdate);
-
-    // If already subscribed, just add the callback
-    if (this.activeSubscriptions.has(username)) {
-      console.log('🔔 [subscribeToVaultUpdates] Already subscribed, adding callback');
-      return;
-    }
-
-    // Set up Nostr filter for vault events
-    const env = getEnvironment();
-    const expectedDTag = `nostrpass.com_vault_${storagePublicKey}_${env}`;
-    
-    const filter = {
-      kinds: [30078], // NIP-78 arbitrary custom app data
-      authors: [storagePublicKey],
-      '#d': [expectedDTag],
-      '#encryption': ['password-aes'] // Only password-encrypted vaults
-    };
-
-    console.log('🔔 [subscribeToVaultUpdates] NDK Filter:', {
-      expectedDTag,
-      storagePublicKey: storagePublicKey.slice(0, 16),
-      relays: relays.length
-    });
-
-    // Subscribe to vault updates using NDK
-    const subscription = this.ndk.subscribe(filter, {
-      closeOnEose: false, // Keep subscription open for real-time updates
-      groupable: false
-    });
-
-    subscription.on('event', (event: any) => {
-      console.log('🔔 [subscribeToVaultUpdates] Received vault event via NDK:', {
-        id: event.id.slice(0, 8),
-        created_at: new Date(event.created_at * 1000).toISOString(),
-        author: event.pubkey.slice(0, 16)
-      });
-
-      // Convert NDK event to NostrEvent format for compatibility
-      const nostrEvent: NostrEvent = {
-        id: event.id,
-        pubkey: event.pubkey,
-        created_at: event.created_at,
-        kind: event.kind,
-        tags: event.tags,
-        content: event.content,
-        sig: event.sig
-      };
-
-      // Decrypt and process the vault update
-      this.handleVaultUpdateEvent(nostrEvent, username, storagePublicKey, storagePrivateKey, relays);
-    });
-
-    // Store subscription info
-    this.activeSubscriptions.set(username, { unsubscribe: () => subscription.stop(), relays });
-    console.log('✅ [subscribeToVaultUpdates] NDK subscription active for:', username);
-  }
-
-  /**
-   * Unsubscribe from vault updates
-   */
-  async unsubscribeFromVaultUpdates(username: string): Promise<void> {
-    console.log('🔕 [unsubscribeFromVaultUpdates] Unsubscribing:', username);
-    
-    const subscription = this.activeSubscriptions.get(username);
-    if (subscription) {
-      subscription.unsubscribe();
-      this.activeSubscriptions.delete(username);
-      console.log('✅ [unsubscribeFromVaultUpdates] Unsubscribed from:', username);
-    }
-
-    // Clear callbacks
-    this.vaultUpdateCallbacks.delete(username);
-  }
-
-  /**
-   * Handle incoming vault update event
-   */
-  private async handleVaultUpdateEvent(
-    event: NostrEvent,
-    username: string,
-    storagePublicKey: string,
-    storagePrivateKey: string,
-    _relays: string[]
-  ): Promise<void> {
-    try {
-      console.log('🔔 [handleVaultUpdateEvent] Processing vault update...');
-      
-      // Decrypt the vault data using storagePrivateKey (NIP-04)
-      const { decrypt } = await import('nostr-tools/nip04');
-      const decryptedContent = await decrypt(storagePrivateKey, storagePublicKey, event.content);
-      const vaultData = JSON.parse(decryptedContent) as VaultData;
-      
-      console.log('✅ [handleVaultUpdateEvent] Decrypted vault update:', {
-        identities: vaultData.identities?.length || 0,
-        updatedAt: new Date(vaultData.updatedAt || 0).toISOString()
-      });
-
-      // Update local cache
-      this.cache.set(username, { data: vaultData, timestamp: Date.now() });
-
-      // Update crypto worker
-      const cryptoWorker = getCryptoWorker();
-      if (cryptoWorker) {
-        await cryptoWorker.updateVaultData({ username, vaultData });
-      }
-
-      // Notify all callbacks
-      const callbacks = this.vaultUpdateCallbacks.get(username);
-      if (callbacks) {
-        callbacks.forEach(callback => {
-          try {
-            callback(vaultData);
-          } catch (error) {
-            console.error('❌ [handleVaultUpdateEvent] Callback error:', error);
-          }
-        });
-      }
-
-      // Also broadcast to other tabs (redundant but ensures compatibility)
-      try {
-        const refreshEvent = new CustomEvent('vault-data-refresh', { 
-          detail: { username, timestamp: Date.now(), source: 'nostr' } 
-        });
-        window.dispatchEvent(refreshEvent);
-        console.log('📡 [handleVaultUpdateEvent] Broadcasted to other tabs');
-      } catch (broadcastError) {
-        console.warn('⚠️ [handleVaultUpdateEvent] Failed to broadcast:', broadcastError);
-      }
-
-    } catch (error) {
-      console.error('❌ [handleVaultUpdateEvent] Failed to process vault update:', error);
-    }
-  }
+  // Legacy handler removed
 
   /**
    * Get subscription status
    */
-  getSubscriptionStatus(username: string): { isSubscribed: boolean; relays: string[] } {
-    const subscription = this.activeSubscriptions.get(username);
-    return {
-      isSubscribed: !!subscription,
-      relays: subscription?.relays || []
-    };
+  getSubscriptionStatus(_username: string): { isSubscribed: boolean; relays: string[] } {
+    return { isSubscribed: false, relays: [] };
   }
 
   /**
@@ -632,16 +437,7 @@ export class VaultDataService {
       }
     }
     
-    // Close NDK
-    if (this.ndk) {
-      try {
-        // NDK doesn't have a destroy method, just clear the reference
-        this.ndk = null;
-        console.log('✅ [cleanup] Cleared NDK reference');
-      } catch (error) {
-        console.error('❌ [cleanup] Failed to clear NDK:', error);
-      }
-    }
+    // NDK removed
   }
 }
 

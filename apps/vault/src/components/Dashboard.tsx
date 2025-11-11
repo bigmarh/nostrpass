@@ -1098,13 +1098,13 @@ export const Dashboard: Component = () => {
                     <hr class="border-gray-300 dark:border-gray-700" />
                     <main>
                         {/* Identity list */}
-                        <div class="flex flex-col gap-2 p-4">
+                        <div class="flex flex-col gap-2 p-4 relative">
                             <header class="flex justify-between items-center">
                                 <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
                                 <div class="flex gap-2">
-                                    <button 
-                                        class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" 
-                                        onClick={() => loadVaultData(true)} 
+                                    <button
+                                        class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300"
+                                        onClick={() => loadVaultData(true)}
                                         title="Refresh vault data"
                                     >
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1118,6 +1118,31 @@ export const Dashboard: Component = () => {
                                     </button>
                                 </div>
                             </header>
+
+                            {/* Lock overlay when vault is locked */}
+                            <Show when={isVaultLocked()}>
+                                <div class="absolute inset-0 bg-gray-100/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-lg flex flex-col items-center justify-center z-10 p-8">
+                                    <div class="flex flex-col items-center gap-4 text-center">
+                                        <svg class="w-16 h-16 text-gray-400 dark:text-gray-500" fill="currentColor" viewBox="0 0 24 24">
+                                            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 3a5 5 0 0 1 5 5v2.005c.77.015 1.246.07 1.635.268a2.5 2.5 0 0 1 1.092 1.092C20 11.9 20 12.6 20 14v3c0 1.4 0 2.1-.273 2.635a2.5 2.5 0 0 1-1.092 1.092C18.1 21 17.4 21 16 21H8c-1.4 0-2.1 0-2.635-.273a2.5 2.5 0 0 1-1.093-1.092C4 19.1 4 18.4 4 17v-3c0-1.4 0-2.1.272-2.635a2.5 2.5 0 0 1 1.093-1.092c.389-.199.865-.253 1.635-.268V8a5 5 0 0 1 5-5m3 5v2H9V8a3 3 0 1 1 6 0" />
+                                        </svg>
+                                        <div>
+                                            <h3 class="text-xl font-bold text-gray-700 dark:text-gray-300 mb-2">
+                                                Vault Locked
+                                            </h3>
+                                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                                                Unlock your vault to view and manage identities
+                                            </p>
+                                            <button
+                                                onClick={toggleVaultLock}
+                                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                                            >
+                                                Unlock Vault
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </Show>
 
                             <For each={filteredIdentities()}>
                                 {(identity) => (
@@ -1546,6 +1571,13 @@ export const Dashboard: Component = () => {
                                         // Save locally first (fast)
                                         await updateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: false });
                                         console.log('✅ [Add Identity] Saved locally');
+                                        
+                                        // Publish identity meta as PRE (non-blocking)
+                                        try {
+                                          await cryptoWorker!.publishIdentityMeta({ username: currentUser.profile.username, nickname: identity.nickname, path: identity.path });
+                                        } catch (e) {
+                                          console.warn('⚠️ [Add Identity] Failed to publish identity PRE:', e);
+                                        }
                                         
                                         setShowAddIdentityModal(false);
                                         setNewIdentityNickname('');

@@ -1,6 +1,6 @@
 import { SimplePool, Event as NostrEvent, Filter } from 'nostr-tools';
 import { finalizeEvent, getPublicKey as nostrGetPublicKey } from 'nostr-tools/pure';
-import { getEnvironment } from './index';
+import { getEnvironment, getNamespace } from './config';
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 
@@ -67,12 +67,13 @@ export async function saveLoginObj(
     const pubkeyToUse = derivedPublicKey || randomPublicKey;
 
     // Create login event with random key for privacy
+    const namespace = getNamespace();
     const loginEvent: Partial<NostrEvent> = {
       kind: 30078,
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['d', `nostrpass.com_login_${hash(username)}_${getEnvironment()}`],
-        ['client', 'nostrpass.com'],
+        ['d', `${namespace}_login_${hash(username)}_${getEnvironment()}`],
+        ['client', namespace],
         ['subject', 'login-lookup'],
       ],
       content: loginContent,
@@ -117,11 +118,12 @@ export async function getLoginObj(
 ): Promise<LoginObj | null> {
   try {
     const pool = new SimplePool();
-    
+    const namespace = getNamespace();
+
     // Create filter for login event
     const filter: Filter = {
       kinds: [30078],
-      '#d': [`nostrpass.com_login_${hash(username)}_${environment}`],
+      '#d': [`${namespace}_login_${hash(username)}_${environment}`],
       limit: 1
     };
 
@@ -161,14 +163,15 @@ export async function saveVaultObj(
     const encryptedContent = await encrypt(passwordKey, storagePublicKey, vaultJson);
     
     console.log('🔐 [saveVaultObj] VaultObj encrypted with password key');
-    
+
+    const namespace = getNamespace();
     // Create vault event with storage key as author
     const vaultEvent: Partial<NostrEvent> = {
       kind: 30078,
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['d', `nostrpass.com_vault_${storagePublicKey}_${getEnvironment()}`],
-        ['client', 'nostrpass.com'],
+        ['d', `${namespace}_vault_${storagePublicKey}_${getEnvironment()}`],
+        ['client', namespace],
         ['subject', 'encrypted-vault'],
         ['encryption', 'password-aes'], // Mark as password-encrypted
       ],
@@ -220,76 +223,14 @@ function hash(input: string): string {
  * @returns Event IDs from successful publishes
  */
 export async function saveVaultToNostr(
-  vaultData: VaultData,
-  userPrivateKey: string,
-  userPublicKey: string,
-  relays: string[],
-  passwordKey: string  // Password key for encryption
+  _vaultData: VaultData,
+  _userPrivateKey: string,
+  _userPublicKey: string,
+  _relays: string[],
+  _passwordKey: string  // Password key for encryption
 ): Promise<string[]> {
-  try {
-    // Serialize vault data as JSON
-    const vaultJson = JSON.stringify(vaultData);
-    
-    // CRITICAL: Encrypt vault data with PASSWORD before storing to Nostr
-    // This protects sensitive data (identities, permissions, recovery) from public relays
-    // No circular dependency - password key is derived from user input
-    const { encrypt } = await import('nostr-tools/nip04');
-    const encryptedContent = await encrypt(passwordKey, userPublicKey, vaultJson);
-    
-    console.log('🔐 [saveVaultToNostr] Vault data encrypted with password key');
-
-    // Create replaceable event (NIP-33)
-    const vaultEvent: Partial<NostrEvent> = {
-      kind: 30078, // NIP-78 arbitrary custom app data (replaceable)
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['d', `nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`],
-        ['client', 'nostrpass.com'],
-        ['subject', 'encrypted-vault'],
-        ['encryption', 'password-aes'], // Mark as password-encrypted
-      ],
-      content: encryptedContent, // Use password-encrypted content
-      pubkey: userPublicKey,
-    };
-
-    // Sign the event
-    const signedEvent = finalizeEvent(vaultEvent as any, hexToBytes(userPrivateKey));
-
-    // Publish to relays with individual error handling
-    const pool = new SimplePool();
-    const successfulPublishes: string[] = [];
-    
-    // Try each relay individually
-    for (const relay of relays) {
-      try {
-        await pool.publish([relay], signedEvent);
-        console.log(`✅ Published password-encrypted vault to ${relay}`);
-        successfulPublishes.push(relay);
-      } catch (error: any) {
-        if (error.message?.includes('pow:')) {
-          const powMatch = error.message.match(/pow:\s*(\d+)\s*bits/);
-          const bits = powMatch ? powMatch[1] : 'unknown';
-          console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits):`, error.message);
-        } else {
-          console.error(`❌ Failed to publish to ${relay}:`, error.message);
-        }
-        // Continue to next relay
-      }
-    }
-    
-    if (successfulPublishes.length === 0) {
-      throw new Error('Failed to publish to any relay');
-    }
-    
-    
-    // Don't close the pool - let it be reused or garbage collected
-    // Closing immediately causes WebSocket errors
-    
-    return successfulPublishes;
-  } catch (error) {
-    console.error('Error saving vault to Nostr:', error);
-    throw error; // Throw the original error, not a generic one
-  }
+  console.warn('[saveVaultToNostr] Deprecated under PRE model. Returning empty list.');
+  return [];
 }
 
 /**
@@ -306,68 +247,24 @@ export async function getVaultFromNostr(
 ): Promise<VaultData | null> {
   try {
     const pool = new SimplePool();
-    
     const env = getEnvironment();
-    const expectedDTag = `nostrpass.com_vault_${userPublicKey}_${env}`;
-    
-    console.log('🔍 [getVaultFromNostr] Searching for vault:', {
-      userPublicKey,
-      expectedDTag,
-      env,
-      hasPasswordKey: !!passwordKey
-    });
-    
-    // Query for vault events - get multiple to find the right encryption type
-    const filter: Filter = {
-      kinds: [30078],
-      authors: [userPublicKey],
-      '#d': [expectedDTag],
-      limit: 10 // Get multiple versions
-    };
-
+    const namespace = getNamespace();
+    const expectedDTag = `${namespace}_vault_${userPublicKey}_${env}`;
+    const filter: Filter = { kinds: [30078], authors: [userPublicKey], '#d': [expectedDTag], limit: 10 };
     const events = await pool.querySync(relays, filter);
     pool.close(relays);
-    
-    console.log('🔍 [getVaultFromNostr] Found events:', {
-      count: events.length,
-      eventIds: events.map(e => e.id.slice(0, 8)),
-      eventAuthors: events.map(e => e.pubkey.slice(0, 16)),
-      eventDTags: events.map(e => e.tags.find(t => t[0] === 'd')?.[1]?.slice(0, 40)),
-      encryptionTags: events.map(e => e.tags.find(t => t[0] === 'encryption')?.[1])
-    });
-
-    if (events.length === 0) {
-      return null;
-    }
-
-    // Sort by created_at to get most recent first
+    if (events.length === 0) return null;
     const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
-    
-    // Try to decrypt with password key (for initial vault)
     const { decrypt } = await import('nostr-tools/nip04');
-    
     for (const event of sortedEvents) {
       try {
         const decryptedContent = await decrypt(passwordKey, userPublicKey, event.content);
         const vaultData = JSON.parse(decryptedContent) as VaultData;
-        
-        console.log('✅ [getVaultFromNostr] Retrieved password-encrypted vault from Nostr:', {
-          username: vaultData.username,
-          identitiesCount: vaultData.identities?.length || 0,
-          hasXprivEncrypted: !!vaultData.xprivEncrypted,
-          updatedAt: vaultData.updatedAt ? new Date(vaultData.updatedAt).toISOString() : 'N/A',
-          eventCreatedAt: new Date(event.created_at * 1000).toISOString(),
-          encryption: 'password-aes',
-          eventId: event.id.slice(0, 8)
-        });
         return vaultData;
-      } catch (decryptError) {
-        console.log('⚠️ [getVaultFromNostr] Failed to decrypt with password key, trying next event...');
+      } catch {
         continue;
       }
     }
-    
-    console.error('❌ [getVaultFromNostr] Failed to decrypt any vault events with password key');
     return null;
   } catch (error) {
     console.error('Error retrieving vault from Nostr:', error);
@@ -383,79 +280,12 @@ export async function getVaultFromNostr(
  * @returns Vault data or null if not found
  */
 export async function getVaultFromNostrWithStorageKey(
-  userPublicKey: string,
-  relays: string[],
-  storagePrivateKey: string
+  _userPublicKey: string,
+  _relays: string[],
+  _storagePrivateKey: string
 ): Promise<VaultData | null> {
-  try {
-    const pool = new SimplePool();
-    
-    const env = getEnvironment();
-    const expectedDTag = `nostrpass.com_vault_${userPublicKey}_${env}`;
-    
-    console.log('🔍 [getVaultFromNostrWithStorageKey] Searching for sync vault:', {
-      userPublicKey,
-      expectedDTag,
-      env,
-      hasStoragePrivateKey: !!storagePrivateKey
-    });
-    
-    // Query for vault events with NIP-04 encryption tag
-    const filter: Filter = {
-      kinds: [30078],
-      authors: [userPublicKey],
-      '#d': [expectedDTag],
-      '#encryption': ['nip04'], // Only NIP-04 encrypted vaults (sync operations)
-      limit: 10
-    };
-
-    const events = await pool.querySync(relays, filter);
-    pool.close(relays);
-    
-    console.log('🔍 [getVaultFromNostrWithStorageKey] Found sync events:', {
-      count: events.length,
-      eventIds: events.map(e => e.id.slice(0, 8)),
-      eventAuthors: events.map(e => e.pubkey.slice(0, 16)),
-      eventDTags: events.map(e => e.tags.find(t => t[0] === 'd')?.[1]?.slice(0, 40))
-    });
-
-    if (events.length === 0) {
-      return null;
-    }
-
-    // Sort by created_at to get most recent first
-    const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
-    
-    // Try to decrypt with storage private key
-    const { decrypt } = await import('nostr-tools/nip04');
-    
-    for (const event of sortedEvents) {
-      try {
-        const decryptedContent = await decrypt(storagePrivateKey, userPublicKey, event.content);
-        const vaultData = JSON.parse(decryptedContent) as VaultData;
-        
-        console.log('✅ [getVaultFromNostrWithStorageKey] Retrieved NIP-04 encrypted vault from Nostr:', {
-          username: vaultData.username,
-          identitiesCount: vaultData.identities?.length || 0,
-          hasXprivEncrypted: !!vaultData.xprivEncrypted,
-          updatedAt: vaultData.updatedAt ? new Date(vaultData.updatedAt).toISOString() : 'N/A',
-          eventCreatedAt: new Date(event.created_at * 1000).toISOString(),
-          encryption: 'nip04',
-          eventId: event.id.slice(0, 8)
-        });
-        return vaultData;
-      } catch (decryptError) {
-        console.log('⚠️ [getVaultFromNostrWithStorageKey] Failed to decrypt with storage key, trying next event...');
-        continue;
-      }
-    }
-    
-    console.error('❌ [getVaultFromNostrWithStorageKey] Failed to decrypt any sync vault events with storage key');
-    return null;
-  } catch (error) {
-    console.error('Error retrieving sync vault from Nostr:', error);
-    return null;
-  }
+  console.warn('[getVaultFromNostrWithStorageKey] Deprecated under PRE model. Returning null.');
+  return null;
 }
 
 /**
@@ -470,11 +300,12 @@ export async function vaultExistsOnNostr(
 ): Promise<boolean> {
   try {
     const pool = new SimplePool();
-    
+    const namespace = getNamespace();
+
     const filter: Filter = {
       kinds: [30078],
       authors: [userPublicKey],
-      '#d': [`nostrpass.com_vault_${userPublicKey}_${getEnvironment()}`],
+      '#d': [`${namespace}_vault_${userPublicKey}_${getEnvironment()}`],
       limit: 1
     };
 
@@ -500,12 +331,13 @@ export async function deleteVaultFromNostr(
   relays: string[]
 ): Promise<void> {
   try {
+    const namespace = getNamespace();
     // Create deletion event (NIP-09)
     const deletionEvent: Partial<NostrEvent> = {
       kind: 5, // Deletion
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['e', `nostrpass.com_vault_${getEnvironment()}_${userPublicKey}`],
+        ['e', `${namespace}_vault_${getEnvironment()}_${userPublicKey}`],
         ['k', '30078']
       ],
       content: 'Vault deleted',

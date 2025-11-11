@@ -26,6 +26,7 @@ export default defineConfig({
       '@nostrpass/types': resolve(__dirname, 'packages/types/src'),
       '@nostrpass/messenger': resolve(__dirname, 'packages/messenger/src'),
       '@nostrpass/provider': resolve(__dirname, 'packages/provider/src'),
+      '@nostrpass/embassy/src/embassy': resolve(__dirname, 'apps/embassy/src/embassy.ts'),
       '@nostrpass/nostrHelpers': resolve(__dirname, 'packages/nostrHelpers/src'),
       '@nostrpass/worker-messenger': resolve(__dirname, 'packages/worker-messenger/src')
     }

@@ -203,67 +203,8 @@ export const Login: Component = () => {
             
             setLoadingStatus('Saving vault to Nostr...');
             
-            // Save vault to Nostr - THIS IS CRITICAL FOR LOGIN TO WORK
-            setLoadingStatus('Saving vault to Nostr (required)...');
-            
-            if (!cryptoWorker) {
-                throw new Error('Crypto worker not available');
-            }
-            
-            let retryCount = 0;
-            const maxRetries = 3;
-            let savedSuccessfully = false;
-            
-            while (!savedSuccessfully && retryCount < maxRetries) {
-                try {
-
-                    
-                    // Wait to ensure session is ready
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
-                    
-                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
-                        username: accountData.username
-                    });
-                    
-                    
-                    // Publish the signed event to relays
-                    const { publishEvent } = await import('@nostrpass/nostrHelpers');
-                    await publishEvent(vaultEvent.event, userRelays);
-                    
-                    
-                    // Verify the vault was saved by trying to retrieve it
-                    setLoadingStatus('Verifying vault was saved...');
-                    const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
-                    const verifyVault = await getVaultFromNostr(
-                        vaultEvent.event.pubkey,
-                        userRelays
-                    );
-                    
-                    if (verifyVault) {
-                        savedSuccessfully = true;
-                    } else {
-                        throw new Error('Vault save verification failed');
-                    }
-                    
-                } catch (error) {
-                    retryCount++;
-                    
-                    if (retryCount >= maxRetries) {
-                        // This is critical - signup must fail if we can't save to Nostr
-                        throw new Error(
-                            'Failed to save vault to Nostr after ' + maxRetries + ' attempts. ' +
-                            'Please check your internet connection and try again. ' +
-                            'Error: ' + (error instanceof Error ? error.message : String(error))
-                        );
-                    }
-                    
-                    // Wait before retry
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
-            }
-            
+            // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
-            
             
             // Navigate to dashboard after successful signup
             navigate(`/${params.app}/dashboard`);
@@ -321,71 +262,8 @@ export const Login: Component = () => {
             
             setLoadingStatus('Saving vault to Nostr...');
             
-            // Save vault to Nostr - THIS IS CRITICAL FOR LOGIN TO WORK
-            setLoadingStatus('Saving vault to Nostr (required)...');
-            
-            if (!cryptoWorker) {
-                throw new Error('Crypto worker not available');
-            }
-            
-            let retryCount = 0;
-            const maxRetries = 3;
-            let savedSuccessfully = false;
-            
-            while (!savedSuccessfully && retryCount < maxRetries) {
-                try {
-                    
-                    
-                    // Wait to ensure session is ready
-                    
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second wait
-                    
-                    const vaultEvent = await cryptoWorker.saveVaultToNostr({ 
-                        username: accountData.username
-                    });
-                    
-                    
-                    
-                    // Publish the signed event to relays
-                    const { publishEvent } = await import('@nostrpass/nostrHelpers');
-                    await publishEvent(vaultEvent.event, userRelays);
-                    
-                    
-                    
-                    // Verify the vault was saved by trying to retrieve it
-                    setLoadingStatus('Verifying vault was saved...');
-                    const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
-                    const verifyVault = await getVaultFromNostr(
-                        vaultEvent.event.pubkey,
-                        userRelays
-                    );
-                    
-                    if (verifyVault) {
-                        
-                        savedSuccessfully = true;
-                    } else {
-                        throw new Error('Vault save verification failed');
-                    }
-                    
-                } catch (error) {
-                    retryCount++;
-                    
-                    if (retryCount >= maxRetries) {
-                        // This is critical - signup must fail if we can't save to Nostr
-                        throw new Error(
-                            'Failed to save vault to Nostr after ' + maxRetries + ' attempts. ' +
-                            'Please check your internet connection and try again. ' +
-                            'Error: ' + (error instanceof Error ? error.message : String(error))
-                        );
-                    }
-                    
-                    // Wait before retry
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
-            }
-            
+            // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
-            
             
             
             // Navigate to dashboard after successful signup
