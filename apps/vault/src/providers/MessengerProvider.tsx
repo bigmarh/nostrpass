@@ -178,7 +178,39 @@ export const MessengerProvider: ParentComponent = (props) => {
           activeIndex = vaultData.identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
         }
         if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {
-          throw new Error('No active identity selected for this application');
+          // Instead of throwing, trigger account picker
+          const requestId = `account-picker-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+          return new Promise((resolve, reject) => {
+            const handleSelected = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === requestId) {
+                cleanup();
+                resolve(ce.detail.identityIndex);
+              }
+            };
+
+            const handleRejected = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === requestId) {
+                cleanup();
+                reject(new Error(ce.detail.error || 'Account selection cancelled'));
+              }
+            };
+
+            const cleanup = () => {
+              window.removeEventListener('account-picker-selected', handleSelected as EventListener);
+              window.removeEventListener('account-picker-rejected', handleRejected as EventListener);
+            };
+
+            window.addEventListener('account-picker-selected', handleSelected as EventListener);
+            window.addEventListener('account-picker-rejected', handleRejected as EventListener);
+
+            // Trigger account picker
+            window.dispatchEvent(new CustomEvent('vault-account-picker', {
+              detail: { appOrigin: origin, requestId }
+            }));
+          });
         }
         return activeIndex;
       }
