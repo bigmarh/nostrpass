@@ -25,8 +25,8 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const origin = (data as any)?.appDomain || context?.origin || 'unknown';
 
       const requestedIndex = data?.identityIndex;
       if (requestedIndex === undefined || requestedIndex === null) {
@@ -118,8 +118,8 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const origin = (data as any)?.appDomain || context?.origin || 'unknown';
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
@@ -195,8 +195,8 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const origin = (data as any)?.appDomain || context?.origin || 'unknown';
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
@@ -283,8 +283,8 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const origin = (data as any)?.appDomain || context?.origin || 'unknown';
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
@@ -347,8 +347,8 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const origin = (data as any)?.appDomain || context?.origin || 'unknown';
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {

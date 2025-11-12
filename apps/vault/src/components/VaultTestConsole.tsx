@@ -1,7 +1,7 @@
 import { Component, createSignal, For, Show, createMemo } from 'solid-js';
 import { useAuth, useCryptoWorker } from '../providers';
 import { useParams } from '@solidjs/router';
-import { desanitizeDomain } from '@nostrpass/nostrHelpers';
+import { desanitizeDomain, sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { PermissionService } from '../services/permissionService';
 
 interface LogEntry {
@@ -21,12 +21,23 @@ export const VaultTestConsole: Component = () => {
   const params = useParams();
   const permissionService = PermissionService.getInstance();
 
-  // Get current app origin
+  // Get current app origin (returns unsanitized, e.g. "http://localhost:3200")
   const currentAppOrigin = createMemo(() => {
     if (params.app) {
       return desanitizeDomain(params.app);
     }
     return simulatedOrigin() || 'https://example.com';
+  });
+
+  // Get sanitized app key for permission lookups (e.g. "localhost-3200")
+  const currentAppKey = createMemo(() => {
+    // The params.app is already sanitized
+    if (params.app) {
+      return params.app;
+    }
+    // Otherwise we need to sanitize the origin
+    const origin = currentAppOrigin();
+    return sanitizeDomain(origin);
   });
 
   const addLog = (type: LogEntry['type'], message: string, data?: any) => {
@@ -52,10 +63,10 @@ export const VaultTestConsole: Component = () => {
         throw new Error('User not authenticated');
       }
 
-      // Check permission
+      // Check permission (use sanitized app key)
       const permissionCheck = await permissionService.checkPermission(
         currentUser.profile.username,
-        currentAppOrigin(),
+        currentAppKey(),
         'getPublicKey'
       );
 
@@ -111,10 +122,10 @@ export const VaultTestConsole: Component = () => {
         throw new Error('User not authenticated or crypto not ready');
       }
 
-      // Check permission
+      // Check permission (use sanitized app key)
       const permissionCheck = await permissionService.checkPermission(
         currentUser.profile.username,
-        currentAppOrigin(),
+        currentAppKey(),
         'signEvent',
         kind
       );
@@ -164,10 +175,10 @@ export const VaultTestConsole: Component = () => {
         throw new Error('User not authenticated or crypto not ready');
       }
 
-      // Check permission
+      // Check permission (use sanitized app key)
       const permissionCheck = await permissionService.checkPermission(
         currentUser.profile.username,
-        currentAppOrigin(),
+        currentAppKey(),
         'signData'
       );
 
@@ -313,6 +324,28 @@ export const VaultTestConsole: Component = () => {
   };
 
   // Permission management functions
+  const printPermissions = async () => {
+    const currentUser = user();
+    if (!currentUser?.profile?.username) {
+      addLog('error', 'No user logged in');
+      return;
+    }
+
+    try {
+      const perms = await permissionService.getAppPermissions(
+        currentUser.profile.username,
+        currentAppKey()
+      );
+
+      addLog('info', '=== CURRENT APP PERMISSIONS ===');
+      addLog('info', 'Full permission object:', JSON.stringify(perms, null, 2));
+      addLog('info', 'signData (nested):', perms?.permissions?.signData);
+      addLog('info', 'signData (root):', (perms as any)?.signData);
+    } catch (error) {
+      addLog('error', 'Failed to get permissions:', error);
+    }
+  };
+
   const grantTestPermission = async () => {
     const currentUser = user();
     if (!currentUser?.profile?.username) {
@@ -322,16 +355,16 @@ export const VaultTestConsole: Component = () => {
 
     try {
       addLog('info', 'Granting ALLOW permission for kind 30023 (Long-form Content)');
-      
+
       await permissionService.saveAppPermissions(
         currentUser.profile.username,
-        currentAppOrigin(),
+        currentAppKey(),
         {
           permissions: { social: 'ASK_EVERYTIME', messaging: 'ASK_EVERYTIME', signData: 'ALLOW', financial: 'ASK_EVERYTIME' }
         },
         'Test App'
       );
-      
+
       addLog('response', 'Permission granted successfully');
     } catch (error) {
       addLog('error', 'Failed to grant permission:', error);
@@ -348,7 +381,7 @@ export const VaultTestConsole: Component = () => {
     try {
       const permissions = await permissionService.getAppPermissions(
         currentUser.profile.username,
-        currentAppOrigin()
+        currentAppKey()
       );
       
       addLog('info', `Current permissions for ${currentAppOrigin()}:`, permissions || 'No permissions set');
@@ -369,7 +402,7 @@ export const VaultTestConsole: Component = () => {
       
       await permissionService.revokeAppPermissions(
         currentUser.profile.username,
-        currentAppOrigin()
+        currentAppKey()
       );
       
       addLog('response', 'All permissions revoked');
@@ -520,6 +553,13 @@ export const VaultTestConsole: Component = () => {
 
             <div class="text-xs text-gray-400 uppercase tracking-wider mt-4 mb-2">Permission Management</div>
             <div class="grid grid-cols-2 gap-2">
+              <button
+                onClick={printPermissions}
+                class="px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm transition-colors"
+                disabled={!user()}
+              >
+                Print Permissions (Debug)
+              </button>
               <button
                 onClick={viewCurrentPermissions}
                 class="px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm transition-colors"
