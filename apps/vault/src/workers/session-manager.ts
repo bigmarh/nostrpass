@@ -312,7 +312,7 @@ export const sessionManager = {
     try {
       // 1. Try to load from local IndexedDB
       console.log('📦 [WORKER login] Loading vault from IndexedDB...');
-      let vaultData = await vaultDB.getVaultByUsername(params.username);
+      let vaultData = await vaultDB.getVault(params.username);
       console.log('📦 [WORKER login] IndexedDB result:', vaultData ? 'found' : 'not found');
 
       // 2. If not found locally, fetch from Nostr
@@ -366,7 +366,7 @@ export const sessionManager = {
           createdAt: (nostrVault as any).createdAt || Date.now()
         } as VaultData);
 
-        vaultData = await vaultDB.getVaultByUsername(params.username);
+        vaultData = await vaultDB.getVault(params.username);
         console.log('✅ [WORKER login] Vault saved to IndexedDB');
       }
 
