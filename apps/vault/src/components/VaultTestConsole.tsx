@@ -121,6 +121,12 @@ export const VaultTestConsole: Component = () => {
 
       addLog('info', 'Permission check result:', permissionCheck);
 
+      // Check for explicit DENY first
+      if (permissionCheck.level === 'DENY') {
+        addLog('error', 'Permission explicitly DENIED', { level: permissionCheck.level });
+        return;
+      }
+
       if (permissionCheck.allowed) {
         // Create test event
         const testEvent = {
@@ -167,9 +173,15 @@ export const VaultTestConsole: Component = () => {
 
       addLog('info', 'Permission check result:', permissionCheck);
 
+      // Check for explicit DENY first
+      if (permissionCheck.level === 'DENY') {
+        addLog('error', 'Permission explicitly DENIED', { level: permissionCheck.level });
+        return;
+      }
+
       if (permissionCheck.allowed) {
         const testMessage = signDataMsg();
-        
+
         // Sign with worker
         const result = await cryptoWorker.signMessageWithSession({
           username: currentUser.profile.username,
