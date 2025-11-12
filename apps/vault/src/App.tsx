@@ -8,6 +8,8 @@ import AccountPickerController from './components/AccountPickerController';
 import SimpleAuthPromptController from './components/SimpleAuthPromptController';
 import { ToastProvider } from './components/Toast';
 import { I18nProvider } from './i18n';
+import { VaultCoreDemo } from './components/VaultCoreDemo';
+import { VaultCoreProvider } from './providers/VaultCoreProvider';
 
 const AppContent: Component = () => {
   return (
@@ -16,8 +18,13 @@ const AppContent: Component = () => {
       <Route path="/:app/unlock" component={() => <AuthGuard><PinUnlock /></AuthGuard>} />
       <Route path="/:app/unlock-quick" component={() => <AuthGuard><UnlockVaultOperation /></AuthGuard>} />
       <Route path="/:app/dashboard" component={() => <AuthGuard><Dashboard /></AuthGuard>} />
-      <Route path="/:app/keys" component={() => <AuthGuard><div>Key Management</div></AuthGuard>} /> 
-    </Router>   
+      <Route path="/:app/keys" component={() => <AuthGuard><div>Key Management</div></AuthGuard>} />
+      <Route path="/:app/vault-core-demo" component={() => (
+        <VaultCoreProvider>
+          <VaultCoreDemo />
+        </VaultCoreProvider>
+      )} />
+    </Router>
   );
 };
 

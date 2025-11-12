@@ -9,6 +9,7 @@ import { ParentMessenger } from '@nostrpass/messenger';
 import { embassyMessageHandlers } from './embassyMessageHandlers';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { Msg } from '../../../packages/types/src/messages';
+import { NostrPassButton, NostrPassButtonConfig, UserInfo } from './NostrPassButton';
 
 interface EmbassyConfig {
   appName?: string;
@@ -35,6 +36,33 @@ interface NostrOperationOptions {
   identityIndex?: number;
 }
 
+interface AccountManagerOptions {
+  forcePrompt?: boolean;
+}
+
+interface AccountIdentitySummary {
+  nickname?: string;
+  publicKey: string;
+  npub?: string;
+  path?: string;
+  authorized: boolean;
+}
+
+interface AccountManagerResult {
+  identityIndex: number;
+  identity?: AccountIdentitySummary;
+}
+
+interface AccountManagerButtonOptions extends AccountManagerOptions {
+  label?: string;
+  className?: string;
+  appendTo?: HTMLElement | string;
+  buttonElement?: HTMLButtonElement;
+  disabledText?: string;
+  onSelect?: (result: AccountManagerResult) => void;
+  onError?: (error: unknown) => void;
+}
+
 interface NostrProvider {
   getPublicKey(options?: NostrOperationOptions): Promise<string>;
   signEvent(event: NostrEvent, options?: NostrOperationOptions): Promise<NostrEvent>;
@@ -44,6 +72,9 @@ interface NostrProvider {
     encrypt(pubkey: string, plaintext: string, options?: NostrOperationOptions): Promise<string>;
     decrypt(pubkey: string, ciphertext: string, options?: NostrOperationOptions): Promise<string>;
   };
+  manageAccount?(options?: AccountManagerOptions): Promise<AccountManagerResult>;
+  createAccountManagerButton?(options?: AccountManagerButtonOptions): HTMLButtonElement;
+  createNostrPassButton?(config?: NostrPassButtonConfig): NostrPassButton;
 }
 
 class NostrPassEmbassy {
@@ -532,6 +563,42 @@ class NostrPassEmbassy {
         border: 2px solid red !important;
         z-index: 999999 !important;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+      }
+
+      .nostrpass-account-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1rem;
+        border: none;
+        border-radius: 9999px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        font-family: inherit;
+        cursor: pointer;
+        background: linear-gradient(135deg, #2563eb, #6366f1);
+        color: #ffffff;
+        box-shadow: 0 10px 20px -12px rgba(37, 99, 235, 0.75);
+        transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+      }
+
+      .nostrpass-account-button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 24px -12px rgba(79, 70, 229, 0.55);
+        filter: brightness(1.02);
+      }
+
+      .nostrpass-account-button:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 6px 12px -6px rgba(79, 70, 229, 0.45);
+        filter: brightness(0.96);
+      }
+
+      .nostrpass-account-button:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+        box-shadow: none;
       }
     `;
 
@@ -1034,6 +1101,99 @@ class NostrPassEmbassy {
     }
   }
 
+  async manageAccount(options: AccountManagerOptions = {}): Promise<AccountManagerResult> {
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    const forcePrompt = options.forcePrompt ?? true;
+
+    this.show('vault', 'full');
+
+    try {
+      const response = await this.messenger!.request(Msg.MANAGE_ACCOUNTS, {
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        forcePrompt
+      });
+      return response;
+    } finally {
+      try {
+        this.hide();
+      } catch (error) {
+        console.warn('Failed to hide vault after manageAccount:', error);
+      }
+    }
+  }
+
+  createAccountManagerButton(options: AccountManagerButtonOptions = {}): HTMLButtonElement {
+    const {
+      label = 'Manage NostrPass Account',
+      className = 'nostrpass-account-button',
+      appendTo,
+      buttonElement,
+      disabledText,
+      onSelect,
+      onError,
+      forcePrompt
+    } = options;
+
+    const button = buttonElement ?? document.createElement('button');
+    if (!buttonElement) {
+      button.type = 'button';
+      button.className = className;
+      button.textContent = label;
+    } else if (className) {
+      buttonElement.className = className;
+    }
+
+    const handleClick = async (event: Event) => {
+      event.preventDefault();
+      const previousLabel = button.textContent;
+      try {
+        button.disabled = true;
+        if (disabledText) {
+          button.textContent = disabledText;
+        }
+        const result = await this.manageAccount({ forcePrompt });
+        onSelect?.(result);
+      } catch (error) {
+        if (onError) {
+          onError(error);
+        } else {
+          console.error('[NostrPass] Failed to manage account:', error);
+        }
+      } finally {
+        button.disabled = false;
+        if (disabledText && previousLabel !== undefined && previousLabel !== null) {
+          button.textContent = previousLabel;
+        }
+      }
+    };
+
+    button.addEventListener('click', handleClick);
+
+    if (appendTo) {
+      const target = typeof appendTo === 'string' ? document.querySelector<HTMLElement>(appendTo) : appendTo;
+      if (!target) {
+        console.warn('[NostrPass] Unable to find target element for account manager button:', appendTo);
+      } else if (!button.parentElement) {
+        target.appendChild(button);
+      }
+    }
+
+    return button;
+  }
+
+  /**
+   * Create a production-ready NostrPass authentication button
+   * Similar to Clerk's user button pattern
+   */
+  createNostrPassButton(config: NostrPassButtonConfig = {}): NostrPassButton {
+    return new NostrPassButton(this, config);
+  }
+
   // Public utility methods
   public isReady(): boolean {
     return this._isReady;
@@ -1108,7 +1268,10 @@ function initNostrPass(config: EmbassyConfig = {}): NostrProvider {
     nip04: {
       encrypt: (pubkey: string, plaintext: string, options?: NostrOperationOptions) => embassyInstance!.encrypt(pubkey, plaintext, options),
       decrypt: (pubkey: string, ciphertext: string, options?: NostrOperationOptions) => embassyInstance!.decrypt(pubkey, ciphertext, options)
-    }
+    },
+    manageAccount: (options?: AccountManagerOptions) => embassyInstance!.manageAccount(options),
+    createAccountManagerButton: (options?: AccountManagerButtonOptions) => embassyInstance!.createAccountManagerButton(options),
+    createNostrPassButton: (config?: NostrPassButtonConfig) => embassyInstance!.createNostrPassButton(config)
   };
 
   return nostrProvider;
@@ -1173,5 +1336,15 @@ if (typeof window !== 'undefined') {
   console.log('💡 Use window.initNostrPass(config) to customize');
 }
 
-export { initNostrPass, NostrPassEmbassy };
-export type { EmbassyConfig, NostrEvent, NostrProvider };
+export { initNostrPass, NostrPassEmbassy, NostrPassButton };
+export type {
+  EmbassyConfig,
+  NostrEvent,
+  NostrProvider,
+  AccountManagerOptions,
+  AccountManagerResult,
+  AccountManagerButtonOptions,
+  AccountIdentitySummary,
+  NostrPassButtonConfig,
+  UserInfo
+};

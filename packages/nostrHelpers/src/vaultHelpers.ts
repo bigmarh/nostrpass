@@ -56,11 +56,12 @@ export async function saveLoginObj(
   loginObj: LoginObj,
   randomPublicKey: string,
   randomPrivateKey: string,
-  relays: string[]
+  relays: string[],
+  environment: string // Add environment parameter to match getLoginObj
 ): Promise<string[]> {
   try {
     const loginContent = JSON.stringify(loginObj);
-    
+
     // Derive public key from the provided private key to ensure consistency
     const privateKeyBytes = hexToBytes(randomPrivateKey);
     const derivedPublicKey = nostrGetPublicKey(privateKeyBytes);
@@ -72,7 +73,7 @@ export async function saveLoginObj(
       kind: 30078,
       created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ['d', `${namespace}_login_${hash(username)}_${getEnvironment()}`],
+        ['d', `${namespace}_login_${hash(username)}_${environment}`], // Use passed environment
         ['client', namespace],
         ['subject', 'login-lookup'],
       ],

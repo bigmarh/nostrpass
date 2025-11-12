@@ -25,8 +25,14 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Check if vault is locked - if so, throw VAULT_LOCKED error which embassy handles specially
+      if (deps.isVaultLocked()) {
+        throw vaultError(ErrorCode.VAULT_LOCKED, 'Vault is locked');
+      }
+
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin); // Sanitize to match stored permission keys
 
       const requestedIndex = data?.identityIndex;
       if (requestedIndex === undefined || requestedIndex === null) {
@@ -118,8 +124,9 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin); // Sanitize to match stored permission keys
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
@@ -136,8 +143,13 @@ export const authHandlers: MessageHandler[] = [
       const eventKind = data.event?.kind;
       const permissionResult = await deps.checkPermission('signEvent', origin, eventKind, identityIndex);
 
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult.allowed) {
-        // Request permission with async wait for user response
+        // Request permission with async wait for user response (ASK_EVERYTIME)
         try {
           const promptResult = await permissionPromptManager.requestPermission({
             appOrigin: origin,
@@ -172,6 +184,7 @@ export const authHandlers: MessageHandler[] = [
   {
     route: Msg.SIGN_DATA,
     handler: async (data: { data: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
+      console.error('🚨🚨🚨 SIGN_DATA HANDLER CALLED 🚨🚨🚨');
       const currentUser = deps.getUser();
       const cryptoWorker = deps.getCryptoWorker();
 
@@ -190,8 +203,10 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin); // Sanitize to match stored permission keys
+      console.error('[SIGN_DATA] Raw origin:', rawOrigin, '→ Sanitized:', origin);
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
@@ -205,9 +220,19 @@ export const authHandlers: MessageHandler[] = [
       }
 
       // Now check permissions (may trigger async prompt)
+      console.error('[SIGN_DATA] Checking permission for:', { action: 'signData', origin, identityIndex });
       const permissionResult2 = await deps.checkPermission('signData', origin, undefined, identityIndex);
+      console.error('[SIGN_DATA] Permission result:', JSON.stringify(permissionResult2, null, 2));
+
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult2.level === 'DENY') {
+        console.error('[SIGN_DATA] ❌ PERMISSION DENIED - Blocking request');
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+      console.error('[SIGN_DATA] ✅ Permission check passed, level:', permissionResult2.level);
+
       if (!permissionResult2.allowed) {
-        // Request permission with async wait for user response
+        // Request permission with async wait for user response (ASK_EVERYTIME)
         try {
           const promptResult = await permissionPromptManager.requestPermission({
             appOrigin: origin,
@@ -272,8 +297,9 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin); // Sanitize to match stored permission keys
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {
@@ -336,8 +362,9 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin); // Sanitize to match stored permission keys
 
       const identityIndex = data?.identityIndex;
       if (identityIndex === undefined || identityIndex === null) {

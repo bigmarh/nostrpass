@@ -78,6 +78,9 @@
         box-shadow: var(--shadow);
         border-bottom: 1px solid var(--border);
         flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
       }
       
       .header h1 {
@@ -88,6 +91,58 @@
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
+      .account-manager-demo {
+        margin-left: auto;
+        display: inline-flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.5rem;
+      }
+
+      .account-manager-badge {
+        background: rgba(15, 23, 42, 0.85);
+        color: #f8fafc;
+        padding: 0.3rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.18);
+      }
+
+      .account-manager-result {
+        min-width: 220px;
+        background: rgba(255, 255, 255, 0.93);
+        backdrop-filter: blur(6px);
+        border-radius: 14px;
+        padding: 0.75rem 0.95rem;
+        box-shadow: 0 15px 30px rgba(15, 23, 42, 0.22);
+        font-size: 0.75rem;
+        color: #0f172a;
+        display: none;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .account-manager-result {
+          background: rgba(17, 24, 39, 0.92);
+          color: #e2e8f0;
+          box-shadow: 0 15px 30px rgba(0, 0, 0, 0.35);
+        }
+      }
+
+      .account-manager-result strong {
+        display: inline-block;
+        min-width: 80px;
+        color: inherit;
+      }
+
+      .account-manager-result p {
+        margin: 0.15rem 0;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+
       
       .main-content {
         flex: 1;
@@ -123,37 +178,39 @@
         }
       }
       
-      .tabs {
-        display: flex;
+      .tab-selector-container {
+        padding: 1rem;
         background: var(--bg-tertiary);
         border-bottom: 1px solid var(--border);
-        padding: 0 0.5rem;
-        gap: 0.25rem;
         flex-shrink: 0;
       }
       
-      .tab {
+      .tab-dropdown {
+        width: 100%;
         padding: 0.75rem 1rem;
-        background: transparent;
-        border: none;
-        color: var(--text-secondary);
         font-size: 0.875rem;
         font-weight: 500;
+        color: var(--text-primary);
+        background: var(--bg-primary);
+        border: 2px solid var(--border);
+        border-radius: var(--radius);
         cursor: pointer;
         transition: var(--transition);
-        border-bottom: 2px solid transparent;
-        white-space: nowrap;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 1rem center;
+        padding-right: 3rem;
       }
       
-      .tab:hover {
-        color: var(--text-primary);
-        background: var(--bg-secondary);
+      .tab-dropdown:hover {
+        border-color: var(--primary);
       }
       
-      .tab.active {
-        color: var(--primary);
-        border-bottom-color: var(--primary);
-        background: var(--bg-primary);
+      .tab-dropdown:focus {
+        outline: none;
+        border-color: var(--border-focus);
+        box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
       }
       
       .tab-content {
@@ -487,15 +544,27 @@
     <div class="app-container">
       <div class="header">
         <h1>Embassy Test Console</h1>
+        <div id="nostrpass-button-container" style="display: flex; align-items: center; gap: 16px;">
+          <div class="account-manager-badge" style="font-size: 12px; color: var(--text-secondary);">
+            NostrPass Auth Demo →
+          </div>
+          <!-- NostrPass button will be injected here -->
+        </div>
       </div>
       
       <div class="main-content">
         <div class="sidebar">
-          <div class="tabs">
-            <button class="tab active" data-tab="config">Config</button>
-            <button class="tab" data-tab="operations">Operations</button>
-            <button class="tab" data-tab="signing">Signing</button>
-            <button class="tab" data-tab="encryption">Encryption</button>
+          <div class="tab-selector-container">
+            <label for="tab-selector" style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary); margin-bottom: 0.5rem; display: block;">
+              Select Test Section
+            </label>
+            <select id="tab-selector" class="tab-dropdown">
+              <option value="config">⚙️ Config</option>
+              <option value="operations">🔧 Operations</option>
+              <option value="signing">✍️ Signing</option>
+              <option value="encryption">🔒 Encryption</option>
+              <option value="financial">⚡ Financial</option>
+            </select>
           </div>
           
           <div id="config-tab" class="tab-content active">
@@ -673,6 +742,154 @@
               </ol>
             </div>
           </div>
+
+          <div id="financial-tab" class="tab-content">
+            <div class="form-section">
+              <div class="form-section-title">⚡ Lightning Zaps (NIP-57)</div>
+              <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Create and sign zap requests to send Lightning payments to Nostr users.
+              </p>
+              
+              <div class="form-group">
+                <div class="form-row">
+                  <label for="zap-recipient">Recipient Pubkey</label>
+                  <input id="zap-recipient" type="text" placeholder="Hex public key or npub" />
+                </div>
+                <div class="form-row">
+                  <label for="zap-amount">Amount (sats)</label>
+                  <input id="zap-amount" type="number" min="1" value="21" placeholder="Amount in satoshis" />
+                </div>
+                <div class="form-row">
+                  <label for="zap-comment">Comment (Optional)</label>
+                  <textarea id="zap-comment" placeholder="Add a message with your zap" rows="3"></textarea>
+                </div>
+                <div class="form-row">
+                  <label for="zap-relays">Relays (comma-separated)</label>
+                  <input id="zap-relays" type="text" placeholder="wss://relay1.com, wss://relay2.com" value="wss://relay.damus.io, wss://relay.nostr.band" />
+                </div>
+              </div>
+
+              <div class="btn-group">
+                <button id="btn-create-zap" class="btn btn-primary">
+                  ⚡ Create Zap Request
+                </button>
+                <button id="btn-sign-zap" class="btn btn-secondary">
+                  ✍️ Sign Zap Event
+                </button>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="form-section-title">Zap Request Preview</div>
+              <div id="zap-preview" style="background: var(--bg-tertiary); padding: 1rem; border-radius: var(--radius); font-family: monospace; font-size: 0.75rem; max-height: 200px; overflow-y: auto;">
+                <p style="color: var(--text-secondary);">Create a zap request to see the event structure</p>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-section">
+              <div class="form-section-title">💰 Financial Event Types</div>
+              <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Sign various financial-related Nostr events.
+              </p>
+
+              <div class="form-group">
+                <div class="form-row">
+                  <label for="financial-event-kind">Event Kind</label>
+                  <select id="financial-event-kind">
+                    <option value="9734">9734 - Zap Request</option>
+                    <option value="9735">9735 - Zap Receipt</option>
+                    <option value="1063">1063 - File Metadata (paid content)</option>
+                    <option value="402">402 - Payment Required</option>
+                    <option value="7000">7000 - Job Request</option>
+                    <option value="7001">7001 - Job Result</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label for="financial-content">Event Content</label>
+                  <textarea id="financial-content" placeholder='{"amount": 1000, "description": "Payment for service"}' rows="4"></textarea>
+                </div>
+                <div class="form-row">
+                  <label for="financial-tags">Tags (JSON array)</label>
+                  <textarea id="financial-tags" placeholder='[["p", "recipient_pubkey"], ["amount", "1000"]]' rows="3"></textarea>
+                </div>
+              </div>
+
+              <button id="btn-sign-financial" class="btn btn-primary btn-block">
+                ✍️ Sign Financial Event
+              </button>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-section">
+              <div class="form-section-title">🎯 NIP-57 Zap Flow Reference</div>
+              <ol style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.8; padding-left: 1.5rem;">
+                <li><strong>Fetch recipient's Lightning Address</strong> from their profile (kind 0) metadata</li>
+                <li><strong>Query LNURL</strong> endpoint to get callback URL and verify zaps are supported</li>
+                <li><strong>Create a zap request</strong> (kind 9734 event) with amount and optional comment</li>
+                <li><strong>Sign the zap request</strong> with your private key (via NostrPass)</li>
+                <li><strong>Send to Lightning Service Provider</strong> who generates invoice</li>
+                <li><strong>Pay the Lightning invoice</strong> using your Lightning wallet</li>
+                <li><strong>LSP publishes zap receipt</strong> (kind 9735) to relays as proof of payment</li>
+              </ol>
+
+              <div style="margin-top: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius); border-left: 3px solid var(--info);">
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
+                  <strong>💡 Tip:</strong> This console helps you create and sign the zap request (step 3-4). 
+                  You'll need a Lightning wallet to complete the payment flow and a Lightning Service Provider (LSP) to handle the invoice generation.
+                </p>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-section">
+              <div class="form-section-title">📚 Quick Reference</div>
+              <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--border);">
+                    <th style="text-align: left; padding: 0.5rem; color: var(--text-primary);">Event Kind</th>
+                    <th style="text-align: left; padding: 0.5rem; color: var(--text-primary);">Description</th>
+                    <th style="text-align: left; padding: 0.5rem; color: var(--text-primary);">NIP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--info);">9734</td>
+                    <td style="padding: 0.5rem; color: var(--text-secondary);">Zap Request</td>
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--text-secondary);">57</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--info);">9735</td>
+                    <td style="padding: 0.5rem; color: var(--text-secondary);">Zap Receipt (LSP publishes)</td>
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--text-secondary);">57</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--info);">1063</td>
+                    <td style="padding: 0.5rem; color: var(--text-secondary);">File Metadata (can include payment info)</td>
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--text-secondary);">94</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--info);">402</td>
+                    <td style="padding: 0.5rem; color: var(--text-secondary);">Payment Required</td>
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--text-secondary);">-</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--info);">7000</td>
+                    <td style="padding: 0.5rem; color: var(--text-secondary);">Job Request (paid work)</td>
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--text-secondary);">90</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--info);">7001</td>
+                    <td style="padding: 0.5rem; color: var(--text-secondary);">Job Result</td>
+                    <td style="padding: 0.5rem; font-family: monospace; color: var(--text-secondary);">90</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
         
         <div class="console-area">
@@ -694,21 +911,19 @@
       const $ = (id) => document.getElementById(id);
       const logEl = $('log');
       
-      // Tab switching
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          const tabName = tab.dataset.tab;
-          
-          // Update active tab
-          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-          tab.classList.add('active');
-          
-          // Update active content
-          document.querySelectorAll('.tab-content').forEach(content => {
-            content.classList.remove('active');
-          });
-          document.getElementById(`${tabName}-tab`).classList.add('active');
+      const nostrpassButtonContainer = $('nostrpass-button-container');
+      let nostrpassButton = null;
+
+      // Tab switching via dropdown
+      const tabSelector = $('tab-selector');
+      tabSelector.addEventListener('change', (e) => {
+        const tabName = e.target.value;
+        
+        // Update active content
+        document.querySelectorAll('.tab-content').forEach(content => {
+          content.classList.remove('active');
         });
+        document.getElementById(`${tabName}-tab`).classList.add('active');
       });
       
       function formatLogEntry(level, message, data) {
@@ -768,7 +983,9 @@
           const debug = $('debug-mode').checked;
           window.nostr = window.initNostrPass?.({ vaultUrl, appName, debug, theme: 'auto' });
           log('info', 'Provider auto-initialized');
+          setupNostrPassButton();
         }
+        return window.nostr;
       }
       
       // Show/hide custom kind input
@@ -783,6 +1000,7 @@
           const debug = $('debug-mode').checked;
           window.nostr = window.initNostrPass?.({ vaultUrl, appName, debug, theme: 'auto' });
           log('success', 'NostrPass provider initialized', { vaultUrl, appName, debug });
+          setupNostrPassButton();
         } catch (e) {
           log('error', 'Initialization failed', { error: String(e) });
         }
@@ -802,6 +1020,7 @@
           if (window.nostr?.showVault) {
             window.nostr.showVault();
             log('success', 'NostrPass initialized and vault opened');
+            setupNostrPassButton();
           }
         }
       });
@@ -1110,6 +1329,142 @@
         $('nip04-pubkey').value = '';
         log('info', 'Encryption fields cleared');
       });
+
+      // Financial Tab Handlers
+      let currentZapRequest = null;
+
+      $('btn-create-zap').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const recipientInput = $('zap-recipient').value.trim();
+          const amount = parseInt($('zap-amount').value) || 21;
+          const comment = $('zap-comment').value.trim();
+          const relaysInput = $('zap-relays').value.trim();
+
+          if (!recipientInput) {
+            throw new Error('Recipient pubkey required');
+          }
+
+          // Parse recipient (support npub)
+          let recipientPubkey = recipientInput;
+          if (recipientInput.startsWith('npub1')) {
+            // Would need nostr-tools to decode, for now show error
+            log('warning', 'npub decoding not implemented in this demo. Please use hex pubkey for now.');
+            throw new Error('Please use hex public key format');
+          }
+
+          // Parse relays
+          const relays = relaysInput.split(',').map(r => r.trim()).filter(r => r.startsWith('wss://'));
+          if (relays.length === 0) {
+            throw new Error('At least one relay required');
+          }
+
+          const senderPubkey = await window.nostr.getPublicKey();
+
+          // Create zap request event (kind 9734)
+          currentZapRequest = {
+            kind: 9734,
+            content: comment,
+            tags: [
+              ['relays', ...relays],
+              ['amount', (amount * 1000).toString()], // Convert to millisats
+              ['p', recipientPubkey]
+            ],
+            created_at: Math.floor(Date.now() / 1000),
+            pubkey: senderPubkey
+          };
+
+          // Display preview
+          $('zap-preview').innerHTML = `<pre>${JSON.stringify(currentZapRequest, null, 2)}</pre>`;
+
+          log('success', 'Zap request created', {
+            recipient: recipientPubkey,
+            amount: `${amount} sats`,
+            comment: comment || '(none)',
+            relays: relays
+          });
+
+          log('info', 'Click "Sign Zap Event" to sign this request');
+        } catch (e) {
+          log('error', 'Failed to create zap request', { error: String(e) });
+        }
+      });
+
+      $('btn-sign-zap').addEventListener('click', async () => {
+        try {
+          if (!currentZapRequest) {
+            throw new Error('Create a zap request first');
+          }
+
+          ensureProvider();
+          const signed = await window.nostr.signEvent(currentZapRequest);
+          
+          log('success', 'Zap request signed', signed);
+          log('info', 'Next steps:', {
+            step1: 'Send this signed event to the Lightning Service Provider callback URL',
+            step2: 'LSP will return a Lightning invoice',
+            step3: 'Pay the invoice with your Lightning wallet',
+            step4: 'LSP publishes zap receipt (kind 9735) to relays'
+          });
+
+          // Update preview with signed event
+          $('zap-preview').innerHTML = `<pre>${JSON.stringify(signed, null, 2)}</pre>`;
+        } catch (e) {
+          log('error', 'Failed to sign zap request', { error: String(e) });
+        }
+      });
+
+      $('btn-sign-financial').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const kind = parseInt($('financial-event-kind').value);
+          const content = $('financial-content').value.trim();
+          const tagsInput = $('financial-tags').value.trim();
+
+          let tags = [];
+          if (tagsInput) {
+            try {
+              tags = JSON.parse(tagsInput);
+              if (!Array.isArray(tags)) {
+                throw new Error('Tags must be an array');
+              }
+            } catch (e) {
+              throw new Error('Invalid JSON for tags: ' + e.message);
+            }
+          }
+
+          const event = {
+            kind,
+            content,
+            tags,
+            created_at: Math.floor(Date.now() / 1000)
+          };
+
+          log('info', 'Signing financial event', { kind, contentLength: content.length, tagCount: tags.length });
+
+          const signed = await window.nostr.signEvent(event);
+          
+          log('success', 'Financial event signed', signed);
+          
+          // Show a helpful message based on event kind
+          let nextSteps = '';
+          if (kind === 9734) {
+            nextSteps = 'Send this zap request to the recipient\'s LNURL callback';
+          } else if (kind === 9735) {
+            nextSteps = 'Publish this zap receipt to relays (typically done by LSP)';
+          } else if (kind === 1063) {
+            nextSteps = 'Publish this file metadata to relays to advertise paid content';
+          } else if (kind === 402) {
+            nextSteps = 'Include this in response to indicate payment is required';
+          } else {
+            nextSteps = 'Publish this event to your configured relays';
+          }
+          
+          log('info', 'Next steps: ' + nextSteps);
+        } catch (e) {
+          log('error', 'Failed to sign financial event', { error: String(e) });
+        }
+      });
       
       // Function to update account info
       async function updateAccountInfo() {
@@ -1151,6 +1506,7 @@
           if (!window.nostr) {
             window.nostr = window.initNostrPass?.({ vaultUrl, appName, debug, theme: 'auto' });
             log('success', 'NostrPass auto-initialized on page load', { vaultUrl, appName, debug });
+            setupNostrPassButton();
           }
         } catch (e) {
           log('warning', 'Auto-initialization skipped', { error: String(e) });
@@ -1178,6 +1534,54 @@
       
       // Initial log
       log('info', 'Embassy Test Console ready');
+
+      function setupNostrPassButton() {
+        if (nostrpassButton || !nostrpassButtonContainer || !window.nostr) return;
+        if (typeof window.nostr.createNostrPassButton !== 'function') {
+          log('warning', 'NostrPass button API not available yet');
+          return;
+        }
+
+        try {
+          nostrpassButton = window.nostr.createNostrPassButton({
+            appendTo: nostrpassButtonContainer,
+            theme: 'auto',
+            showNpub: true,
+            showManageAccount: true,
+            onSignIn: (user) => {
+              log('success', 'User signed in', {
+                identityIndex: user.identityIndex,
+                publicKey: user.publicKey,
+                nickname: user.nickname,
+                npub: user.npub
+              });
+            },
+            onSignOut: () => {
+              log('info', 'User signed out');
+            },
+            onError: (error) => {
+              log('error', 'NostrPass button error', { error: String(error) });
+            }
+          });
+
+          // Try to restore session
+          nostrpassButton.restoreSession().then(restored => {
+            if (restored) {
+              const user = nostrpassButton.getUser();
+              log('info', 'Session restored', { user });
+            }
+          }).catch(e => {
+            log('warning', 'Failed to restore session', { error: String(e) });
+          });
+
+        } catch (error) {
+          log('error', 'Failed to create NostrPass button', { error: String(error) });
+        }
+      }
+
+      if (window.nostr) {
+        setupNostrPassButton();
+      }
     </script>
   
   </body>
