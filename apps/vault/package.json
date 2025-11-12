@@ -20,6 +20,7 @@
     "@nostrpass/messenger": "workspace:*",
     "@nostrpass/nostrHelpers": "workspace:*",
     "@nostrpass/types": "workspace:*",
+    "@nostrpass/vault-core": "workspace:*",
     "@nostrpass/worker-messenger": "workspace:*",
     "@scure/bip32": "^2.0.0",
     "@scure/bip39": "^2.0.0",
