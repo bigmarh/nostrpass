@@ -163,6 +163,8 @@ export class AuthManager extends EventEmitter {
         relays: this.relays
       });
 
+      console.log('[AuthManager] Login result:', result);
+
       if (result.success && result.user) {
         this.currentUser = result.user;
         this.sessionId = result.sessionId || null;
@@ -185,7 +187,8 @@ export class AuthManager extends EventEmitter {
         };
       }
 
-      return { success: false, error: 'Login failed' };
+      console.error('[AuthManager] Login failed, result:', result);
+      return { success: false, error: result.error || 'Login failed' };
     } catch (error) {
       console.error('[AuthManager] Login error:', error);
       return {

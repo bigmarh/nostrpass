@@ -147,8 +147,10 @@ export class VaultCore {
         }
       }
 
-      // Try to restore previous session
-      await this.auth.restoreSession();
+      // Try to restore previous session (skip for now in RPC mode to avoid issues)
+      if (!this.config.workerClient) {
+        await this.auth.restoreSession();
+      }
 
       this.initialized = true;
 
