@@ -504,6 +504,7 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
     return;
   }
 
+  console.log('[AuthWorkerBridge] Setting up messenger routes...');
   const DEV_BYPASS = false;
 
   // Handle public key requests from parent - NIP-07 compliant
@@ -790,10 +791,13 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
   // Unlock with PIN (called by Embassy after PIN prompt)
   messenger.messenger.route('UNLOCK_WITH_PIN', {
     handler: async (data: { pin: string }) => {
+      console.log('[AuthWorkerBridge] UNLOCK_WITH_PIN handler called', { hasPIN: !!data?.pin });
       if (!data?.pin) {
         throw new Error('PIN is required');
       }
+      console.log('[AuthWorkerBridge] Calling unlockVault...');
       const success = await unlockVault(data.pin);
+      console.log('[AuthWorkerBridge] unlockVault returned:', success);
       // Broadcast updated auth status to parent immediately so cross-tab preflight sees unlocked
       try {
         messenger.send('AUTH_STATUS', {
@@ -845,4 +849,6 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
       console.log('[AuthWorkerBridge] Auth status acknowledged by parent:', data);
     }
   });
+
+  console.log('[AuthWorkerBridge] ✅ All messenger routes registered successfully');
 }

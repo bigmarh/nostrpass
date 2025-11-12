@@ -1,4 +1,4 @@
-import { Component, Show, createSignal } from 'solid-js';
+import { Component, Show, createSignal, createEffect } from 'solid-js';
 import type { VaultData } from '@nostrpass/nostrHelpers';
 import { useCryptoWorker } from '../providers';
 import PinPad from './PinPad';
@@ -21,6 +21,14 @@ export const PinManager: Component<PinManagerProps> = (props) => {
 
   // Internal state signals
   const [showPinUnlock, setShowPinUnlock] = createSignal(false);
+
+  // Automatically show PIN unlock when vault becomes locked
+  createEffect(() => {
+    if (props.isVaultLocked && props.username) {
+      console.log('[PinManager] Vault is locked, showing PIN unlock modal');
+      setShowPinUnlock(true);
+    }
+  });
   const [pinUnlockError, setPinUnlockError] = createSignal('');
   const [isUnlocking, setIsUnlocking] = createSignal(false);
   const [showRecovery, setShowRecovery] = createSignal(false);
