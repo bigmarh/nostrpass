@@ -136,8 +136,13 @@ export const authHandlers: MessageHandler[] = [
       const eventKind = data.event?.kind;
       const permissionResult = await deps.checkPermission('signEvent', origin, eventKind, identityIndex);
 
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult.allowed) {
-        // Request permission with async wait for user response
+        // Request permission with async wait for user response (ASK_EVERYTIME)
         try {
           const promptResult = await permissionPromptManager.requestPermission({
             appOrigin: origin,
@@ -206,8 +211,14 @@ export const authHandlers: MessageHandler[] = [
 
       // Now check permissions (may trigger async prompt)
       const permissionResult2 = await deps.checkPermission('signData', origin, undefined, identityIndex);
+
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult2.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult2.allowed) {
-        // Request permission with async wait for user response
+        // Request permission with async wait for user response (ASK_EVERYTIME)
         try {
           const promptResult = await permissionPromptManager.requestPermission({
             appOrigin: origin,
