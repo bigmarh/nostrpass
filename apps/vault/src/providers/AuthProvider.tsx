@@ -1,12 +1,13 @@
-import { createContext, useContext, ParentComponent, createSignal, createEffect, onMount } from 'solid-js';
+import { createContext, useContext, ParentComponent, createSignal, createEffect, onMount, on } from 'solid-js';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
-import { useMessenger } from './MessengerProvider';
+import { useMessenger, notifyAuthReady } from './MessengerProvider';
 import { useEnvironment } from './EnvironmentProvider';
 import type { User, UserProfile, LoginObj, VaultObj, ErrorCode } from '@nostrpass/types';
 import { createUser, getIdentityKeypair } from '../services/userService';
 import { getCryptoWorker, getCryptoWorkerInstance } from '../services/cryptoWorkerSingleton';
 import type { VaultData } from '@nostrpass/nostrHelpers';
 import { showErrorToast, showSuccessToast } from '../components/Toast';
+import { setupWorkerMessageHandlers, setupBroadcastChannelListener, setupMessengerRoutes } from './auth/AuthWorkerBridge';
 
 interface AuthContextType {
   user: () => User | null;
@@ -51,178 +52,37 @@ export const AuthProvider: ParentComponent = (props) => {
 
   // Handle session expired notifications from worker
   createEffect(() => {
-    try {
-      const workerInstance = getCryptoWorkerInstance();
-      if (!workerInstance) return;
-      
-      // Listen for session messages from worker
-      const handleWorkerMessage = (event: MessageEvent) => {
-        const currentUser = user();
-        
-        // Handle vault broadcasts (for all tabs)
-        if ((event as any).data?.type === 'VAULT_BROADCAST') {
-          const { broadcastType, username, timestamp } = (event as any).data.data;
-          
-          switch (broadcastType) {
-            case 'VAULT_DATA_UPDATED':
-              if (currentUser?.profile.username === username) {
-                const refreshEvent = new CustomEvent('vault-data-refresh', { 
-                  detail: { username, timestamp } 
-                });
-                window.dispatchEvent(refreshEvent);
-              }
-              break;
-              
-            case 'USER_LOGGED_IN':
-              // Another tab logged in - refresh session status
-              attemptSessionRestore();
-              if (messenger.isReady() && currentUser?.publicKey) {
-                messenger.send('AUTH_STATUS', {
-                  isAuthenticated: false,
-                  publicKey: currentUser.publicKey
-                });
-              }
-              window.dispatchEvent(new CustomEvent('session-refresh', { 
-                detail: { username, timestamp } 
-              }));
-              break;
-            case 'SESSION_REFRESH':
-              attemptSessionRestore();
-              break;
-              
-            case 'USER_LOGGED_OUT':
-              if (currentUser?.profile.username === username) {
-                setUser(null);
-                setHasPinVault(false);
-                setIsVaultLocked(true);
-                localStorage.removeItem('vaultsession');
-                localStorage.removeItem('last-username');
-                if (messenger.isReady()) {
-                  messenger.send('AUTH_STATUS', {
-                    isAuthenticated: false,
-                    publicKey: null
-                  });
-                }
-              }
-              break;
-              
-            case 'SESSION_UNLOCKED':
-              if (currentUser?.profile.username === username) {
-                setIsVaultLocked(false);
-                setHasPinVault(false);
-              }
-              break;
-              
-            case 'SESSION_LOCKED':
-              if (currentUser?.profile.username === username) {
-                setIsVaultLocked(true);
-                setHasPinVault(true);
-              }
-              break;
-          }
-          return;
-        }
-        
-        // Handle existing session messages
-        if ((event as any).data?.type === 'SESSION_EXPIRED' || (event as any).data?.type === 'SESSION_LOCKED') {
-          const { username, reason } = (event as any).data.data;
-          
-          if (currentUser?.profile.username === username) {
-            setIsVaultLocked(true);
-            setHasPinVault(true);
-            localStorage.removeItem('last-username');
-            if (messenger.isReady()) {
-              messenger.send('AUTH_STATUS', {
-                isAuthenticated: false,
-                publicKey: null,
-                reason: reason || (event as any).data.type
-              });
-            }
-          }
-        }
-      };
-      
-      // Add listener to worker
-      workerInstance.addEventListener('message', handleWorkerMessage as unknown as EventListener);
-      
-      // Set up BroadcastChannel listener for cross-tab communication
-      let broadcastChannel: BroadcastChannel | null = null;
-      if (typeof BroadcastChannel !== 'undefined') {
-        broadcastChannel = new BroadcastChannel('nostrpass-vault');
-        broadcastChannel.onmessage = (event) => {
-          if ((event as any).data?.type === 'VAULT_BROADCAST') {
-            const { broadcastType, username, timestamp } = (event as any).data.data;
-            
-            const currentUser = user();
-            
-            switch (broadcastType) {
-              case 'VAULT_DATA_UPDATED':
-                if (currentUser?.profile.username === username) {
-                  const refreshEvent = new CustomEvent('vault-data-refresh', { 
-                    detail: { username, timestamp } 
-                  });
-                  window.dispatchEvent(refreshEvent);
-                }
-                break;
-              
-              case 'SESSION_UNLOCKED':
-                if (currentUser?.profile.username === username) {
-                  refreshSessionStatus();
-                }
-                break;
-              
-              case 'SESSION_LOCKED':
-                if (currentUser?.profile.username === username) {
-                  setIsVaultLocked(true);
-                  setHasPinVault(true);
-                }
-                break;
-              case 'USER_LOGGED_OUT':
-                if (currentUser?.profile.username === username) {
-                  setUser(null);
-                  setHasPinVault(false);
-                  setIsVaultLocked(true);
-                  localStorage.removeItem('vaultsession');
-                  localStorage.removeItem('last-username');
-                  if (messenger.isReady()) {
-                    messenger.send('AUTH_STATUS', {
-                      isAuthenticated: false,
-                      publicKey: null
-                    });
-                  }
-                }
-                break;
-              case 'USER_LOGGED_IN':
-                attemptSessionRestore();
-                if (messenger.isReady() && currentUser?.publicKey) {
-                  messenger.send('AUTH_STATUS', {
-                    isAuthenticated: false,
-                    publicKey: currentUser.publicKey
-                  });
-                }
-                window.dispatchEvent(new CustomEvent('session-refresh', {
-                  detail: { username, timestamp }
-                }));
-                break;
-              case 'SESSION_REFRESH':
-                attemptSessionRestore();
-                break;
-            }
-          }
-        };
+    const cleanup = setupWorkerMessageHandlers({
+      getCryptoWorkerInstance,
+      user,
+      setUser,
+      setHasPinVault,
+      setIsVaultLocked,
+      attemptSessionRestore,
+      messenger,
+      showErrorToast: (code: string) => showErrorToast(code as ErrorCode)
+    });
+
+    return cleanup;
+  });
+
+  // Set up BroadcastChannel listener for cross-tab communication
+  createEffect(() => {
+    const broadcastChannel = setupBroadcastChannelListener({
+      user,
+      setUser,
+      setHasPinVault,
+      setIsVaultLocked,
+      attemptSessionRestore,
+      refreshSessionStatus,
+      messenger
+    });
+
+    return () => {
+      if (broadcastChannel) {
+        broadcastChannel.close();
       }
-      
-      // Cleanup
-      return () => {
-        workerInstance.removeEventListener('message', handleWorkerMessage as unknown as EventListener);
-        if (broadcastChannel) {
-          broadcastChannel.close();
-        }
-      };
-    } catch (error) {
-      console.error('Failed to set up worker message listener:', error);
-      showErrorToast('NETWORK_ERROR' as ErrorCode);
-    }
+    };
   });
 
   // Session management on mount
@@ -289,7 +149,15 @@ export const AuthProvider: ParentComponent = (props) => {
     };
 
     window.addEventListener('session-refresh', handleSessionRefresh as unknown as EventListener);
-    
+
+    // Notify MessengerProvider that auth is ready
+    console.error('🔍 [AuthProvider] Calling notifyAuthReady');
+    notifyAuthReady({
+      user,
+      cryptoWorker,
+      isVaultLocked
+    });
+
     return () => {
       window.removeEventListener('session-refresh', handleSessionRefresh as unknown as EventListener);
     };
@@ -354,392 +222,23 @@ export const AuthProvider: ParentComponent = (props) => {
     }
   }
 
-  // Set up message handlers for auth-related requests
-  createEffect(() => {
-    if (!messenger.isReady() || !messenger.messenger) return;
+  // Set up message handlers for auth-related requests (runs once when messenger is ready)
+  createEffect(on(
+    () => messenger.isReady() && messenger.messenger,
+    (ready) => {
+      if (!ready) return;
 
-    const DEV_BYPASS = false;
-    const appKeyFromOrigin = (origin: string): string => {
-      try {
-        const u = new URL(origin);
-        return sanitizeDomain(u.host);
-      } catch {
-        return sanitizeDomain(origin);
-      }
-    };
-
-    const getAppIdentityIndexForOrigin = async (username: string, origin: string): Promise<number> => {
-      if (!cryptoWorker) throw new Error('Crypto not ready');
-      const vaultData = await cryptoWorker.getVaultData({ username });
-      if (!vaultData?.identities || vaultData.identities.length === 0) {
-        throw new Error('No identities found');
-      }
-      if (DEV_BYPASS) {
-        return 0;
-      } else {
-        const appKey = appKeyFromOrigin(origin);
-        let activeIndex = (vaultData as any).activeIdentityByApp?.[appKey];
-        if (activeIndex === undefined || activeIndex === null) {
-          activeIndex = (vaultData as any).identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
-        }
-        if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {
-          // Instead of throwing, trigger account picker
-          const requestId = `account-picker-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-          return new Promise((resolve, reject) => {
-            const handleSelected = (e: Event) => {
-              const ce = e as CustomEvent;
-              if (ce.detail.requestId === requestId) {
-                cleanup();
-                resolve(ce.detail.identityIndex);
-              }
-            };
-
-            const handleRejected = (e: Event) => {
-              const ce = e as CustomEvent;
-              if (ce.detail.requestId === requestId) {
-                cleanup();
-                reject(new Error(ce.detail.error || 'Account selection cancelled'));
-              }
-            };
-
-            const cleanup = () => {
-              window.removeEventListener('account-picker-selected', handleSelected as EventListener);
-              window.removeEventListener('account-picker-rejected', handleRejected as EventListener);
-            };
-
-            window.addEventListener('account-picker-selected', handleSelected as EventListener);
-            window.addEventListener('account-picker-rejected', handleRejected as EventListener);
-
-            // Trigger account picker
-            window.dispatchEvent(new CustomEvent('vault-account-picker', {
-              detail: { appOrigin: origin, requestId }
-            }));
-          });
-        }
-        const identity = (vaultData as any).identities[activeIndex];
-        if (!identity?.appPermissions || !identity.appPermissions[appKey]) {
-          throw new Error('Selected identity is not authorized for this application');
-        }
-        return activeIndex;
-      }
-    };
-
-    // Handle public key requests from parent - NIP-07 compliant
-    messenger.messenger.route('GET_PUBLIC_KEY', {
-      handler: async (_data: any, context: any) => {
-        const currentUser = user();
-        if (!currentUser) {
-          throw new Error('User not authenticated');
-        }
-
-        const origin = context?.origin || 'unknown';
-        if (!cryptoWorker) throw new Error('Crypto not ready');
-        if (!currentUser.profile?.username) throw new Error('No username');
-
-        const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
-
-        // Only allow if identity is connected to this app
-        const idx = await getAppIdentityIndexForOrigin(currentUser.profile.username, origin);
-        const identity = (vaultData as any)?.identities?.[idx];
-        if (!identity?.publicKey) throw new Error('No connected identity public key');
-        return identity.publicKey;
-      }
-    });
-
-    // Handle sign event requests
-    messenger.messenger.route('SIGN_EVENT', {
-      handler: async (data: any, context: any) => {
-        const currentUser = user();
-        if (!currentUser || !cryptoWorker) {
-          throw new Error('User not authenticated or crypto not ready');
-        }
-
-        // If session rehydrated without keys, ask Embassy to prompt for PIN
-        try {
-          const ks = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
-          if (!ks?.hasPrivateKey && !ks?.hasXpriv) {
-            try {
-              messenger.send('PROMPT_REQUIRED', {
-                promptType: 'PIN_PAD',
-                reason: 'SIGN_EVENT_MISSING_KEYS',
-                eventKind: data?.event?.kind,
-                origin: context?.origin || 'unknown'
-              });
-            } catch {}
-            throw new Error('Session rehydrated without keys; unlock with PIN');
-          }
-        } catch {}
-
-        // Gate on vault lock state (do NOT rely on privateKey presence in UI thread)
-        if (isVaultLocked()) {
-          try {
-            messenger.send('PROMPT_REQUIRED', {
-              promptType: 'PIN_PAD',
-              reason: 'SIGN_EVENT',
-              eventKind: data?.event?.kind,
-              origin: context?.origin || 'unknown'
-            });
-          } catch {}
-          throw new Error('Vault is locked. Please unlock with PIN.');
-        }
-
-        const origin = context?.origin || 'unknown';
-        const identityIndex = await getAppIdentityIndexForOrigin(currentUser.profile.username, origin);
-
-        // Ensure event has required fields (pubkey, created_at)
-        try {
-          const vdata = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
-          const identity = (vdata as any)?.identities?.[identityIndex];
-          if (identity?.publicKey) {
-            if (!data.event) data.event = {};
-            if (!data.event.pubkey) data.event.pubkey = identity.publicKey;
-            if (!data.event.created_at) data.event.created_at = Math.floor(Date.now() / 1000);
-          }
-        } catch {}
-
-        // Use session-based signing in worker
-        try {
-          const result = await cryptoWorker.signEventWithSession({
-            username: currentUser.profile.username,
-            event: data.event,
-            identityIndex
-          });
-          // NIP-07: signEvent() returns the signed event object directly
-          return result.event;
-        } catch (err: any) {
-          const msg = err instanceof Error ? err.message : String(err ?? 'SIGN_EVENT failed');
-          throw new Error(msg);
-        }
-      }
-    });
-
-    // Handle sign data requests
-    messenger.messenger.route('SIGN_DATA', {
-      handler: async (data: { data: string }, context: any) => {
-        const currentUser = user();
-        if (!currentUser || !cryptoWorker) {
-          throw new Error('User not authenticated or crypto not ready');
-        }
-
-        // Preflight: prompt for PIN if keys missing
-        try {
-          const ks = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
-          if (!ks?.hasPrivateKey && !ks?.hasXpriv) {
-            try {
-              messenger.send('PROMPT_REQUIRED', {
-                promptType: 'PIN_PAD',
-                reason: 'SIGN_DATA_MISSING_KEYS',
-                origin: context?.origin || 'unknown'
-              });
-            } catch {}
-            throw new Error('Session rehydrated without keys; unlock with PIN');
-          }
-          // Post-unlock settle: if just unlocked, give worker a brief moment to attach keys
-          if (!ks?.hasPrivateKey) {
-            for (let i = 0; i < 5; i++) {
-              await new Promise(r => setTimeout(r, 120));
-              const again = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
-              if (again?.hasPrivateKey || again?.hasXpriv) break;
-              if (i === 4) {
-                throw new Error('Session rehydrated without keys; unlock with PIN');
-              }
-            }
-          }
-        } catch {}
-
-        // Gate on vault lock state
-        if (isVaultLocked()) {
-          try {
-            messenger.send('PROMPT_REQUIRED', {
-              promptType: 'PIN_PAD',
-              reason: 'SIGN_DATA',
-              origin: context?.origin || 'unknown'
-            });
-          } catch {}
-          throw new Error('Vault is locked. Please unlock with PIN.');
-        }
-
-        const origin = context?.origin || 'unknown';
-        const identityIndex = await getAppIdentityIndexForOrigin(currentUser.profile.username, origin);
-
-        // Use session-based signing for arbitrary data
-        try {
-          const result = await cryptoWorker.signMessageWithSession({
-            username: currentUser.profile.username,
-            message: data.data,
-            identityIndex
-          });
-          return { signature: result.signature };
-        } catch (err: any) {
-          // Normalize error for messenger
-          const msg = err instanceof Error ? err.message : String(err ?? 'Sign data failed');
-          throw new Error(msg);
-        }
-      }
-    });
-
-    // Handle encrypt requests (NIP-04)
-    messenger.messenger.route('ENCRYPT', {
-      handler: async (data: { plaintext: string; recipientPubkey: string }, context: any) => {
-        const currentUser = user();
-        if (!currentUser || !cryptoWorker) {
-          throw new Error('User not authenticated or crypto not ready');
-        }
-
-        // Preflight: prompt for PIN if keys missing
-        try {
-          const ks = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
-          if (!ks?.hasPrivateKey && !ks?.hasXpriv) {
-            try {
-              messenger.send('PROMPT_REQUIRED', {
-                promptType: 'PIN_PAD',
-                reason: 'ENCRYPT_MISSING_KEYS',
-                origin: context?.origin || 'unknown'
-              });
-            } catch {}
-            throw new Error('Session rehydrated without keys; unlock with PIN');
-          }
-        } catch {}
-
-        // Gate on vault lock state
-        if (isVaultLocked()) {
-          try {
-            messenger.send('PROMPT_REQUIRED', {
-              promptType: 'PIN_PAD',
-              reason: 'ENCRYPT',
-              origin: context?.origin || 'unknown'
-            });
-          } catch {}
-          throw new Error('Vault is locked. Please unlock with PIN.');
-        }
-
-        const origin = context?.origin || 'unknown';
-        const identityIndex = await getAppIdentityIndexForOrigin(currentUser.profile.username, origin);
-
-        // Use session-based encryption
-        const encrypted = await cryptoWorker.encryptWithSession({
-          username: currentUser.profile.username,
-          plaintext: data.plaintext,
-          recipientPubkey: data.recipientPubkey,
-          identityIndex
-        });
-
-        // NIP-07: nip04.encrypt() returns just the encrypted string
-        return encrypted;
-      }
-    });
-
-    // Handle decrypt requests (NIP-04)
-    messenger.messenger.route('DECRYPT', {
-      handler: async (data: { ciphertext: string; senderPubkey: string }, context: any) => {
-        const currentUser = user();
-        if (!currentUser || !cryptoWorker) {
-          throw new Error('User not authenticated or crypto not ready');
-        }
-
-        // Preflight: prompt for PIN if keys missing
-        try {
-          const ks = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
-          if (!ks?.hasPrivateKey && !ks?.hasXpriv) {
-            try {
-              messenger.send('PROMPT_REQUIRED', {
-                promptType: 'PIN_PAD',
-                reason: 'DECRYPT_MISSING_KEYS',
-                origin: context?.origin || 'unknown'
-              });
-            } catch {}
-            throw new Error('Session rehydrated without keys; unlock with PIN');
-          }
-        } catch {}
-
-        // Gate on vault lock state
-        if (isVaultLocked()) {
-          try {
-            messenger.send('PROMPT_REQUIRED', {
-              promptType: 'PIN_PAD',
-              reason: 'DECRYPT',
-              origin: context?.origin || 'unknown'
-            });
-          } catch {}
-          throw new Error('Vault is locked. Please unlock with PIN.');
-        }
-
-        const origin = context?.origin || 'unknown';
-        const identityIndex = await getAppIdentityIndexForOrigin(currentUser.profile.username, origin);
-
-        // Use session-based decryption
-        const decrypted = await cryptoWorker.decryptWithSession({
-          username: currentUser.profile.username,
-          ciphertext: data.ciphertext,
-          senderPubkey: data.senderPubkey,
-          identityIndex
-        });
-
-        // NIP-07: nip04.decrypt() returns just the decrypted string
-        return decrypted;
-      }
-    });
-
-    // Unlock with PIN (called by Embassy after PIN prompt)
-    messenger.messenger.route('UNLOCK_WITH_PIN', {
-      handler: async (data: { pin: string }) => {
-        if (!data?.pin) {
-          throw new Error('PIN is required');
-        }
-        const success = await unlockVault(data.pin);
-        // Broadcast updated auth status to parent immediately so cross-tab preflight sees unlocked
-        try {
-          messenger.send('AUTH_STATUS', {
-            isAuthenticated: !!user(),
-            publicKey: user()?.publicKey || null
-          });
-        } catch {}
-        return { success };
-      }
-    });
-
-    // Preflight permission check
-    messenger.messenger.route('CHECK_PERMISSION', {
-      handler: async (data: { action: 'getPublicKey' | 'signEvent' | 'signData' | 'nip04' | 'getRelays'; eventKind?: number }, context: any) => {
-        const currentUser = user();
-        if (!currentUser || !cryptoWorker) {
-          throw new Error('User not authenticated or crypto not ready');
-        }
-
-        const rawOrigin = context?.origin || 'unknown';
-        const appKey = appKeyFromOrigin(rawOrigin);
-        const result = await cryptoWorker.checkPermission({
-          username: currentUser.profile.username,
-          origin: appKey,
-          action: data.action,
-          eventKind: data.eventKind
-        });
-        // If vault is unlocked in UI and worker should also be unlocked, cheerfully clear needsPrompt
-        const isLocked = isVaultLocked();
-        const normalized = isLocked ? result : { ...result, needsPrompt: false };
-        return { ...normalized, isLocked };
-      }
-    });
-
-    // Handle auth status requests
-    messenger.messenger.route('GET_AUTH_STATUS', {
-      handler: () => {
-        return {
-          isAuthenticated: !!user(),
-          publicKey: user()?.publicKey || null
-        };
-      }
-    });
-    
-    // Handle auth status response (acknowledgment from parent)
-    messenger.messenger.route('AUTH_STATUS_RESPONSE', {
-      handler: (data: any) => {
-        // Just acknowledge - parent is confirming receipt of AUTH_STATUS
-        console.log('Auth status acknowledged by parent:', data);
-      }
-    });
-  });
+      console.log('[AuthProvider] Setting up messenger routes');
+      setupMessengerRoutes({
+        messenger,
+        user,
+        isVaultLocked,
+        cryptoWorker,
+        unlockVault
+      });
+    },
+    { defer: true } // Only run when the tracked value changes from falsy to truthy
+  ));
 
   const createAccount = async (
     username: string, 
@@ -1618,8 +1117,8 @@ export const AuthProvider: ParentComponent = (props) => {
       try {
         // Derive storage keypair to decrypt Nostr events
         await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index: 8907 }); // STORAGE_INDEX
-        
-        // PRE model: blob fetch deprecated; state hydration handled below
+
+        // Note: Vault data already loaded from IndexedDB during login
       } catch (nostrError) {
         console.warn('⚠️ [UNLOCK] Failed to fetch from Nostr (non-critical):', nostrError);
       }

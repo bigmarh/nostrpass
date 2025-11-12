@@ -30,8 +30,86 @@
     <link rel="canonical" href="https://nostrpass.com" />
     <script type="module" crossorigin src="/assets/frontend.BsPHdLya.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/frontend.D5CBXSdI.css">
+    <script defer src="/embassy.js"></script>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        if (typeof window.initNostrPass !== 'function') {
+          console.warn('[NostrPass Demo] Embassy script not ready; skipping NostrPass button demo.');
+          return;
+        }
+
+        const provider = window.initNostrPass({
+          appName: 'NostrPass Test Site',
+          appDomain: window.location.origin,
+          vaultUrl: 'https://vault.nostrpass.com/'
+        });
+
+        // Create container for NostrPass button
+        const demoContainer = document.createElement('div');
+        demoContainer.id = 'nostrpass-button-demo';
+        demoContainer.style.position = 'fixed';
+        demoContainer.style.top = '24px';
+        demoContainer.style.right = '24px';
+        demoContainer.style.zIndex = '2147483647';
+        demoContainer.style.display = 'flex';
+        demoContainer.style.alignItems = 'center';
+        demoContainer.style.gap = '12px';
+
+        // Add badge
+        const badge = document.createElement('div');
+        badge.textContent = 'NostrPass Demo';
+        badge.style.background = 'rgba(15, 23, 42, 0.85)';
+        badge.style.color = 'white';
+        badge.style.padding = '8px 16px';
+        badge.style.borderRadius = '9999px';
+        badge.style.fontSize = '12px';
+        badge.style.fontWeight = '600';
+        badge.style.boxShadow = '0 10px 30px rgba(15, 23, 42, 0.35)';
+
+        demoContainer.appendChild(badge);
+        document.body.appendChild(demoContainer);
+
+        // Create the NostrPass button
+        try {
+          const nostrpassButton = provider.createNostrPassButton({
+            appendTo: demoContainer,
+            theme: 'auto',
+            showNpub: true,
+            showManageAccount: true,
+            onSignIn: (user) => {
+              console.log('[NostrPass Demo] User signed in:', user);
+              // Update badge to show signed in state
+              badge.textContent = `Signed in as ${user.nickname || 'Identity ' + (user.identityIndex + 1)}`;
+              badge.style.background = 'rgba(16, 185, 129, 0.85)'; // Green
+            },
+            onSignOut: () => {
+              console.log('[NostrPass Demo] User signed out');
+              // Reset badge
+              badge.textContent = 'NostrPass Demo';
+              badge.style.background = 'rgba(15, 23, 42, 0.85)';
+            },
+            onError: (error) => {
+              console.error('[NostrPass Demo] Error:', error);
+            }
+          });
+
+          // Try to restore session
+          nostrpassButton.restoreSession().then(restored => {
+            if (restored) {
+              const user = nostrpassButton.getUser();
+              if (user) {
+                badge.textContent = `Signed in as ${user.nickname || 'Identity ' + (user.identityIndex + 1)}`;
+                badge.style.background = 'rgba(16, 185, 129, 0.85)';
+              }
+            }
+          });
+        } catch (error) {
+          console.error('[NostrPass Demo] Failed to create button:', error);
+        }
+      });
+    </script>
   </body>
 </html>

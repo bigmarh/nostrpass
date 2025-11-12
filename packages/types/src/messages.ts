@@ -15,7 +15,8 @@ export enum Msg {
   ENCRYPT = 'ENCRYPT',
   DECRYPT = 'DECRYPT',
   GOT_ERROR = 'GOT_ERROR',
-  PROMPT_REQUIRED = 'PROMPT_REQUIRED'
+  PROMPT_REQUIRED = 'PROMPT_REQUIRED',
+  MANAGE_ACCOUNTS = 'MANAGE_ACCOUNTS'
 }
 
 export enum ErrorCode {
@@ -54,5 +55,17 @@ export interface DecryptResponse extends ResponseBase<'DECRYPT_RESPONSE', string
 
 export interface GetRelaysRequest extends RequestBase<Msg.GET_RELAYS, { appName?: string; appDomain?: string; identityIndex?: number }>{}
 export interface GetRelaysResponse extends ResponseBase<'GET_RELAYS_RESPONSE', Record<string, { read: boolean; write: boolean }>>{}
+
+export interface ManageAccountsRequest extends RequestBase<Msg.MANAGE_ACCOUNTS, { appName?: string; appDomain?: string; forcePrompt?: boolean }>{}
+export interface ManageAccountsResponse extends ResponseBase<'MANAGE_ACCOUNTS_RESPONSE', {
+  identityIndex: number;
+  identity?: {
+    nickname?: string;
+    publicKey: string;
+    npub?: string;
+    path?: string;
+    authorized: boolean;
+  }
+}>{}
 
 

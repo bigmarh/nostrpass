@@ -29,7 +29,7 @@ export const AppProviders: ParentComponent = (props) => {
 
 // Re-export all providers and hooks
 export { EnvironmentProvider, useEnvironment } from './EnvironmentProvider';
-export { MessengerProvider, useMessenger } from './MessengerProvider';
+export { MessengerProvider, useMessenger, notifyAuthReady } from './MessengerProvider';
 export { CryptoWorkerProvider, useCryptoWorker, useCryptoWorkerReady } from './CryptoWorkerProvider';
 export { AuthProvider, useAuth } from './AuthProvider';
 export { DataProvider, useData } from './DataProvider';

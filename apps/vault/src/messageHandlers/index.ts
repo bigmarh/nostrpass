@@ -10,6 +10,10 @@ export function setupMessageHandlers(
   messenger: IframeMessenger,
   dependencies: MessageHandlerDependencies
 ) {
+  console.error('🚨🚨🚨 setupMessageHandlers() CALLED AT', new Date().toISOString());
+  console.error('🚨 messenger instance:', messenger);
+  console.error('🚨 dependencies:', Object.keys(dependencies));
+  
   // Global middleware: enrich context.metadata with origin details
   messenger.use(async (context, next) => {
     context.metadata = context.metadata || {};
@@ -90,9 +94,13 @@ export function setupMessageHandlers(
   });
 
   // Register all auth-related handlers
+  console.error('🟢 Registering auth handlers:', authHandlers.map(h => h.route));
   authHandlers.forEach(({ route, handler }) => {
     messenger.route(route, {
-      handler: (data: any, context: any) => handler(data, context, dependencies)
+      handler: (data: any, context: any) => {
+        console.error(`🔵 Handler called for route: ${route}`);
+        return handler(data, context, dependencies);
+      }
     });
   });
 

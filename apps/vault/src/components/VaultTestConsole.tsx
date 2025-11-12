@@ -197,7 +197,8 @@ export const VaultTestConsole: Component = () => {
         const result = await cryptoWorker.signMessageWithSession({
           username: currentUser.profile.username,
           message: testMessage,
-          identityIndex: 0
+          identityIndex: 0,
+          origin: currentAppKey() // Pass origin for permission check
         });
 
         addLog('response', 'Data signed successfully:', {

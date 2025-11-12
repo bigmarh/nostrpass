@@ -18,19 +18,28 @@ interface MessengerContextType {
 
 const MessengerContext = createContext<MessengerContextType>();
 
+// Global registry for auth ready callback
+let authReadyCallback: ((auth: any) => void) | null = null;
+
+export function registerAuthReady(callback: (auth: any) => void) {
+  authReadyCallback = callback;
+}
+
+export function notifyAuthReady(auth: any) {
+  console.error('🔍 [MessengerProvider] notifyAuthReady called with auth:', !!auth);
+  if (authReadyCallback) {
+    console.error('🔍 [MessengerProvider] Calling registered callback');
+    authReadyCallback(auth);
+  } else {
+    console.error('🔍 [MessengerProvider] No callback registered yet!');
+  }
+}
+
 export const MessengerProvider: ParentComponent = (props) => {
   const [isReady, setIsReady] = createSignal(false);
   const [messenger, setMessenger] = createSignal<IframeMessenger | null>(null);
   const [handlersRegistered, setHandlersRegistered] = createSignal(false);
   const { isDevelopment, isStaging, isProduction } = useEnvironment();
-  
-  const getAuth = () => {
-    try {
-      return useAuth();
-    } catch {
-      return null;
-    }
-  };
 
   const toAppKey = (origin: string): string => {
     try {
@@ -131,23 +140,53 @@ export const MessengerProvider: ParentComponent = (props) => {
     }
   });
 
-  // Once auth and messenger are available, register message handlers with deps
-  createEffect(() => {
-    const m = messenger();
-    const auth = getAuth();
-    if (!m || !auth) return;
+  // Register callback for when AuthProvider is ready
+  onMount(() => {
+    console.error('🔍 [MessengerProvider] onMount - registering auth ready callback');
+
+    authReadyCallback = (auth: any) => {
+      console.error('🔍 [MessengerProvider] Auth ready callback fired!', { hasAuth: !!auth, hasMessenger: !!messenger() });
+      const m = messenger();
+      if (m && auth && !handlersRegistered()) {
+        console.error('🔍 [MessengerProvider] Both ready, setting up handlers');
+        setupHandlers(m, auth);
+      }
+    };
+  });
+
+  const setupHandlers = (m: IframeMessenger, auth: any) => {
+    console.error('🔍 [MessengerProvider] setupHandlers called - messenger:', !!m, 'auth:', !!auth);
+
+    // Don't return early - let the effect re-run when auth becomes available
+    if (!m) {
+      console.error('🔍 [MessengerProvider] Messenger not ready yet, will retry');
+      return;
+    }
+
+    if (!auth) {
+      console.error('🔍 [MessengerProvider] Auth not ready yet, will retry when auth becomes available');
+      return;
+    }
+
+    // Skip if handlers already registered to avoid double registration
+    if (handlersRegistered()) {
+      console.error('🔍 [MessengerProvider] Handlers already registered, skipping');
+      return;
+    }
+
+    console.error('🔍 [MessengerProvider] Both messenger and auth ready, proceeding with setup');
 
     const deps = {
-      getUser: () => auth.user(),
-      getCryptoWorker: () => (auth as any).cryptoWorker || null,
+      getUser: () => auth.user(),  // user is a signal (function)
+      getCryptoWorker: () => auth.cryptoWorker,  // cryptoWorker is already the value
       checkPermission: async (action: string, origin: string, eventKind?: number, identityIndex?: number) => {
         const fallback: { allowed: boolean; level: PermissionLevel; sessionGranted?: boolean } = {
           allowed: false,
           level: 'ASK_EVERYTIME'
         };
         try {
-          const cw = (auth as any).cryptoWorker;
-          const current = auth.user();
+          const cw = auth.cryptoWorker;  // cryptoWorker is already the value
+          const current = auth.user();  // user is a signal (function)
           if (!cw || !current) return fallback;
           const appKey = toAppKey(origin);
           const result = await cw.checkPermission({
@@ -166,10 +205,10 @@ export const MessengerProvider: ParentComponent = (props) => {
           return fallback;
         }
       },
-      isVaultLocked: () => auth.isVaultLocked(),
+      isVaultLocked: () => auth.isVaultLocked(),  // isVaultLocked is a signal (function)
       getAppIdentityIndex: async (origin: string) => {
-        const cw = (auth as any).cryptoWorker;
-        const current = auth.user();
+        const cw = auth.cryptoWorker;  // cryptoWorker is already the value
+        const current = auth.user();  // user is a signal (function)
         if (!cw || !current) throw new Error('Crypto not ready');
         const vaultData = await cw.getVaultData({ username: current.profile.username });
         const appKey = toAppKey(origin);
@@ -221,7 +260,7 @@ export const MessengerProvider: ParentComponent = (props) => {
 
     // Inform parent handlers are ready
     if (window.parent !== window) sendVaultReady();
-  });
+  };
 
   const send = (type: string, data?: any) => {
     const m = messenger();

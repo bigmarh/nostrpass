@@ -1,38 +1,890 @@
-var S=Object.defineProperty;var A=(d,c,u)=>c in d?S(d,c,{enumerable:!0,configurable:!0,writable:!0,value:u}):d[c]=u;var l=(d,c,u)=>A(d,typeof c!="symbol"?c+"":c,u);(function(){"use strict";var d=(n=>(n.REQUEST="REQUEST",n.RESPONSE="RESPONSE",n.ERROR="ERROR",n.NOTIFICATION="NOTIFICATION",n))(d||{}),c=(n=>(n.GET_PUBLIC_KEY="GET_PUBLIC_KEY",n.SIGN_EVENT="SIGN_EVENT",n.ENCRYPT="ENCRYPT",n.DECRYPT="DECRYPT",n.GET_RELAYS="GET_RELAYS",n.NIP04_ENCRYPT="NIP04_ENCRYPT",n.NIP04_DECRYPT="NIP04_DECRYPT",n.NIP44_ENCRYPT="NIP44_ENCRYPT",n.NIP44_DECRYPT="NIP44_DECRYPT",n))(c||{}),u=(n=>(n.INVALID_REQUEST="INVALID_REQUEST",n.UNAUTHORIZED="UNAUTHORIZED",n.NOT_FOUND="NOT_FOUND",n.INTERNAL_ERROR="INTERNAL_ERROR",n.TIMEOUT="TIMEOUT",n.USER_DENIED="USER_DENIED",n.INVALID_PARAMS="INVALID_PARAMS",n))(u||{});const T={apiBaseUrl:"https://api-j26h4veqna-uc.a.run.app",firebaseFunctionsUrl:"https://us-central1-nostrpass.cloudfunctions.net/api",useFirebaseEmulators:!1,firestoreEmulatorHost:"localhost",firestoreEmulatorPort:8181,functionsEmulatorHost:"localhost",functionsEmulatorPort:5101,isDevelopment:!0,isProduction:!1,devServerPorts:[5173,5174],allowedOrigins:["https://nostrpass.com","https://www.nostrpass.com","https://vault.nostrpass.com"]};function b(){const n=window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1"||window.location.port==="5173"||window.location.port==="5174"||window.location.port==="5102",t={isDevelopment:n,isProduction:!n,apiBaseUrl:"http://localhost:5101/nostrpass/us-central1/api",firebaseFunctionsUrl:"http://localhost:5101/nostrpass/api",useFirebaseEmulators:n&&!1,firestoreEmulatorHost:"localhost",firestoreEmulatorPort:parseInt("8181"),functionsEmulatorHost:"localhost",functionsEmulatorPort:parseInt("5101"),devServerPorts:[parseInt("5102"),parseInt("5173")],allowedOrigins:["http://localhost:5102","http://localhost:5173","http://127.0.0.1:5102","http://127.0.0.1:5173","https://localhost:5102","https://localhost:5173",...T.allowedOrigins||[]]};return{...T,...n?t:{}}}const g=b();function y(){return g.isDevelopment}g.isDevelopment&&console.debug("🔧 Environment Configuration:",{isDevelopment:g.isDevelopment,hostname:window.location.hostname,port:window.location.port,apiBaseUrl:g.apiBaseUrl,useEmulators:g.useFirebaseEmulators,firestoreEmulator:`${g.firestoreEmulatorHost}:${g.firestoreEmulatorPort}`,allowedOrigins:g.allowedOrigins.slice(0,3)});class O{constructor(){l(this,"logLevel");this.logLevel=0}sanitize(e){if(typeof e=="string")return e.replace(/[A-Za-z0-9+/]{100,}/g,"[REDACTED_TOKEN]").replace(/npub[a-zA-Z0-9]{58,}/g,"[REDACTED_PUBKEY]").replace(/nsec[a-zA-Z0-9]{58,}/g,"[REDACTED_PRIVKEY]").replace(/firebase-uid-[a-zA-Z0-9-]+/g,"[REDACTED_UID]");if(typeof e=="object"&&e!==null){const t={};for(const[s,i]of Object.entries(e))["token","customToken","privateKey","seed","mnemonic","pin","password"].includes(s)?t[s]="[REDACTED]":s.includes("uid")||s.includes("userId")?t[s]="[REDACTED_ID]":t[s]=this.sanitize(i);return t}return e}formatMessage(e,t,s){const i=new Date().toISOString(),r=s!=null&&s.service?`[${s.service}]`:"[NostrPass]";return y()?`${i} ${e} ${r} ${t}`:`${r} ${t}`}error(e,t,s){if(this.logLevel>=0){const i=t?this.sanitize(t):void 0,r=this.formatMessage("ERROR",e,s);t instanceof Error?console.error(r,{message:t.message,stack:y()?t.stack:void 0,...s}):t?console.error(r,i,s):console.error(r,s)}}warn(e,t,s){if(this.logLevel>=1){const i=t?this.sanitize(t):void 0,r=this.formatMessage("WARN",e,s);i?console.warn(r,i):console.warn(r)}}info(e,t,s){if(this.logLevel>=2){const i=t?this.sanitize(t):void 0,r=this.formatMessage("INFO",e,s);i?console.log(r,i):console.log(r)}}debug(e,t,s){if(this.logLevel>=3){const i=t?this.sanitize(t):void 0,r=this.formatMessage("DEBUG",e,s);i?console.debug(r,i):console.debug(r)}}createServiceLogger(e){return{error:(t,s,i)=>this.error(t,s,{service:e,...i}),warn:(t,s,i)=>this.warn(t,s,{service:e,...i}),info:(t,s,i)=>this.info(t,s,{service:e,...i}),debug:(t,s,i)=>this.debug(t,s,{service:e,...i})}}setLogLevel(e){this.logLevel=e}}const U=new O,I=n=>U.createServiceLogger(n);var E=(n=>(n.PENDING="PENDING",n.TIMEOUT="TIMEOUT",n.RESOLVED="RESOLVED",n.REJECTED="REJECTED",n))(E||{});class L{constructor(e={}){l(this,"requests",new Map);l(this,"logger",I("RequestQueue"));l(this,"timeout");l(this,"maxRetries");l(this,"setTimeout");l(this,"clearTimeout");l(this,"cleanupTimer");this.timeout=e.timeout??3e4,this.maxRetries=e.maxRetries??3,this.setTimeout=e.setTimeout??((...s)=>setTimeout(...s)),this.clearTimeout=e.clearTimeout??((...s)=>clearTimeout(...s));const t=e.cleanupInterval??6e4;this.cleanupTimer=this.setTimeout(()=>this.cleanup(),t)}add(e){return this.requests.has(e.id)?(this.logger.warn("Duplicate request ID detected",{id:e.id}),Promise.reject(this.createError(e.id,u.INVALID_REQUEST,"Duplicate request ID"))):new Promise((t,s)=>{const i=this.setTimeout(()=>{this.handleTimeout(e.id)},this.timeout),r={request:e,timestamp:Date.now(),state:"PENDING",retryCount:0,timeoutHandle:i,resolve:t,reject:s};this.requests.set(e.id,r),this.logger.debug("Request added to queue",{id:e.id,method:e.method})})}retry(e){const t=this.requests.get(e);return t?t.state!=="TIMEOUT"?(this.logger.warn("Cannot retry: invalid state",{id:e,state:t.state}),!1):t.retryCount>=this.maxRetries?(this.logger.warn("Cannot retry: max retries exceeded",{id:e,retries:t.retryCount}),!1):(t.retryCount++,t.state="PENDING",t.timeoutHandle=this.setTimeout(()=>this.handleTimeout(e),this.timeout),this.logger.debug("Request retry initiated",{id:e,retryCount:t.retryCount}),!0):(this.logger.warn("Cannot retry: request not found",{id:e}),!1)}resolve(e,t){const s=this.requests.get(e);return s?(s.timeoutHandle&&this.clearTimeout(s.timeoutHandle),s.state="RESOLVED",s.resolve(t),this.requests.delete(e),this.logger.debug("Request resolved",{id:e}),!0):(this.logger.warn("Cannot resolve: request not found",{id:e}),!1)}reject(e,t){const s=this.requests.get(e);return s?(s.timeoutHandle&&this.clearTimeout(s.timeoutHandle),s.state="REJECTED",s.reject(t),this.requests.delete(e),this.logger.debug("Request rejected",{id:e,code:t.code}),!0):(this.logger.warn("Cannot reject: request not found",{id:e}),!1)}getByState(e){return Array.from(this.requests.values()).filter(t=>t.state===e)}cleanup(){const e=Date.now(),t=[];for(const[s,i]of this.requests)i.state==="RESOLVED"||i.state==="REJECTED"?t.push(s):e-i.timestamp>this.timeout*2&&(t.push(s),this.logger.warn("Cleaning up stale request",{id:s,age:e-i.timestamp}));return t.forEach(s=>this.requests.delete(s)),this.logger.debug("Cleanup completed",{removed:t.length}),t.length}destroy(){this.cleanupTimer&&this.clearTimeout(this.cleanupTimer),this.requests.clear()}handleTimeout(e){const t=this.requests.get(e);!t||t.state!=="PENDING"||(t.state="TIMEOUT",this.logger.warn("Request timeout",{id:e,method:t.request.method}))}createError(e,t,s){return{id:`error-${Date.now()}`,type:d.ERROR,timestamp:Date.now(),requestId:e,code:t,message:s}}}var h=(n=>(n.INITIAL="INITIAL",n.LOCKED="LOCKED",n.UNLOCKING="UNLOCKING",n.UNLOCKED="UNLOCKED",n.PROCESSING="PROCESSING",n.ERROR="ERROR",n))(h||{});const p=class p{constructor(){l(this,"currentState","INITIAL");l(this,"logger",I("NavigationMachine"));l(this,"transitionRules");l(this,"eventHandlers",new Map);this.transitionRules=this.initializeTransitionRules(),this.logger.debug("NavigationMachine initialized",{state:this.currentState})}static getInstance(){return p.instance||(p.instance=new p),p.instance}static resetInstance(){p.instance&&(p.instance.eventHandlers.clear(),p.instance=null)}getCurrentState(){return this.currentState}canTransition(e){const t=this.createTransitionKey(this.currentState,e),s=this.transitionRules.get(t)??!1;return this.logger.debug("Checking transition",{from:this.currentState,to:e,allowed:s}),s}transition(e){if(!this.canTransition(e))return this.logger.error("Invalid state transition attempted",{from:this.currentState,to:e,message:this.getTransitionError(this.currentState,e)}),!1;const t=this.currentState;this.currentState=e;const s={from:t,to:e,timestamp:Date.now()};return this.logger.info("State transition successful",{from:t,to:e}),this.emitEvent("stateChange",s),!0}reset(){const e=this.currentState;this.currentState="INITIAL",this.logger.info("State machine reset",{from:e,to:this.currentState}),this.emitEvent("stateChange",{from:e,to:this.currentState,timestamp:Date.now()})}initializeTransitionRules(){const e=[{from:"INITIAL",to:"LOCKED",allowed:!0},{from:"INITIAL",to:"UNLOCKED",allowed:!0},{from:"LOCKED",to:"UNLOCKING",allowed:!0},{from:"LOCKED",to:"ERROR",allowed:!0},{from:"UNLOCKING",to:"UNLOCKED",allowed:!0},{from:"UNLOCKING",to:"LOCKED",allowed:!0},{from:"UNLOCKING",to:"ERROR",allowed:!0},{from:"UNLOCKED",to:"PROCESSING",allowed:!0},{from:"UNLOCKED",to:"LOCKED",allowed:!0},{from:"UNLOCKED",to:"ERROR",allowed:!0},{from:"PROCESSING",to:"UNLOCKED",allowed:!0},{from:"PROCESSING",to:"ERROR",allowed:!0},{from:"ERROR",to:"LOCKED",allowed:!0},{from:"ERROR",to:"UNLOCKED",allowed:!0},{from:"ERROR",to:"INITIAL",allowed:!0}],t=new Map;return e.forEach(s=>{const i=this.createTransitionKey(s.from,s.to);t.set(i,s.allowed)}),t}createTransitionKey(e,t){return`${e}->${t}`}getTransitionError(e,t){const s=this.getValidTransitionsFrom(e);return s.length===0?`No valid transitions from state '${e}'`:`Cannot transition from '${e}' to '${t}'. Valid transitions: ${s.join(", ")}`}getValidTransitionsFrom(e){const t=[];return Object.values(h).forEach(s=>{const i=this.createTransitionKey(e,s);this.transitionRules.get(i)&&t.push(s)}),t}on(e,t){this.eventHandlers.has(e)||this.eventHandlers.set(e,[]),this.eventHandlers.get(e).push(t)}off(e,t){const s=this.eventHandlers.get(e);if(s){const i=s.indexOf(t);i>-1&&s.splice(i,1)}}removeAllListeners(){this.eventHandlers.clear()}emitEvent(e,t){const s=this.eventHandlers.get(e);s&&s.forEach(i=>i(t))}};l(p,"instance",null);let f=p;const o={debug:(n,...e)=>{var t,s,i;(((t=window.location)==null?void 0:t.hostname)==="localhost"||(i=(s=window.location)==null?void 0:s.hostname)!=null&&i.includes("dev"))&&console.log(`[Embassy] ${n}`,...e)},info:(n,...e)=>console.log(`[Embassy] ${n}`,...e),warn:(n,...e)=>console.warn(`[Embassy] ${n}`,...e),error:(n,...e)=>console.error(`[Embassy] ${n}`,...e)};function P(){return"http://localhost:5102/vault/"}const _=P(),C="nostrpass-vault-iframe";class D{constructor(e={}){l(this,"iframe",null);l(this,"loginButton",null);l(this,"config");l(this,"requestId",0);l(this,"requestQueue");l(this,"isReady",!1);l(this,"styleElement",null);l(this,"vaultReady",!1);l(this,"navigationMachine",f.getInstance());l(this,"MESSAGE_TYPE_MAP",{"nostrpass:ready":"VAULT_READY","nostrpass:response":"RESPONSE","nostrpass:unlocked":"VAULT_UNLOCKED","nostrpass:authenticated":"VAULT_AUTHENTICATED",VAULT_AUTH_SUCCESS:"VAULT_AUTHENTICATED","nostrpass-permission-granted":"PERMISSION_GRANTED","nostrpass-biometric-permission-completed":"BIOMETRIC_COMPLETED",NOSTRPASS_CLOSE_VAULT:"CLOSE_VAULT",NOSTRPASS_SHOW_VAULT:"SHOW_VAULT","nostrpass:check-app-permissions":"CHECK_APP_PERMISSIONS","nostrpass:logout":"USER_LOGOUT"});this.config={appName:e.appName||document.title||"Unknown App",appDomain:e.appDomain||window.location.hostname,permissions:e.permissions||["getPublicKey","signEvent"],theme:e.theme||"auto",position:e.position||"center",size:e.size||"fullscreen",button:e.button||{show:!0},debug:e.debug||!1},this.config={...this.config,...window.nostrPassConfig},this.requestQueue=new L({timeout:3e4,maxRetries:3}),this.setupMessageListener(),this.injectStyles(),document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>this.createLoginButton()):this.createLoginButton(),this.createIframe(!0),o.info("Embassy initialized",{appName:this.config.appName,appDomain:this.config.appDomain})}mapMethodToRequestMethod(e){return{getPublicKey:c.GET_PUBLIC_KEY,signEvent:c.SIGN_EVENT,signData:c.SIGN_EVENT,getRelays:c.GET_RELAYS,"nip04.encrypt":c.NIP04_ENCRYPT,"nip04.decrypt":c.NIP04_DECRYPT}[e]||c.SIGN_EVENT}mapErrorToCode(e){return{VAULT_LOCKED:u.UNAUTHORIZED,PERMISSION_REQUIRED:u.UNAUTHORIZED,AUTH_REQUIRED:u.UNAUTHORIZED,ASK_ONCE_REQUIRED:u.UNAUTHORIZED,ASK_ALWAYS_REQUIRED:u.UNAUTHORIZED,BIOMETRIC_REQUIRED:u.UNAUTHORIZED,USER_DENIED:u.USER_DENIED,INVALID_REQUEST:u.INVALID_REQUEST,NOT_FOUND:u.NOT_FOUND}[e]||u.INTERNAL_ERROR}setupMessageListener(){window.addEventListener("message",e=>{var t,s,i,r;try{const R=new URL(_);if(e.origin!==R.origin)return}catch{return}o.debug("Received message from vault:",{type:(t=e.data)==null?void 0:t.type,requestId:(s=e.data)==null?void 0:s.requestId,hasData:!!((i=e.data)!=null&&i.data),error:(r=e.data)==null?void 0:r.error}),this.handleMessage(e)})}handleMessage(e){var N;if(((N=e.data)==null?void 0:N.type)==="nostrpass:request-app-domain"){o.debug("Vault requested app domain, responding",{appDomain:this.config.appDomain}),e.source&&typeof e.source.postMessage=="function"&&e.source.postMessage({type:"nostrpass:app-domain-response",appDomain:this.config.appDomain},e.origin);return}if(!this.iframe||e.source!==this.iframe.contentWindow)return;const{type:t,requestId:s,success:i,data:r,error:R,event:m}=e.data;if(t===d.NOTIFICATION&&m)switch(o.debug("Processing notification",{event:m}),m){case"CLOSE_VAULT":this.hide();return;case"VAULT_READY":this.handleVaultReady();return;default:o.debug("Unhandled notification event",{event:m});return}const w=this.MESSAGE_TYPE_MAP[t]||t;switch(o.debug("Processing message",{originalType:t,mappedType:w}),w){case"VAULT_READY":this.handleVaultReady();break;case"RESPONSE":s&&this.handleResponse(s,i,r,R);break;case"VAULT_UNLOCKED":this.handleVaultUnlocked();break;case"VAULT_AUTHENTICATED":this.handleVaultAuthenticated(r);break;case"PERMISSION_GRANTED":this.handlePermissionGranted();break;case"BIOMETRIC_COMPLETED":this.handleBiometricCompleted(r);break;case"CLOSE_VAULT":this.hide();break;case"SHOW_VAULT":this.show();break;case"CHECK_APP_PERMISSIONS":this.handleAppPermissionCheck(r);break;case"USER_LOGOUT":this.handleLogout();break;default:o.debug("Unhandled message type",{type:w})}}handleVaultReady(){o.info("Vault is ready"),this.isReady=!0,this.vaultReady=!0,this.navigationMachine.transition(h.UNLOCKED),this.dispatchEvent("nostrpass:ready")}handleResponse(e,t,s,i){if(o.debug("Handling response",{requestId:e,success:t,hasData:!!s,error:i}),t){o.debug("Request successful",{requestId:e});const r={id:`res_${Date.now()}`,type:d.RESPONSE,timestamp:Date.now(),requestId:e,result:s};this.requestQueue.resolve(e,r)}else{o.warn("Request failed",{requestId:e,error:i});const r={id:`err_${Date.now()}`,type:d.ERROR,timestamp:Date.now(),requestId:e,code:this.mapErrorToCode(i),message:i||"Request failed",details:s};if(i==="VAULT_LOCKED"){o.info("Vault is locked, prompting user to unlock"),this.navigationMachine.transition(h.LOCKED),this.showVault("unlock-operation",!0),this.requestQueue.retry(e);return}if(i==="PERMISSION_REQUIRED"){o.info("Permission required, prompting user to approve"),this.showVault("passport",!0),this.requestQueue.retry(e);return}if(i==="AUTH_REQUIRED"){o.info("Authentication required, prompting user to sign in"),this.navigationMachine.transition(h.INITIAL),this.showVault("/",!0),this.requestQueue.retry(e);return}if(i==="ASK_ONCE_REQUIRED"||i==="ASK_ALWAYS_REQUIRED"||i==="BIOMETRIC_REQUIRED"){o.info("Biometric permission required",{error:i,requestId:e,data:s}),this.sendToVault({type:"nostrpass:show-biometric-permission",requestId:e,errorType:i,errorData:s,timestamp:Date.now()}),this.show(),this.requestQueue.retry(e);return}this.requestQueue.reject(e,r)}}handleVaultUnlocked(){o.info("Vault unlocked, reactivating provider"),window.__nostrpass_is_active=!0,this.navigationMachine.transition(h.UNLOCKED);const e=this.requestQueue.getByState(E.TIMEOUT);e.length>0?(o.info("Retrying pending requests after unlock",{count:e.length}),e.forEach(t=>{this.requestQueue.retry(t.request.id)})):o.debug("No pending requests to retry")}handlePermissionGranted(){o.info("Permission granted, retrying pending requests"),this.requestQueue.getByState(E.TIMEOUT).forEach(t=>{this.requestQueue.retry(t.request.id)}),this.hide()}handleBiometricCompleted(e){o.info("Biometric permission completed",{success:e==null?void 0:e.success,requestId:e==null?void 0:e.requestId});const t=e==null?void 0:e.requestId,s=e==null?void 0:e.success;if(t&&s)o.info("Retrying pending request after biometric approval",{requestId:t}),this.requestQueue.retry(t);else if(t&&!s){o.info("Biometric permission denied, rejecting request",{requestId:t});const i={id:`err_${Date.now()}`,type:d.ERROR,timestamp:Date.now(),requestId:t,code:u.USER_DENIED,message:"Biometric permission denied by user"};this.requestQueue.reject(t,i),this.hide()}else this.hide()}handleVaultAuthenticated(e){o.info("User authenticated in vault",{userId:e==null?void 0:e.userID}),this.navigationMachine.transition(h.UNLOCKED),this.dispatchEvent("nostrpass:authenticated",e);const t=this.requestQueue.getByState(E.TIMEOUT);t.length>0&&(o.info("Retrying pending requests after authentication",{count:t.length}),t.forEach(s=>{this.requestQueue.retry(s.request.id)}))}handleLogout(){o.info("User logged out, clearing all data"),this.navigationMachine.transition(h.INITIAL),this.clearUserData(),this.dispatchEvent("nostrpass:logout")}handleAppPermissionCheck(e){const{hasPermissions:t,appDomain:s}=e||{};o.debug("App permissions check",{hasPermissions:t,appDomain:s}),t&&this.hide()}injectStyles(){this.styleElement||(this.styleElement=document.createElement("style"),this.styleElement.textContent=`
-      .nostrpass-button {
-        position: fixed;
-        bottom: var(--nostrpass-btn-bottom, 20px);
-        right: var(--nostrpass-btn-right, 20px);
-        z-index: 999998;
-        border: var(--nostrpass-btn-border, 1px solid #afafaf);
-        background: var(--nostrpass-btn-bg, linear-gradient(135deg, rgb(24 28 34 / 96%) 0%, rgb(0 0 0 / 70%) 100%));
-        color: var(--nostrpass-btn-color, #ffffff);
-        padding: var(--nostrpass-btn-padding, 12px 24px);
-        font-size: var(--nostrpass-btn-font-size, 14px);
-        font-weight: var(--nostrpass-btn-font-weight, 600);
-        cursor: pointer;
-        box-shadow: var(--nostrpass-btn-shadow, rgba(0, 0, 0, 0.2) 0px 10px 25px);
-        transition: var(--nostrpass-btn-transition, 0.3s);
-        display: flex;
-        align-items: center;
-        font-family: var(--nostrpass-btn-font, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
-        transform: translateY(0px);
-        border-radius: var(--nostrpass-btn-radius, 0px);
+var A = Object.defineProperty;
+var U = (a, e, t) => e in a ? A(a, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : a[e] = t;
+var f = (a, e, t) => U(a, typeof e != "symbol" ? e + "" : e, t);
+class L {
+  // 30 seconds
+  constructor(e = !1, t = t) {
+    this.isParent = e, this.window = t, this.pendingRequests = /* @__PURE__ */ new Map(), this.messageHandlers = /* @__PURE__ */ new Map(), this.allowedOrigins = /* @__PURE__ */ new Set(), this.isInitialized = !1, this.defaultTimeout = 3e4, this.window = t, this.setupMessageListener();
+  }
+  // Initialize with allowed origins
+  init(e = ["*"]) {
+    e.forEach((t) => this.allowedOrigins.add(t)), this.isInitialized = !0;
+  }
+  // Add a message handler (simple mode)
+  on(e, t) {
+    this.messageHandlers.set(e, t);
+  }
+  // Remove a message handler
+  off(e) {
+    this.messageHandlers.delete(e);
+  }
+  // Send a request and wait for response
+  async request(e, t = null, s = this.defaultTimeout) {
+    if (!this.isInitialized)
+      throw new Error("SecureMessenger not initialized. Call init() first.");
+    const o = this.generateId(), l = {
+      id: o,
+      type: e,
+      data: t,
+      timestamp: Date.now(),
+      origin: this.window.location.origin
+    };
+    return new Promise((n, i) => {
+      const r = setTimeout(() => {
+        this.pendingRequests.delete(o), i(new Error(`Request timeout after ${s}ms`));
+      }, s);
+      this.pendingRequests.set(o, {
+        resolve: n,
+        reject: i,
+        timeout: r
+      }), this.sendMessage(l);
+    });
+  }
+  // Send a one-way message (no response expected)
+  send(e, t = null) {
+    if (!this.isInitialized)
+      throw new Error("SecureMessenger not initialized. Call init() first.");
+    const s = {
+      id: this.generateId(),
+      type: e,
+      data: t,
+      timestamp: Date.now(),
+      origin: this.window.location.origin
+    };
+    this.sendMessage(s);
+  }
+  // Send a response to a request
+  async sendResponse(e, t, s) {
+    const o = {
+      id: e.id,
+      type: `${e.type}_RESPONSE`,
+      data: s ? { error: s } : t,
+      timestamp: Date.now(),
+      origin: this.window.location.origin
+    };
+    this.sendMessage(o);
+  }
+  // Internal message sending
+  sendMessage(e) {
+    var s;
+    const t = this.isParent ? this.window.frames[0] || ((s = this.window.document.querySelector("iframe")) == null ? void 0 : s.contentWindow) : this.window.parent;
+    if (!t)
+      throw new Error("Target window not found");
+    this.allowedOrigins.has("*") ? t.postMessage(e, "*") : this.allowedOrigins.forEach((o) => {
+      t.postMessage(e, o);
+    });
+  }
+  // Set up message listener
+  setupMessageListener() {
+    this.window.addEventListener("message", async (e) => {
+      try {
+        await this.handleMessage(e);
+      } catch (t) {
+        console.error("Error handling message:", t);
+      }
+    });
+  }
+  // Handle incoming messages (can be overridden by subclasses)
+  async handleMessage(e) {
+    if (!this.isOriginAllowed(e.origin)) {
+      console.warn("Message from unauthorized origin:", e.origin);
+      return;
+    }
+    const t = e.data;
+    if (!this.isValidMessage(t)) {
+      console.warn("Invalid message structure:", t);
+      return;
+    }
+    if (t.type.endsWith("_RESPONSE") && this.pendingRequests.has(t.id)) {
+      this.handleResponse(t);
+      return;
+    }
+    const s = this.messageHandlers.get(t.type);
+    if (!s) {
+      console.warn("No handler for message type:", t.type);
+      return;
+    }
+    try {
+      const o = await s(t.data);
+      t.type.endsWith("_RESPONSE") || await this.sendResponse(t, o);
+    } catch (o) {
+      if (!t.type.endsWith("_RESPONSE")) {
+        const n = { error: o instanceof Error ? o.message : String(o) };
+        o && typeof o == "object" && "code" in o && o.code && (n.code = o.code);
+        const i = {
+          id: t.id,
+          type: `${t.type}_RESPONSE`,
+          data: n,
+          timestamp: Date.now(),
+          origin: this.window.location.origin
+        };
+        this.sendMessage(i);
+      }
+    }
+  }
+  // Handle response messages
+  handleResponse(e) {
+    const t = this.pendingRequests.get(e.id);
+    if (t)
+      if (clearTimeout(t.timeout), this.pendingRequests.delete(e.id), e.data && e.data.error) {
+        const s = new Error(e.data.error);
+        e.data.code && (s.code = e.data.code), t.reject(s);
+      } else
+        t.resolve(e.data);
+  }
+  // Validate message structure
+  isValidMessage(e) {
+    return e && typeof e.id == "string" && typeof e.type == "string" && typeof e.timestamp == "number" && typeof e.origin == "string" && // Validate timestamp is recent (within 5 minutes)
+    Math.abs(Date.now() - e.timestamp) < 5 * 60 * 1e3;
+  }
+  // Check if origin is allowed
+  isOriginAllowed(e) {
+    return this.isInitialized ? this.allowedOrigins.has("*") || this.allowedOrigins.has(e) : !1;
+  }
+  // Generate unique message ID
+  generateId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+  // Cleanup
+  destroy() {
+    this.pendingRequests.forEach(({ timeout: e, reject: t }) => {
+      clearTimeout(e), t(new Error("Messenger destroyed"));
+    }), this.pendingRequests.clear(), this.messageHandlers.clear(), this.allowedOrigins.clear(), this.isInitialized = !1;
+  }
+}
+class T extends L {
+  constructor(e = window) {
+    super(!0, e), this.iframe = null;
+  }
+  // Create and setup iframe
+  createIframe(e, t) {
+    return this.iframe = document.createElement("iframe"), this.iframe.src = e, this.iframe.style.cssText = `
+      width: 100%;
+      height: 600px;
+      border: none;
+      border-radius: 8px;
+    `, (t || document.body).appendChild(this.iframe), this.iframe.addEventListener("load", () => {
+      const o = new URL(e).origin;
+      this.init([o]);
+    }), this.iframe;
+  }
+  // Create hidden iframe (for Embassy use case)
+  createHiddenIframe(e) {
+    return this.iframe = document.createElement("iframe"), this.iframe.src = e, this.iframe.style.cssText = `
+      position: fixed;
+      top: -1000px;
+      left: -1000px;
+      width: 1px;
+      height: 1px;
+      border: none;
+      opacity: 0;
+      pointer-events: none;
+    `, document.body.appendChild(this.iframe), this.iframe.addEventListener("load", () => {
+      const t = new URL(e).origin;
+      this.init([t]);
+    }), this.iframe;
+  }
+  destroy() {
+    this.iframe && this.iframe.parentNode && (this.iframe.parentNode.removeChild(this.iframe), this.iframe = null), super.destroy();
+  }
+}
+const R = function(a) {
+  return {
+    HIDE_VAULT: () => {
+      console.log("🔙 Hide vault signal received from vault iframe");
+      try {
+        return a.hide(), console.log("✅ Vault hidden successfully"), { acknowledged: !0 };
+      } catch (e) {
+        return console.error("❌ Failed to hide vault:", e), { acknowledged: !1, error: e instanceof Error ? e.message : "Unknown error" };
+      }
+    },
+    SHOW_VAULT: (e = "vault") => (console.log("Show vault signal received"), a.show(e), { acknowledged: !0 }),
+    VAULT_READY: () => {
+      console.log("Vault ready signal received"), a._isReady = !0;
+      const e = new CustomEvent("nostr:ready", {
+        detail: { embassy: a }
+      });
+      return window.dispatchEvent(e), { acknowledged: !0 };
+    },
+    AUTH_STATUS: (e) => (console.log("Auth status signal received", e), { acknowledged: !0 }),
+    GET_RELAYS: () => (console.log("Get relays signal received"), { acknowledged: !0 }),
+    GOT_ERROR: () => (console.log("Error signal received"), { acknowledged: !0 }),
+    PROMPT_REQUIRED: async (e) => (console.log("Prompt requested by vault:", e), (e == null ? void 0 : e.promptType) === "PIN_PAD" && (await a.requestPinUnlock() || console.warn("PIN prompt canceled or failed")), { acknowledged: !0 }),
+    "nostrpass:unlocked": (e) => {
+      console.log("🔓 Vault unlocked signal received from vault iframe", e), e != null && e.forOperation && (console.log("✅ Unlock was for an operation, notifying waiters"), a.notifyUnlocked());
+    }
+  };
+}, _ = (a) => a.replace(/\./g, "-").replace(/:/g, "-").replace(/_/g, "-");
+var g = /* @__PURE__ */ ((a) => (a.VAULT_READY = "VAULT_READY", a.AUTH_STATUS = "AUTH_STATUS", a.SHOW_VAULT = "SHOW_VAULT", a.HIDE_VAULT = "HIDE_VAULT", a.CHECK_PERMISSION = "CHECK_PERMISSION", a.GET_RELAYS = "GET_RELAYS", a.GET_PUBLIC_KEY = "GET_PUBLIC_KEY", a.SIGN_EVENT = "SIGN_EVENT", a.SIGN_DATA = "SIGN_DATA", a.ENCRYPT = "ENCRYPT", a.DECRYPT = "DECRYPT", a.GOT_ERROR = "GOT_ERROR", a.PROMPT_REQUIRED = "PROMPT_REQUIRED", a.MANAGE_ACCOUNTS = "MANAGE_ACCOUNTS", a))(g || {});
+class D {
+  constructor(e = {}) {
+    f(this, "config");
+    f(this, "iframe", null);
+    f(this, "_isReady", !1);
+    f(this, "styleElement", null);
+    f(this, "backdropEl", null);
+    f(this, "messenger", null);
+    f(this, "handlers", []);
+    f(this, "isPromptOpen", !1);
+    // Reserved for future cooldown logic; intentionally unused for now
+    // private lastUnlockAt = 0;
+    f(this, "unlockResolvers", []);
+    this.config = {
+      appName: e.appName || document.title || "Unknown App",
+      appDomain: e.appDomain || window.location.host,
+      permissions: e.permissions || ["getPublicKey", "signEvent"],
+      vaultUrl: e.vaultUrl || "http://localhost:3001",
+      trustedOrigins: e.trustedOrigins,
+      // Keep as-is, will handle defaults in initializeMessenger
+      theme: e.theme || "auto",
+      debug: e.debug || !1,
+      parentPinOverlay: e.parentPinOverlay ?? !1
+    }, this.handlers = Object.keys(R(this)), console.log("🚀 NostrPass Embassy initialized", this.config), this.injectStyles(), document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => this.createIframe()) : this.createIframe();
+  }
+  sleep(e) {
+    return new Promise((t) => setTimeout(t, e));
+  }
+  waitForUnlock() {
+    return new Promise((e) => {
+      this.unlockResolvers.push(e), setTimeout(() => {
+        const t = this.unlockResolvers.indexOf(e);
+        t > -1 && (this.unlockResolvers.splice(t, 1), e());
+      }, 6e4);
+    });
+  }
+  notifyUnlocked() {
+    for (console.log("🔓 Notifying unlock resolvers:", this.unlockResolvers.length); this.unlockResolvers.length > 0; ) {
+      const e = this.unlockResolvers.shift();
+      e && e();
+    }
+  }
+  promptPin() {
+    return new Promise((e) => {
+      var P;
+      if (this.isPromptOpen) return e(!1);
+      this.isPromptOpen = !0;
+      const t = (h) => h.sort(() => Math.random() - 0.5);
+      (P = document.getElementById("np-pin-overlay")) == null || P.remove();
+      const s = document.createElement("div");
+      s.id = "np-pin-overlay", Object.assign(s.style, {
+        position: "fixed",
+        inset: "0",
+        background: "rgba(0,0,0,0.5)",
+        zIndex: "2147483647",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+      });
+      const o = document.createElement("div");
+      Object.assign(o.style, {
+        padding: "16px",
+        borderRadius: "8px",
+        width: "320px",
+        maxWidth: "90vw",
+        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+      });
+      const l = document.createElement("h3");
+      l.textContent = "Unlock Vault", Object.assign(l.style, { margin: "0 0 8px", fontSize: "16px" });
+      const n = document.createElement("p");
+      n.textContent = "Enter your PIN to continue.", Object.assign(n.style, { margin: "0 0 12px", color: "#555", fontSize: "13px" });
+      const i = document.createElement("div");
+      Object.assign(i.style, { display: "flex", justifyContent: "center", gap: "12px", marginBottom: "12px" });
+      const r = (h) => {
+        i.innerHTML = "";
+        for (let p = 0; p < 6; p++) {
+          const y = document.createElement("div");
+          y.style.width = "12px", y.style.height = "12px", y.style.borderRadius = "9999px", y.style.border = "2px solid " + (p < h ? "#111" : "#d1d5db"), i.appendChild(y);
+        }
+      }, c = document.createElement("div");
+      Object.assign(c.style, {
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: "10px",
+        width: "240px",
+        margin: "0 auto"
+      });
+      const d = (h) => {
+        const p = document.createElement("button");
+        return p.textContent = h, Object.assign(p.style, {
+          width: "76px",
+          height: "56px",
+          border: "1px solid #d1d5db",
+          borderRadius: "8px",
+          fontWeight: "600",
+          cursor: "pointer"
+        }), p;
+      }, w = (h) => {
+        const p = document.createElement("button");
+        return p.textContent = h, Object.assign(p.style, {
+          height: "44px",
+          border: "1px solid #d1d5db",
+          borderRadius: "8px",
+          background: "#fff",
+          cursor: "pointer"
+        }), p;
+      };
+      let m = "";
+      const v = t(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]), b = () => {
+        this.isPromptOpen = !1, s.remove();
+      }, O = async () => {
+        try {
+          const h = await this.messenger.request("UNLOCK_WITH_PIN", { pin: m });
+          if (h != null && h.success)
+            b(), e(!0);
+          else {
+            for (m = "", r(0); c.firstChild; ) c.removeChild(c.firstChild);
+            t(v), k();
+          }
+        } catch {
+          m = "", r(0);
+        }
+      }, S = (h) => {
+        m.length >= 6 || (m += h, r(m.length), m.length === 6 && O());
+      }, I = () => {
+        m && (m = m.slice(0, -1), r(m.length));
+      }, k = () => {
+        v.forEach((y) => {
+          const C = d(y);
+          C.addEventListener("click", () => S(y)), c.appendChild(C);
+        });
+        const h = w("← Delete");
+        h.style.gridColumn = "span 2", h.addEventListener("click", I), c.appendChild(h);
+        const p = document.createElement("div");
+        c.appendChild(p);
+      }, E = document.createElement("div");
+      Object.assign(E.style, { display: "flex", gap: "8px", marginTop: "12px", justifyContent: "flex-end" });
+      const x = w("Cancel");
+      x.addEventListener("click", () => {
+        b(), e(!1);
+      }), E.appendChild(x), o.appendChild(l), o.appendChild(n), o.appendChild(i), r(0), k(), o.appendChild(c), o.appendChild(E), s.appendChild(o), document.body.appendChild(s);
+    });
+  }
+  requestPinUnlock() {
+    return this.promptPin();
+  }
+  // Core iframe management
+  async createIframe() {
+    if (this.iframe) {
+      this.config.debug && console.log("Iframe already exists");
+      return;
+    }
+    return new Promise((e, t) => {
+      this.iframe = document.createElement("iframe"), this.iframe.id = "nostrpass-vault-iframe";
+      const s = new URL(this.config.vaultUrl + "/" + _(this.config.appDomain));
+      s.searchParams.set("appName", this.config.appName), s.searchParams.set("appDomain", this.config.appDomain), s.searchParams.set("theme", this.config.theme), this.iframe.src = s.toString(), console.log("iframe.src", s.toString()), this.iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"), this.iframe.setAttribute("allow", "publickey-credentials-create; publickey-credentials-get"), this.iframe.setAttribute("aria-hidden", "true"), this.iframe.setAttribute("tabindex", "-1"), this.iframe.setAttribute("title", "NostrPass Vault"), this.iframe.className = "nostrpass-iframe nostrpass-iframe-hidden", this.iframe.style.background = "transparent", this.iframe.style.backgroundColor = "transparent", this.iframe.setAttribute("allowtransparency", "true"), this.config.debug && new URLSearchParams(window.location.search).has("embassy-debug") && (this.iframe.classList.add("nostrpass-iframe-debug"), this.iframe.classList.remove("nostrpass-iframe-hidden")), this.initializeMessenger(), this.iframe.onload = () => {
+        this.config.debug && console.log("Iframe loaded successfully"), setTimeout(() => {
+          this.config.debug && console.log("Iframe initialization period complete"), e();
+        }, 100);
+      }, this.iframe.onerror = () => {
+        console.error("Failed to load NostrPass vault"), t(new Error("Failed to load vault iframe"));
+      }, this.backdropEl || (this.backdropEl = document.createElement("div"), this.backdropEl.className = "nostrpass-backdrop", this.backdropEl.addEventListener("click", () => this.hide())), document.body.appendChild(this.backdropEl), document.body.appendChild(this.iframe), this.config.debug && console.log("Iframe created and added to DOM");
+    });
+  }
+  show(e = "vault", t = "full") {
+    if (!this.iframe) {
+      console.warn("Cannot show iframe - not created yet"), this.createIframe().then(() => this.show(e, t));
+      return;
+    }
+    if (this.iframe.classList.remove("nostrpass-iframe-hidden"), t === "minimal" ? (this.iframe.classList.remove("nostrpass-iframe-visible"), this.iframe.classList.add("nostrpass-iframe-minimal")) : (this.iframe.classList.remove("nostrpass-iframe-minimal"), this.iframe.classList.add("nostrpass-iframe-visible")), this.backdropEl && (this.backdropEl.style.display = "block"), this.iframe.setAttribute("aria-hidden", "false"), this.iframe.removeAttribute("tabindex"), document.body.style.overflow = "hidden", t === "minimal" && e === "vault" && this.messenger)
+      try {
+        this.messenger.send("NAVIGATE_TO_UNLOCK", {});
+      } catch (s) {
+        console.warn("Failed to send navigation message:", s);
+      }
+    this.config.debug && console.log("Iframe shown in", t, "mode");
+  }
+  hide() {
+    if (console.log("🔙 Embassy hide() method called"), !this.iframe) {
+      console.warn("Cannot hide iframe - not created yet");
+      return;
+    }
+    console.log("🔙 Hiding iframe, current classes:", this.iframe.className), this.iframe.classList.remove("nostrpass-iframe-visible"), this.iframe.classList.remove("nostrpass-iframe-minimal"), this.iframe.classList.add("nostrpass-iframe-hidden"), this.backdropEl && (this.backdropEl.style.display = "none"), this.iframe.setAttribute("aria-hidden", "true"), this.iframe.setAttribute("tabindex", "-1"), document.body.style.overflow = "", console.log("🔙 Iframe hidden, new classes:", this.iframe.className), this.config.debug && console.log("Iframe hidden");
+  }
+  injectStyles() {
+    this.styleElement || (this.styleElement = document.createElement("style"), this.styleElement.id = "nostrpass-embassy-styles", this.styleElement.textContent = `
+      /* Base iframe styles - transparent background */
+      .nostrpass-iframe {
+        background: transparent !important;
+        background-color: transparent !important;
       }
       
-      .nostrpass-button:hover {
-        transform: translateY(-2px);
-        box-shadow: var(--nostrpass-btn-shadow-hover, 0 15px 35px rgba(0, 0, 0, 0.3));
+      /* Hidden state - off-screen positioning for better performance */
+      .nostrpass-iframe-hidden {
+        position: fixed !important;
+        top: -2000px !important;
+        left: -2000px !important;
+        width: 1px !important;
+        height: 1px !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        user-select: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        z-index: -9999 !important;
+        background: transparent !important;
+        background-color: transparent !important;
       }
       
-      .nostrpass-button.nostrpass-hidden {
+      /* Visible state - fullscreen overlay with transparent background */
+      .nostrpass-iframe-visible {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        z-index: 2147483647 !important; /* Maximum z-index */
+        color-scheme: light dark; /* Support both themes */
+      }
+
+      /* Minimal state - centered modal for quick unlock */
+      .nostrpass-iframe-minimal {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: min(500px, 90vw) !important;
+        height: min(600px, 90vh) !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        border-radius: 12px !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+        z-index: 2147483647 !important; /* Maximum z-index */
+        color-scheme: light dark; /* Support both themes */
+      }
+
+      /* Dimmed backdrop behind iframe - provides the modal overlay effect */
+      .nostrpass-backdrop {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        background: rgba(0, 0, 0, 0.5) !important;
+        backdrop-filter: blur(2px) !important;
+        z-index: 2147483646 !important; /* Just beneath iframe */
+        pointer-events: auto !important;
         display: none !important;
       }
-    `,document.head.appendChild(this.styleElement))}createLoginButton(){var e,t;if(((e=this.config.button)==null?void 0:e.show)===!1){o.debug("NostrPass button hidden by config");return}if(this.loginButton||document.getElementById("nostrpass-login-button")){o.debug("Button already exists, skipping creation");return}o.debug("Creating NostrPass login button"),this.loginButton=document.createElement("button"),this.loginButton.id="nostrpass-login-button",this.loginButton.className="nostrpass-button",this.loginButton.innerHTML="NostrPass",(t=this.config.button)!=null&&t.className&&this.loginButton.classList.add(this.config.button.className),this.loginButton.onclick=()=>this.showVault("passport",!1),document.body.appendChild(this.loginButton),o.info("NostrPass button added to page",{buttonId:this.loginButton.id,isVisible:this.loginButton.offsetParent!==null})}hideLoginButton(){this.loginButton&&(this.loginButton.style.display="none")}showLoginButton(){this.loginButton&&(this.loginButton.style.display="flex")}async showVault(e="",t=!1){this.hideLoginButton(),this.iframe||await this.createIframe(),this.show(e,t)}async sendRequest(e,t){this.iframe||await this.showVault();const s=`req_${++this.requestId}`,i={id:s,type:d.REQUEST,timestamp:Date.now(),method:this.mapMethodToRequestMethod(e),params:{...t,appName:this.config.appName,appDomain:this.config.appDomain,permissions:this.config.permissions},origin:this.config.appDomain};return this.sendToVault({type:"nostrpass:request",requestId:s,method:e,params:i.params}),(await this.requestQueue.add(i)).result}async createIframe(e=!1){if(!this.iframe)return new Promise((t,s)=>{this.iframe=document.createElement("iframe"),this.iframe.id=C,this.iframe.createdAt=Date.now();const i=new URL(_);i.searchParams.set("appRequest",encodeURIComponent(JSON.stringify(this.config))),this.iframe.src=i.toString(),this.iframe.style.cssText=this.getIframeStyles(),e&&(o.debug("Creating hidden iframe"),this.iframe.style.display="none"),this.iframe.setAttribute("allow","publickey-credentials-create; publickey-credentials-get"),this.iframe.onload=()=>{const r=()=>this.isReady?t():setTimeout(r,100);r()},this.iframe.onerror=()=>{s(new Error("Failed to load NostrPass vault"))},document.body.appendChild(this.iframe)})}getIframeStyles(){const e=this.config.size==="fullscreen";return`
-      position: fixed;
-      z-index: 999999;
-      border: none;
-      background: #00000045;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-      width: 100vw; height: 100vh; top: 0; left: 0;
-    `}clearUserData(){this.requestQueue.cleanup()}isAuthenticated(){return!!(this.isReady&&this.vaultReady)}async checkVaultConnection(){return!!(this.iframe&&this.isReady)}async getPublicKey(){const e=await this.sendRequest("getPublicKey");return typeof e=="string"?e:e.publicKey||e.pubkey||e}async signEvent(e){return this.sendRequest("signEvent",{event:e})}async signData(e){return this.sendRequest("signData",{data:e})}async getRelays(){return this.sendRequest("getRelays")||{}}async encrypt(e,t){return this.sendRequest("nip04.encrypt",{pubkey:e,plaintext:t})}async decrypt(e,t){return this.sendRequest("nip04.decrypt",{pubkey:e,ciphertext:t})}async logout(){try{await this.sendRequest("logout")}catch(e){o.warn("Logout request failed:",e)}this.clearUserData(),this.close(),this.dispatchEvent("nostrpass:logout",{programmatic:!0})}close(){this.iframe&&(this.iframe.remove(),this.iframe=null,this.isReady=!1),this.clearUserData(),this.showLoginButton()}show(e="",t=!1){this.iframe&&(o.debug("Showing vault",{page:e,forOperation:t}),e==="unlock-operation"?this.navigationMachine.transition(h.UNLOCKING):e==="/"&&this.navigationMachine.transition(h.INITIAL),this.sendToVault({type:"nostrpass:navigate",data:{page:e||"",forOperation:t}}),this.iframe.style.display="block")}hide(){this.iframe&&(this.iframe.style.display="none"),this.showLoginButton()}sendToVault(e){this.iframe&&this.iframe.contentWindow?(o.debug("Sending message to vault",{type:e.type}),this.iframe.contentWindow.postMessage(e,"*")):o.warn("Cannot send message - vault iframe not available")}dispatchEvent(e,t){o.debug("Dispatching event",{eventName:e,hasDetail:!!t}),window.dispatchEvent(new CustomEvent(e,{detail:t}))}}let a=null;function v(n={}){return a&&a.close(),a=new D(n),{getPublicKey:()=>a.getPublicKey(),signEvent:t=>a.signEvent(t),signData:t=>a.signData(t),getRelays:()=>a.getRelays(),nip04:{encrypt:(t,s)=>a.encrypt(t,s),decrypt:(t,s)=>a.decrypt(t,s)}}}if(typeof window<"u"){window.initNostrPass=v,window.NostrPassEmbassy=D,window.nostrPass={showVault:async()=>{if(a)return a.showVault()},hideVault:()=>a==null?void 0:a.hide(),isAuthenticated:()=>(a==null?void 0:a.isAuthenticated())||!1,checkConnection:async()=>a?a.checkVaultConnection():!1,getPublicKey:()=>a?a.getPublicKey():Promise.resolve(null),logout:async()=>{a&&await a.logout()}},window.nostr&&!window.__nostrpass_original_provider?(window.__nostrpass_original_provider=window.nostr,console.log("🔍 NostrPass Embassy loaded (existing nostr provider detected and stored)")):console.log("🚀 NostrPass Embassy loaded (no existing nostr provider)");const n=Object.getOwnPropertyDescriptor(window,"nostr");n&&n.configurable&&console.log("🔧 Found existing nostr property descriptor, will preserve it");const e=v();window.__nostrpass_api=e,window.__nostrpass_embassy=a,window.__nostrpass_create_button=()=>{a?a.createLoginButton():console.log("Embassy instance not found")},window.__nostrpass_test_provider=async()=>{if(console.log("=== TESTING PROVIDER OVERRIDE ==="),console.log("window.nostr:",window.nostr),console.log("__nostrpass_is_active:",window.__nostrpass_is_active),console.log("__nostrpass_api:",window.__nostrpass_api),console.log("__nostrpass_original_provider:",window.__nostrpass_original_provider),window.nostr&&window.nostr.getPublicKey)try{console.log("Testing getPublicKey...");const t=await window.nostr.getPublicKey();console.log("Result:",t)}catch(t){console.log("Error:",t)}console.log("=== END TEST ===")},Object.defineProperty(window,"nostr",{get(){return e},set(t){console.log("🚫 External script tried to set window.nostr:",t),console.log("Current state - active:",window.__nostrpass_is_active,"original:",window.__nostrpass_original_provider),t&&!window.__nostrpass_original_provider&&(window.__nostrpass_original_provider=t,console.log("📝 Stored external provider as fallback"))},configurable:!0,enumerable:!0}),window.addEventListener("nostrpass:authenticated",t=>{var i;const s=t;window.__nostrpass_is_active=!0,window.dispatchEvent(new CustomEvent("nostr:provider-changed",{detail:{provider:"nostrpass",previousProvider:window.__nostrpass_original_provider?"other":"none",publicKey:(i=s.detail)==null?void 0:i.nostrPublicKey}})),console.log("✅ NostrPass provider activated")}),window.addEventListener("nostrpass:logout",()=>{window.__nostrpass_is_active=!1,window.dispatchEvent(new CustomEvent("nostr:provider-changed",{detail:{provider:window.__nostrpass_original_provider?"other":"none",previousProvider:"nostrpass"}})),console.log("🔄 Provider switched back")}),console.log("💡 Use window.initNostrPass(config) to customize configuration")}})();
+      
+      /* Debug mode - visible but smaller */
+      .nostrpass-iframe-debug {
+        position: fixed !important;
+        top: 10px !important;
+        right: 10px !important;
+        width: 400px !important;
+        height: 300px !important;
+        opacity: 0.9 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: 2px solid red !important;
+        z-index: 999999 !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+      }
+
+      .nostrpass-account-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1rem;
+        border: none;
+        border-radius: 9999px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        font-family: inherit;
+        cursor: pointer;
+        background: linear-gradient(135deg, #2563eb, #6366f1);
+        color: #ffffff;
+        box-shadow: 0 10px 20px -12px rgba(37, 99, 235, 0.75);
+        transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+      }
+
+      .nostrpass-account-button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 24px -12px rgba(79, 70, 229, 0.55);
+        filter: brightness(1.02);
+      }
+
+      .nostrpass-account-button:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 6px 12px -6px rgba(79, 70, 229, 0.45);
+        filter: brightness(0.96);
+      }
+
+      .nostrpass-account-button:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+    `, document.head.appendChild(this.styleElement), this.config.debug && console.log("Styles injected"));
+  }
+  // Initialize messenger for secure communication
+  initializeMessenger() {
+    if (!this.iframe) return;
+    this.messenger = new T(window), this.messenger.sendMessage = (t) => {
+      var o;
+      if (!((o = this.iframe) != null && o.contentWindow)) {
+        console.error("Iframe contentWindow not available");
+        return;
+      }
+      const s = new URL(this.iframe.src).origin;
+      this.iframe.contentWindow.postMessage(t, s);
+    };
+    let e;
+    if (this.config.trustedOrigins && this.config.trustedOrigins.length > 0 ? e = [...this.config.trustedOrigins] : e = [
+      "https://nostrpass.com",
+      "https://app.nostrpass.com",
+      "https://www.nostrpass.com"
+    ], this.config.vaultUrl)
+      try {
+        const t = new URL(this.config.vaultUrl).origin;
+        e.includes(t) || e.push(t);
+      } catch (t) {
+        console.warn("Failed to parse vaultUrl origin:", t);
+      }
+    (this.iframe.src.includes("localhost") || this.iframe.src.includes("127.0.0.1")) && (e.includes("http://localhost:3001") || e.push("http://localhost:3001"), e.includes("http://127.0.0.1:3001") || e.push("http://127.0.0.1:3001")), this.messenger.init(e), this.setupMessageHandlers(), this.config.debug && console.log("Messenger initialized with trusted origins:", e);
+  }
+  // Set up handlers for vault messages
+  setupMessageHandlers() {
+    if (!this.messenger) return;
+    const e = R(this);
+    console.log("Setting up message handlers:", this.handlers), this.handlers.forEach((t) => {
+      console.log("Registering handler for:", t), this.messenger.on(t, e[t]);
+    }), this.config.debug && console.log("Message handlers registered:", this.messenger.messageHandlers);
+  }
+  // Core Nostr methods
+  async getPublicKey(e) {
+    (!this.iframe || !this.messenger) && (await this.createIframe(), await this.waitForReady());
+    try {
+      const t = (e == null ? void 0 : e.identityIndex) ?? 0;
+      let s = null;
+      try {
+        const l = await this.messenger.request(g.CHECK_PERMISSION, {
+          action: "getPublicKey",
+          identityIndex: t
+        }), n = (l == null ? void 0 : l.isLocked) === !0, i = (l == null ? void 0 : l.needsPrompt) === !0;
+        if (n && this.config.parentPinOverlay) {
+          if (!await this.requestPinUnlock()) throw new Error("User canceled PIN prompt");
+        } else n && !this.config.parentPinOverlay ? (console.log("⏳ Setting up unlock wait promise..."), s = this.waitForUnlock(), this.show("vault", "minimal")) : i && !this.config.parentPinOverlay && this.show("vault", "full");
+      } catch (l) {
+        String((l == null ? void 0 : l.message) || l).toLowerCase().includes("not authenticated") && (console.log("⚠️ User not authenticated, showing full vault for login"), this.show("vault", "full"));
+      }
+      s && (console.log("⏳ Waiting for vault unlock..."), await s, console.log("✅ Vault unlocked, continuing operation"));
+      const o = await this.messenger.request(g.GET_PUBLIC_KEY, {
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: t
+      });
+      return this.config.debug && console.log("Public key received:", o), this.hide(), o.publicKey || o;
+    } catch (t) {
+      throw console.error("Failed to get public key:", t), t;
+    }
+  }
+  async signEvent(e, t) {
+    (!this.iframe || !this.messenger) && (await this.createIframe(), await this.waitForReady());
+    try {
+      const s = (t == null ? void 0 : t.identityIndex) ?? 0;
+      let o = null;
+      try {
+        const n = await this.messenger.request(g.CHECK_PERMISSION, {
+          action: "signEvent",
+          eventKind: e == null ? void 0 : e.kind,
+          identityIndex: s
+        }), i = (n == null ? void 0 : n.isLocked) === !0, r = (n == null ? void 0 : n.needsPrompt) === !0;
+        if (i && this.config.parentPinOverlay) {
+          if (!await this.requestPinUnlock()) throw new Error("User canceled PIN prompt");
+        } else i && !this.config.parentPinOverlay ? (console.log("⏳ Setting up unlock wait promise..."), o = this.waitForUnlock(), this.show("vault", "minimal")) : r && !this.config.parentPinOverlay && this.show("vault", "full");
+      } catch (n) {
+        String((n == null ? void 0 : n.message) || n).toLowerCase().includes("not authenticated") && (console.log("⚠️ User not authenticated, showing full vault for login"), this.show("vault", "full"));
+      }
+      o && (console.log("⏳ Waiting for vault unlock..."), await o, console.log("✅ Vault unlocked, continuing operation"));
+      const l = async () => this.messenger.request(g.SIGN_EVENT, {
+        event: e,
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: s
+      });
+      try {
+        const n = await l();
+        return this.config.debug && console.log("Signed event received:", n), this.hide(), n.signedEvent || n;
+      } catch (n) {
+        const i = String((n == null ? void 0 : n.message) || n);
+        if (i.toLowerCase().includes("vault is locked") || i.toLowerCase().includes("rehydrated")) {
+          await this.sleep(150);
+          const r = await l();
+          return this.config.debug && console.log("Signed event received (retry):", r), this.hide(), r.signedEvent || r;
+        }
+        throw n;
+      }
+    } catch (s) {
+      throw console.error("Failed to sign event:", s), s;
+    }
+  }
+  async getRelays() {
+    return console.log("TODO: getRelays"), {};
+  }
+  async signData(e, t) {
+    (!this.iframe || !this.messenger) && (await this.createIframe(), await this.waitForReady());
+    try {
+      const s = (t == null ? void 0 : t.identityIndex) ?? 0;
+      let o = null;
+      try {
+        const n = await this.messenger.request(g.CHECK_PERMISSION, {
+          action: "signData",
+          identityIndex: s
+        }), i = (n == null ? void 0 : n.isLocked) === !0, r = (n == null ? void 0 : n.needsPrompt) === !0;
+        if (i && this.config.parentPinOverlay) {
+          if (!await this.requestPinUnlock()) throw new Error("User canceled PIN prompt");
+        } else i && !this.config.parentPinOverlay ? (console.log("⏳ Setting up unlock wait promise..."), o = this.waitForUnlock(), this.show("vault", "minimal")) : r && !this.config.parentPinOverlay && this.show("vault", "full");
+      } catch (n) {
+        String((n == null ? void 0 : n.message) || n).toLowerCase().includes("not authenticated") && (console.log("⚠️ User not authenticated, showing full vault for login"), this.show("vault", "full"));
+      }
+      o && (console.log("⏳ Waiting for vault unlock..."), await o, console.log("✅ Vault unlocked, continuing operation"));
+      const l = async () => this.messenger.request(g.SIGN_DATA, {
+        data: e,
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: s
+      });
+      try {
+        const n = await l(), i = (n == null ? void 0 : n.signature) ?? n;
+        return this.config.debug && console.log("Signed data received:", i), this.hide(), i;
+      } catch (n) {
+        const i = String((n == null ? void 0 : n.message) || n);
+        if (i.toLowerCase().includes("locked") || i.toLowerCase().includes("unlock") || i.toLowerCase().includes("rehydrated")) {
+          await this.sleep(150);
+          try {
+            const r = await l();
+            return this.hide(), (r == null ? void 0 : r.signature) ?? r;
+          } catch (r) {
+            if (String((r == null ? void 0 : r.message) || r).toLowerCase().includes("rehydrated")) {
+              await this.sleep(200);
+              const d = await l();
+              return this.hide(), (d == null ? void 0 : d.signature) ?? d;
+            }
+            throw r;
+          }
+        }
+        throw n;
+      }
+    } catch (s) {
+      throw console.error("Failed to sign data:", s), s;
+    }
+  }
+  async encrypt(e, t, s) {
+    (!this.iframe || !this.messenger) && (await this.createIframe(), await this.waitForReady());
+    try {
+      const o = (s == null ? void 0 : s.identityIndex) ?? 0;
+      let l = null;
+      try {
+        const i = await this.messenger.request(g.CHECK_PERMISSION, {
+          action: "nip04",
+          identityIndex: o
+        }), r = (i == null ? void 0 : i.isLocked) === !0, c = (i == null ? void 0 : i.needsPrompt) === !0;
+        if (r && this.config.parentPinOverlay) {
+          if (!await this.requestPinUnlock()) throw new Error("User canceled PIN prompt");
+        } else r && !this.config.parentPinOverlay ? (console.log("⏳ Setting up unlock wait promise..."), l = this.waitForUnlock(), this.show("vault", "minimal")) : c && !this.config.parentPinOverlay && this.show("vault", "full");
+      } catch (i) {
+        String((i == null ? void 0 : i.message) || i).toLowerCase().includes("not authenticated") && (console.log("⚠️ User not authenticated, showing full vault for login"), this.show("vault", "full"));
+      }
+      l && (console.log("⏳ Waiting for vault unlock..."), await l, console.log("✅ Vault unlocked, continuing operation"));
+      const n = async () => this.messenger.request(g.ENCRYPT, {
+        plaintext: t,
+        recipientPubkey: e,
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: o
+      });
+      try {
+        const i = await n();
+        return this.config.debug && console.log("Encrypted payload received:", i), this.hide(), i;
+      } catch (i) {
+        const r = String((i == null ? void 0 : i.message) || i);
+        if (r.toLowerCase().includes("locked") || r.toLowerCase().includes("unlock") || r.toLowerCase().includes("rehydrated")) {
+          await this.sleep(150);
+          try {
+            const c = await n();
+            return this.hide(), c;
+          } catch (c) {
+            if (String((c == null ? void 0 : c.message) || c).toLowerCase().includes("rehydrated")) {
+              await this.sleep(200);
+              const w = await n();
+              return this.hide(), w;
+            }
+            throw c;
+          }
+        }
+        throw i;
+      }
+    } catch (o) {
+      throw console.error("Failed to encrypt:", o), o;
+    }
+  }
+  async decrypt(e, t, s) {
+    (!this.iframe || !this.messenger) && (await this.createIframe(), await this.waitForReady());
+    try {
+      const o = (s == null ? void 0 : s.identityIndex) ?? 0;
+      let l = null;
+      try {
+        const i = await this.messenger.request(g.CHECK_PERMISSION, {
+          action: "nip04",
+          identityIndex: o
+        }), r = (i == null ? void 0 : i.isLocked) === !0, c = (i == null ? void 0 : i.needsPrompt) === !0;
+        if (r && this.config.parentPinOverlay) {
+          if (!await this.requestPinUnlock()) throw new Error("User canceled PIN prompt");
+        } else r && !this.config.parentPinOverlay ? (console.log("⏳ Setting up unlock wait promise..."), l = this.waitForUnlock(), this.show("vault", "minimal")) : c && !this.config.parentPinOverlay && this.show("vault", "full");
+      } catch (i) {
+        String((i == null ? void 0 : i.message) || i).toLowerCase().includes("not authenticated") && (console.log("⚠️ User not authenticated, showing full vault for login"), this.show("vault", "full"));
+      }
+      l && (console.log("⏳ Waiting for vault unlock..."), await l, console.log("✅ Vault unlocked, continuing operation"));
+      const n = async () => this.messenger.request(g.DECRYPT, {
+        ciphertext: t,
+        senderPubkey: e,
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        identityIndex: o
+      });
+      try {
+        const i = await n();
+        return this.config.debug && console.log("Decrypted payload received:", i), this.hide(), i;
+      } catch (i) {
+        const r = String((i == null ? void 0 : i.message) || i);
+        if (r.toLowerCase().includes("locked") || r.toLowerCase().includes("unlock") || r.toLowerCase().includes("rehydrated")) {
+          await this.sleep(150);
+          try {
+            const c = await n();
+            return this.hide(), c;
+          } catch (c) {
+            if (String((c == null ? void 0 : c.message) || c).toLowerCase().includes("rehydrated")) {
+              await this.sleep(200);
+              const w = await n();
+              return this.hide(), w;
+            }
+            throw c;
+          }
+        }
+        throw i;
+      }
+    } catch (o) {
+      throw console.error("Failed to decrypt:", o), o;
+    }
+  }
+  async manageAccount(e = {}) {
+    (!this.iframe || !this.messenger) && (await this.createIframe(), await this.waitForReady());
+    const t = e.forcePrompt ?? !0;
+    this.show("vault", "full");
+    try {
+      return await this.messenger.request(g.MANAGE_ACCOUNTS, {
+        appName: this.config.appName,
+        appDomain: this.config.appDomain,
+        forcePrompt: t
+      });
+    } finally {
+      try {
+        this.hide();
+      } catch (s) {
+        console.warn("Failed to hide vault after manageAccount:", s);
+      }
+    }
+  }
+  createAccountManagerButton(e = {}) {
+    const {
+      label: t = "Manage NostrPass Account",
+      className: s = "nostrpass-account-button",
+      appendTo: o,
+      buttonElement: l,
+      disabledText: n,
+      onSelect: i,
+      onError: r,
+      forcePrompt: c
+    } = e, d = l ?? document.createElement("button");
+    l ? s && (l.className = s) : (d.type = "button", d.className = s, d.textContent = t);
+    const w = async (m) => {
+      m.preventDefault();
+      const v = d.textContent;
+      try {
+        d.disabled = !0, n && (d.textContent = n);
+        const b = await this.manageAccount({ forcePrompt: c });
+        i == null || i(b);
+      } catch (b) {
+        r ? r(b) : console.error("[NostrPass] Failed to manage account:", b);
+      } finally {
+        d.disabled = !1, n && v !== void 0 && v !== null && (d.textContent = v);
+      }
+    };
+    if (d.addEventListener("click", w), o) {
+      const m = typeof o == "string" ? document.querySelector(o) : o;
+      m ? d.parentElement || m.appendChild(d) : console.warn("[NostrPass] Unable to find target element for account manager button:", o);
+    }
+    return d;
+  }
+  // Public utility methods
+  isReady() {
+    return this._isReady;
+  }
+  async waitForReady() {
+    if (!this._isReady)
+      return new Promise((e) => {
+        const t = () => {
+          this._isReady ? e() : setTimeout(t, 100);
+        };
+        t();
+      });
+  }
+  // Cleanup
+  destroy() {
+    this.messenger && (this.messenger.destroy(), this.messenger = null), this.iframe && this.iframe.parentNode && (this.iframe.parentNode.removeChild(this.iframe), this.iframe = null), this.backdropEl && this.backdropEl.parentNode && (this.backdropEl.parentNode.removeChild(this.backdropEl), this.backdropEl = null), this.styleElement && this.styleElement.parentNode && (this.styleElement.parentNode.removeChild(this.styleElement), this.styleElement = null), this._isReady = !1, this.config.debug && console.log("Embassy destroyed");
+  }
+}
+let u = null;
+function N(a = {}) {
+  return u && u.destroy(), u = new D(a), {
+    getPublicKey: (t) => u.getPublicKey(t),
+    signEvent: (t, s) => u.signEvent(t, s),
+    signData: (t, s) => u.signData(t, s),
+    getRelays: () => u.getRelays(),
+    nip04: {
+      encrypt: (t, s, o) => u.encrypt(t, s, o),
+      decrypt: (t, s, o) => u.decrypt(t, s, o)
+    },
+    manageAccount: (t) => u.manageAccount(t),
+    createAccountManagerButton: (t) => u.createAccountManagerButton(t)
+  };
+}
+function M() {
+  console.log("showVault"), u == null || u.show();
+}
+function q() {
+  u == null || u.hide();
+}
+if (typeof window < "u") {
+  window.initNostrPass = N, window.showVault = M, window.hideVault = q;
+  const a = document.currentScript;
+  if ((a == null ? void 0 : a.getAttribute("data-manual-init")) === "true")
+    console.log("✅ NostrPass Embassy loaded (manual init mode)");
+  else {
+    const t = {};
+    a != null && a.hasAttribute("data-vault-url") && (t.vaultUrl = a.getAttribute("data-vault-url") || void 0), a != null && a.hasAttribute("data-app-name") && (t.appName = a.getAttribute("data-app-name") || void 0), a != null && a.hasAttribute("data-debug") && (t.debug = a.getAttribute("data-debug") === "true"), a != null && a.hasAttribute("data-theme") && (t.theme = a.getAttribute("data-theme") || void 0);
+    const s = N(t);
+    window.nostr = s, console.log("✅ NostrPass Embassy auto-initialized with config:", t);
+  }
+  console.log("💡 Use window.initNostrPass(config) to customize");
+}
+export {
+  D as NostrPassEmbassy,
+  N as initNostrPass
+};
+//# sourceMappingURL=embassy.js.map
