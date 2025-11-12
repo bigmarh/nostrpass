@@ -292,6 +292,243 @@ export const sessionManager = {
   },
 
   /**
+   * Login handler - orchestrates the full login flow
+   * 1. Try to load vault from local IndexedDB
+   * 2. If not found, fetch from Nostr relays
+   * 3. Verify password
+   * 4. Initialize locked session
+   */
+  login: async (params: { username: string; password: string; environment?: string; relays?: string[] }, crypto: NostrCrypto, handlers: any): Promise<{
+    success: boolean;
+    user?: {
+      publicKey: string;
+      profile: { username: string; storagePublicKey?: string };
+    };
+    needsMigration?: boolean;
+    error?: string;
+  }> => {
+    console.log('🔍 [WORKER login] Starting login for username:', params.username);
+
+    try {
+      // 1. Try to load from local IndexedDB
+      console.log('📦 [WORKER login] Loading vault from IndexedDB...');
+      let vaultData = await vaultDB.getVaultByUsername(params.username);
+      console.log('📦 [WORKER login] IndexedDB result:', vaultData ? 'found' : 'not found');
+
+      // 2. If not found locally, fetch from Nostr
+      if (!vaultData) {
+        console.log('📡 [WORKER login] Fetching from Nostr relays...');
+
+        // Dynamic import to avoid circular dependencies
+        const { getLoginObj, getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+        const relays = params.relays || [];
+        const env = params.environment || 'production';
+
+        const loginObj = await getLoginObj(params.username, env, relays);
+        if (!loginObj) {
+          return { success: false, error: 'No vault found for this username' };
+        }
+
+        console.log('✅ [WORKER login] Found LoginObj on Nostr');
+
+        // Derive password key using salt from LoginObj
+        console.log('🔑 [WORKER login] Deriving password key...');
+        const passwordDeriveResult = await handlers.deriveKey({
+          password: params.password,
+          salt: loginObj.passwordSalt
+        });
+        const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+
+        // Decrypt VaultObj with password key
+        const nostrVault = await getVaultFromNostr(loginObj.storagePublicKey, relays, passwordKey);
+
+        if (!nostrVault) {
+          return { success: false, error: 'Vault data not found on Nostr' };
+        }
+
+        console.log('✅ [WORKER login] Found VaultObj on Nostr');
+
+        // Save to local IndexedDB for future use
+        console.log('💾 [WORKER login] Saving vault to IndexedDB...');
+        await vaultDB.saveVault({
+          username: params.username,
+          publicKey: loginObj.storagePublicKey,
+          xprivEncrypted: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
+          encryptedVault: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
+          salt: (nostrVault as any).salt,
+          identities: (nostrVault as any).identities || [],
+          activeIdentityByApp: (nostrVault as any).activeIdentityByApp || {},
+          passwordVerifier: (nostrVault as any).passwordVerifier,
+          passwordSalt: (nostrVault as any).passwordSalt,
+          recovery: (nostrVault as any).recovery,
+          lastSyncedAt: Date.now(),
+          updatedAt: (nostrVault as any).updatedAt || Date.now(),
+          createdAt: (nostrVault as any).createdAt || Date.now()
+        } as VaultData);
+
+        vaultData = await vaultDB.getVaultByUsername(params.username);
+        console.log('✅ [WORKER login] Vault saved to IndexedDB');
+      }
+
+      if (!vaultData) {
+        return { success: false, error: 'No vault found for this username' };
+      }
+
+      // 3. Verify password
+      console.log('🔐 [WORKER login] Verifying password...');
+
+      if (!params.password) {
+        return { success: false, error: 'Password is required' };
+      }
+
+      // MIGRATION PATH: Add security fields if missing (for old accounts)
+      if (!vaultData.passwordVerifier || !vaultData.passwordSalt) {
+        console.warn('⚠️ [WORKER login] Account missing security fields - migrating...');
+
+        try {
+          // Generate new password salt
+          const newPasswordSalt = await handlers.generateSalt();
+          const passwordSalt = newPasswordSalt.salt || newPasswordSalt;
+
+          // Derive key from password
+          const passwordDeriveResult = await handlers.deriveKey({
+            password: params.password,
+            salt: passwordSalt
+          });
+          const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+
+          // Create and encrypt verifier
+          const passwordVerifier = await handlers.encryptData({
+            data: 'NostrPass_Password_Verifier_v1',
+            password: passwordKey
+          });
+
+          // Update vault data with new security fields
+          vaultData.passwordVerifier = passwordVerifier;
+          vaultData.passwordSalt = passwordSalt;
+          vaultData.updatedAt = Date.now();
+
+          // Save to IndexedDB
+          await vaultDB.updateVaultData(params.username, vaultData);
+
+          console.log('✅ [WORKER login] Account migrated with security fields');
+        } catch (migrationError) {
+          console.error('❌ [WORKER login] Migration failed:', migrationError);
+          return { success: false, error: 'Failed to upgrade account security' };
+        }
+      }
+
+      // Verify password with stored verifier
+      try {
+        console.log('🔐 [WORKER login] Deriving key from password...');
+        const passwordDeriveResult = await handlers.deriveKey({
+          password: params.password,
+          salt: vaultData.passwordSalt
+        });
+        const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+
+        console.log('🔐 [WORKER login] Decrypting password verifier...');
+        const decrypted = await handlers.decryptData({
+          encryptedData: vaultData.passwordVerifier,
+          password: passwordKey
+        });
+
+        console.log('🔐 [WORKER login] Verifier decrypted, checking value...');
+        if (decrypted !== 'NostrPass_Password_Verifier_v1') {
+          console.error('❌ [WORKER login] Password verification failed');
+          return { success: false, error: 'Invalid password' };
+        }
+
+        console.log('✅ [WORKER login] Password verified successfully');
+
+        // 4. Initialize locked session with password key cached
+        console.log('🔒 [WORKER login] Initializing session...');
+        await sessionManager.initSession({
+          username: params.username,
+          publicKey: vaultData.publicKey,
+          vaultData,
+          passwordKey  // Cache password key for vault operations
+        });
+
+        console.log('✅ [WORKER login] Login successful');
+
+        return {
+          success: true,
+          user: {
+            publicKey: vaultData.publicKey,
+            profile: {
+              username: params.username,
+              storagePublicKey: vaultData.storagePublicKey || vaultData.publicKey
+            }
+          }
+        };
+      } catch (error) {
+        console.error('❌ [WORKER login] Password verification error:', error);
+        return { success: false, error: 'Invalid password' };
+      }
+    } catch (error) {
+      console.error('❌ [WORKER login] Login failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Login failed'
+      };
+    }
+  },
+
+  /**
+   * Logout handler - orchestrates the full logout flow
+   * 1. Stop Nostr subscription
+   * 2. Clear in-memory session
+   * 3. Clear persisted session
+   * 4. Optionally delete vault data
+   */
+  logout: async (params: { username: string; deleteVault?: boolean }, crypto: NostrCrypto, handlers: any): Promise<{ success: boolean }> => {
+    console.log('🚪 [WORKER logout] Starting logout for username:', params.username);
+
+    try {
+      // 1. Stop Nostr realtime subscription
+      try {
+        await handlers.stopNostrSubscription({ username: params.username });
+        console.log('✅ [WORKER logout] Stopped Nostr subscription');
+      } catch (error) {
+        console.warn('⚠️ [WORKER logout] Failed to stop subscription:', error);
+      }
+
+      // 2. Clear in-memory session
+      try {
+        await sessionManager.logoutUser({ username: params.username });
+        console.log('✅ [WORKER logout] Cleared in-memory session');
+      } catch (error) {
+        console.error('❌ [WORKER logout] Failed to clear session:', error);
+      }
+
+      // 3. Clear persisted session data
+      try {
+        await sessionManager.clearSession({ username: params.username });
+        console.log('✅ [WORKER logout] Cleared persisted session');
+      } catch (error) {
+        console.error('❌ [WORKER logout] Failed to clear persisted session:', error);
+      }
+
+      // 4. Optionally delete vault data
+      if (params.deleteVault) {
+        try {
+          await handlers.deleteVault({ username: params.username });
+          console.log('🗑️ [WORKER logout] Deleted vault data');
+        } catch (error) {
+          console.error('❌ [WORKER logout] Failed to delete vault:', error);
+        }
+      }
+
+      console.log('✅ [WORKER logout] Logout completed');
+      return { success: true };
+    } catch (error) {
+      console.error('❌ [WORKER logout] Logout failed:', error);
+      return { success: false };
+    }
+  },
+
+  /**
    * Sign a Nostr event using the current session keys for a specific identity
    * Checks permissions before signing
    */
