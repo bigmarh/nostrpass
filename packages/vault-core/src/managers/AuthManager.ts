@@ -38,25 +38,34 @@ import type {
 } from '../types';
 
 export class AuthManager extends EventEmitter {
-  private worker: Worker;
+  private worker: Worker | any; // Can be raw Worker or RPC client
   private currentUser: User | null = null;
   private isLocked: boolean = true;
   private sessionId: string | null = null;
+  private isRpcMode: boolean = false; // Track if using RPC client
+  private environment?: string;
+  private relays?: string[];
 
-  constructor(worker: Worker) {
+  constructor(worker: Worker | any, config?: { environment?: string; relays?: string[] }) {
     super();
     this.worker = worker;
-    // Only set up listeners if worker is not null
-    if (this.worker) {
+    this.environment = config?.environment;
+    this.relays = config?.relays;
+
+    // Detect if this is an RPC client (has method-like properties)
+    this.isRpcMode = worker && typeof worker.login === 'function';
+
+    // Only set up listeners for raw Worker mode
+    if (this.worker && !this.isRpcMode) {
       this.setupWorkerListeners();
     }
   }
 
   /**
-   * Set up listeners for worker messages related to auth
+   * Set up listeners for worker messages related to auth (raw Worker mode only)
    */
   private setupWorkerListeners(): void {
-    if (!this.worker) return;
+    if (!this.worker || this.isRpcMode) return;
 
     this.worker.addEventListener('message', (event: MessageEvent) => {
       const { type } = event.data;
@@ -80,8 +89,18 @@ export class AuthManager extends EventEmitter {
 
   /**
    * Send message to worker and wait for response
+   * Supports both raw Worker (postMessage) and RPC client modes
    */
   private async sendToWorker<T = any>(type: string, data?: any): Promise<T> {
+    // RPC mode - call method directly
+    if (this.isRpcMode) {
+      if (typeof this.worker[type] === 'function') {
+        return await this.worker[type](data);
+      }
+      throw new Error(`Worker does not have method: ${type}`);
+    }
+
+    // Raw Worker mode - use postMessage
     return new Promise((resolve, reject) => {
       const requestId = `${type}_${Date.now()}_${Math.random()}`;
 
@@ -137,7 +156,12 @@ export class AuthManager extends EventEmitter {
         user?: User;
         sessionId?: string;
         needsMigration?: boolean;
-      }>('login', { username, password });
+      }>('login', {
+        username,
+        password,
+        environment: this.environment,
+        relays: this.relays
+      });
 
       if (result.success && result.user) {
         this.currentUser = result.user;

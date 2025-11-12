@@ -12,6 +12,8 @@
 import { createContext, useContext, ParentComponent, onMount, onCleanup, createSignal, createEffect, Accessor } from 'solid-js';
 import { VaultCore } from '@nostrpass/vault-core';
 import type { User, VaultData, AppPermissions } from '@nostrpass/vault-core';
+import { getCryptoWorker } from '../services/cryptoWorkerSingleton';
+import { getRelays } from './EnvironmentProvider';
 
 // Inline SolidJS adapter functions
 function createVault(config: any): Accessor<VaultCore | null> {
@@ -203,10 +205,15 @@ const VaultCoreContext = createContext<VaultCoreContextType>();
  * ```
  */
 export const VaultCoreProvider: ParentComponent = (props) => {
-  // Create vault instance
+  // Get the worker-messenger RPC client
+  const workerClient = getCryptoWorker();
+  const relays = getRelays();
+
+  // Create vault instance with RPC client
   const vault = createVault({
-    workerUrl: '/crypto.worker.js',
+    workerClient,
     environment: import.meta.env.MODE || 'production',
+    relays,
     debug: import.meta.env.DEV
   });
 

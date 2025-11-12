@@ -76,14 +76,19 @@ export class VaultCore {
       ...config
     };
 
-    // Create placeholder worker (will be initialized later)
-    this.worker = null as any;
+    // Use workerClient if provided, otherwise null (will be initialized later)
+    this.worker = config.workerClient || (null as any);
 
-    // Initialize managers with worker
-    this.auth = new AuthManager(this.worker as Worker);
-    this.vault = new VaultManager(this.worker as Worker);
-    this.identities = new IdentityManager(this.worker as Worker);
-    this.permissions = new PermissionManager(this.worker as Worker);
+    // Initialize managers with worker/client and config
+    const managerConfig = {
+      environment: this.config.environment,
+      relays: this.config.relays
+    };
+
+    this.auth = new AuthManager(this.worker, managerConfig);
+    this.vault = new VaultManager(this.worker);
+    this.identities = new IdentityManager(this.worker);
+    this.permissions = new PermissionManager(this.worker);
   }
 
   /**
@@ -107,29 +112,40 @@ export class VaultCore {
     }
 
     try {
-      // Create worker
-      this.worker = new Worker(this.config.workerUrl);
+      // If workerClient was provided, skip worker creation
+      if (!this.config.workerClient) {
+        if (!this.config.workerUrl) {
+          throw new Error('Either workerClient or workerUrl must be provided');
+        }
 
-      if (this.config.debug) {
-        console.log('[VaultCore] Worker created:', this.config.workerUrl);
+        // Create worker
+        this.worker = new Worker(this.config.workerUrl);
+
+        if (this.config.debug) {
+          console.log('[VaultCore] Worker created:', this.config.workerUrl);
+        }
+
+        // Update manager worker references
+        (this.auth as any).worker = this.worker;
+        (this.vault as any).worker = this.worker;
+        (this.identities as any).worker = this.worker;
+        (this.permissions as any).worker = this.worker;
+
+        // Set up worker listeners for raw Worker mode
+        if (typeof (this.auth as any).setupWorkerListeners === 'function') {
+          (this.auth as any).setupWorkerListeners();
+        }
+        if (typeof (this.vault as any).setupWorkerListeners === 'function') {
+          (this.vault as any).setupWorkerListeners();
+        }
+
+        // Wait for worker to be ready
+        await this.waitForWorkerReady();
+      } else {
+        if (this.config.debug) {
+          console.log('[VaultCore] Using provided worker client (RPC mode)');
+        }
       }
-
-      // Update manager worker references
-      (this.auth as any).worker = this.worker;
-      (this.vault as any).worker = this.worker;
-      (this.identities as any).worker = this.worker;
-      (this.permissions as any).worker = this.worker;
-
-      // Set up worker listeners now that worker is assigned
-      if (typeof (this.auth as any).setupWorkerListeners === 'function') {
-        (this.auth as any).setupWorkerListeners();
-      }
-      if (typeof (this.vault as any).setupWorkerListeners === 'function') {
-        (this.vault as any).setupWorkerListeners();
-      }
-
-      // Wait for worker to be ready
-      await this.waitForWorkerReady();
 
       // Try to restore previous session
       await this.auth.restoreSession();
