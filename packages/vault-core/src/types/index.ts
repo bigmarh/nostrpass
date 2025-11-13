@@ -68,14 +68,25 @@ export type VaultData = VaultObj;
  */
 export interface VaultCoreConfig {
   /**
-   * URL to the crypto worker script
+   * URL to the crypto worker script (for raw Worker mode)
    */
-  workerUrl: string;
+  workerUrl?: string;
+
+  /**
+   * Worker-messenger RPC client (for worker-messenger mode)
+   * If provided, this takes precedence over workerUrl
+   */
+  workerClient?: any;
 
   /**
    * Environment name (production, development, etc.)
    */
   environment?: string;
+
+  /**
+   * Relay URLs for Nostr operations
+   */
+  relays?: string[];
 
   /**
    * Optional custom origin for messenger

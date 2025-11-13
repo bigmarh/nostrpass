@@ -8,11 +8,23 @@ import { permissionPromptManager } from '../utils/permissionPromptManager';
 
 function originToAppKey(origin: string): string {
   try {
-    const u = new URL(origin);
-    return sanitizeDomain(u.host);
-  } catch {
-    // Fallback: if origin is already a sanitized key
-    return sanitizeDomain(origin);
+    // Try parsing as URL
+    let url: URL;
+    if (origin.startsWith('http://') || origin.startsWith('https://')) {
+      url = new URL(origin);
+    } else {
+      // Add protocol if missing (for localhost:3200 format)
+      url = new URL(`http://${origin}`);
+    }
+
+    const result = sanitizeDomain(url.host);
+    console.log('🔑 [originToAppKey] URL parsed:', { origin, host: url.host, result });
+    return result;
+  } catch (e) {
+    // Final fallback: sanitize the raw string
+    const result = sanitizeDomain(origin);
+    console.log('🔑 [originToAppKey] Fallback to sanitize:', { origin, result, error: (e as Error).message });
+    return result;
   }
 }
 
@@ -20,22 +32,35 @@ export const authHandlers: MessageHandler[] = [
   {
     route: Msg.GET_PUBLIC_KEY,
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
+      console.log('🔑 [GET_PUBLIC_KEY] Handler called', { data, origin: context?.origin });
+
       const currentUser = deps.getUser();
+      console.log('🔑 [GET_PUBLIC_KEY] Current user:', currentUser ? { username: currentUser.profile?.username, publicKey: currentUser.publicKey?.substring(0, 20) } : null);
+
       if (!currentUser) {
+        console.error('❌ [GET_PUBLIC_KEY] No user authenticated');
         throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated');
       }
 
       // Check if vault is locked - if so, throw VAULT_LOCKED error which embassy handles specially
-      if (deps.isVaultLocked()) {
+      const isLocked = deps.isVaultLocked();
+      console.log('🔑 [GET_PUBLIC_KEY] Vault locked:', isLocked);
+
+      if (isLocked) {
+        console.error('❌ [GET_PUBLIC_KEY] Vault is locked');
         throw vaultError(ErrorCode.VAULT_LOCKED, 'Vault is locked');
       }
 
       // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
       const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
       const origin = originToAppKey(rawOrigin); // Sanitize to match stored permission keys
+      console.log('🔑 [GET_PUBLIC_KEY] Origin:', { raw: rawOrigin, sanitized: origin });
 
       const requestedIndex = data?.identityIndex;
+      console.log('🔑 [GET_PUBLIC_KEY] Requested identity index:', requestedIndex);
+
       if (requestedIndex === undefined || requestedIndex === null) {
+        console.error('❌ [GET_PUBLIC_KEY] Missing identity index');
         throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
 

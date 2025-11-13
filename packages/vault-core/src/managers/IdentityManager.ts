@@ -34,18 +34,31 @@ import type {
 } from '../types';
 
 export class IdentityManager extends EventEmitter {
-  private worker: Worker;
+  private worker: Worker | any;
+  private isRpcMode: boolean = false;
   private identities: Identity[] = [];
 
-  constructor(worker: Worker) {
+  constructor(worker: Worker | any) {
     super();
     this.worker = worker;
+
+    // Detect if this is an RPC client
+    this.isRpcMode = worker && typeof worker.createIdentity === 'function';
   }
 
   /**
    * Send message to worker and wait for response
    */
   private async sendToWorker<T = any>(type: string, data?: any): Promise<T> {
+    // RPC mode - call method directly
+    if (this.isRpcMode) {
+      if (typeof this.worker[type] === 'function') {
+        return await this.worker[type](data);
+      }
+      throw new Error(`Worker does not have method: ${type}`);
+    }
+
+    // Raw Worker mode - use postMessage
     return new Promise((resolve, reject) => {
       const requestId = `${type}_${Date.now()}_${Math.random()}`;
 

@@ -22,6 +22,11 @@ import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tool
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
 import { PERMISSION_KINDS, type PermissionLevel } from '@nostrpass/types';
+import { cryptoPrimitives } from './crypto-primitives';
+import { nostrSync } from './nostr-sync';
+
+// Singleton crypto instance for session manager operations
+const crypto = new NostrCrypto();
 import type {
   CreateVaultParams,
   CreateVaultResult,
@@ -292,6 +297,243 @@ export const sessionManager = {
   },
 
   /**
+   * Login handler - orchestrates the full login flow
+   * 1. Try to load vault from local IndexedDB
+   * 2. If not found, fetch from Nostr relays
+   * 3. Verify password
+   * 4. Initialize locked session
+   */
+  login: async (params: { username: string; password: string; environment?: string; relays?: string[] }, crypto: NostrCrypto): Promise<{
+    success: boolean;
+    user?: {
+      publicKey: string;
+      profile: { username: string; storagePublicKey?: string };
+    };
+    needsMigration?: boolean;
+    error?: string;
+  }> => {
+    console.log('🔍 [WORKER login] Starting login for username:', params.username);
+
+    try {
+      // 1. Try to load from local IndexedDB
+      console.log('📦 [WORKER login] Loading vault from IndexedDB...');
+      let vaultData = await vaultDB.getVault(params.username);
+      console.log('📦 [WORKER login] IndexedDB result:', vaultData ? 'found' : 'not found');
+
+      // 2. If not found locally, fetch from Nostr
+      if (!vaultData) {
+        console.log('📡 [WORKER login] Fetching from Nostr relays...');
+
+        // Dynamic import to avoid circular dependencies
+        const { getLoginObj, getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+        const relays = params.relays || [];
+        const env = params.environment || 'production';
+
+        const loginObj = await getLoginObj(params.username, env, relays);
+        if (!loginObj) {
+          return { success: false, error: 'No vault found for this username' };
+        }
+
+        console.log('✅ [WORKER login] Found LoginObj on Nostr');
+
+        // Derive password key using salt from LoginObj
+        console.log('🔑 [WORKER login] Deriving password key...');
+        const passwordDeriveResult = await cryptoPrimitives.deriveKey({
+          password: params.password,
+          salt: loginObj.passwordSalt
+        });
+        const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+
+        // Decrypt VaultObj with password key
+        const nostrVault = await getVaultFromNostr(loginObj.storagePublicKey, relays, passwordKey);
+
+        if (!nostrVault) {
+          return { success: false, error: 'Vault data not found on Nostr' };
+        }
+
+        console.log('✅ [WORKER login] Found VaultObj on Nostr');
+
+        // Save to local IndexedDB for future use
+        console.log('💾 [WORKER login] Saving vault to IndexedDB...');
+        await vaultDB.saveVault({
+          username: params.username,
+          publicKey: loginObj.storagePublicKey,
+          xprivEncrypted: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
+          encryptedVault: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
+          salt: (nostrVault as any).salt,
+          identities: (nostrVault as any).identities || [],
+          activeIdentityByApp: (nostrVault as any).activeIdentityByApp || {},
+          passwordVerifier: (nostrVault as any).passwordVerifier,
+          passwordSalt: (nostrVault as any).passwordSalt,
+          recovery: (nostrVault as any).recovery,
+          lastSyncedAt: Date.now(),
+          updatedAt: (nostrVault as any).updatedAt || Date.now(),
+          createdAt: (nostrVault as any).createdAt || Date.now()
+        } as VaultData);
+
+        vaultData = await vaultDB.getVault(params.username);
+        console.log('✅ [WORKER login] Vault saved to IndexedDB');
+      }
+
+      if (!vaultData) {
+        return { success: false, error: 'No vault found for this username' };
+      }
+
+      // 3. Verify password
+      console.log('🔐 [WORKER login] Verifying password...');
+
+      if (!params.password) {
+        return { success: false, error: 'Password is required' };
+      }
+
+      // MIGRATION PATH: Add security fields if missing (for old accounts)
+      if (!vaultData.passwordVerifier || !vaultData.passwordSalt) {
+        console.warn('⚠️ [WORKER login] Account missing security fields - migrating...');
+
+        try {
+          // Generate new password salt
+          const newPasswordSalt = await cryptoPrimitives.generateSalt();
+          const passwordSalt = newPasswordSalt.salt || newPasswordSalt;
+
+          // Derive key from password
+          const passwordDeriveResult = await cryptoPrimitives.deriveKey({
+            password: params.password,
+            salt: passwordSalt
+          });
+          const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+
+          // Create and encrypt verifier
+          const passwordVerifier = await cryptoPrimitives.encryptData({
+            data: 'NostrPass_Password_Verifier_v1',
+            password: passwordKey
+          });
+
+          // Update vault data with new security fields
+          vaultData.passwordVerifier = passwordVerifier;
+          vaultData.passwordSalt = passwordSalt;
+          vaultData.updatedAt = Date.now();
+
+          // Save to IndexedDB
+          await vaultDB.updateVaultData(params.username, vaultData);
+
+          console.log('✅ [WORKER login] Account migrated with security fields');
+        } catch (migrationError) {
+          console.error('❌ [WORKER login] Migration failed:', migrationError);
+          return { success: false, error: 'Failed to upgrade account security' };
+        }
+      }
+
+      // Verify password with stored verifier
+      try {
+        console.log('🔐 [WORKER login] Deriving key from password...');
+        const passwordDeriveResult = await cryptoPrimitives.deriveKey({
+          password: params.password,
+          salt: vaultData.passwordSalt
+        });
+        const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+
+        console.log('🔐 [WORKER login] Decrypting password verifier...');
+        const decrypted = await cryptoPrimitives.decryptData({
+          encryptedData: vaultData.passwordVerifier,
+          password: passwordKey
+        });
+
+        console.log('🔐 [WORKER login] Verifier decrypted, checking value...');
+        if (decrypted !== 'NostrPass_Password_Verifier_v1') {
+          console.error('❌ [WORKER login] Password verification failed');
+          return { success: false, error: 'Invalid password' };
+        }
+
+        console.log('✅ [WORKER login] Password verified successfully');
+
+        // 4. Initialize locked session with password key cached
+        console.log('🔒 [WORKER login] Initializing session...');
+        await sessionManager.initSession({
+          username: params.username,
+          publicKey: vaultData.publicKey,
+          vaultData,
+          passwordKey  // Cache password key for vault operations
+        });
+
+        console.log('✅ [WORKER login] Login successful');
+
+        return {
+          success: true,
+          user: {
+            publicKey: vaultData.publicKey,
+            profile: {
+              username: params.username,
+              storagePublicKey: vaultData.storagePublicKey || vaultData.publicKey
+            }
+          }
+        };
+      } catch (error) {
+        console.error('❌ [WORKER login] Password verification error:', error);
+        return { success: false, error: 'Invalid password' };
+      }
+    } catch (error) {
+      console.error('❌ [WORKER login] Login failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Login failed'
+      };
+    }
+  },
+
+  /**
+   * Logout handler - orchestrates the full logout flow
+   * 1. Stop Nostr subscription
+   * 2. Clear in-memory session
+   * 3. Clear persisted session
+   * 4. Optionally delete vault data
+   */
+  logout: async (params: { username: string; deleteVault?: boolean }, crypto: NostrCrypto): Promise<{ success: boolean }> => {
+    console.log('🚪 [WORKER logout] Starting logout for username:', params.username);
+
+    try {
+      // 1. Stop Nostr realtime subscription
+      try {
+        await nostrSync.stopNostrSubscription({ username: params.username });
+        console.log('✅ [WORKER logout] Stopped Nostr subscription');
+      } catch (error) {
+        console.warn('⚠️ [WORKER logout] Failed to stop subscription:', error);
+      }
+
+      // 2. Clear in-memory session
+      try {
+        await sessionManager.logoutUser({ username: params.username });
+        console.log('✅ [WORKER logout] Cleared in-memory session');
+      } catch (error) {
+        console.error('❌ [WORKER logout] Failed to clear session:', error);
+      }
+
+      // 3. Clear persisted session data
+      try {
+        await sessionManager.clearSession({ username: params.username });
+        console.log('✅ [WORKER logout] Cleared persisted session');
+      } catch (error) {
+        console.error('❌ [WORKER logout] Failed to clear persisted session:', error);
+      }
+
+      // 4. Optionally delete vault data
+      if (params.deleteVault) {
+        try {
+          await sessionManager.deleteVault({ username: params.username });
+          console.log('🗑️ [WORKER logout] Deleted vault data');
+        } catch (error) {
+          console.error('❌ [WORKER logout] Failed to delete vault:', error);
+        }
+      }
+
+      console.log('✅ [WORKER logout] Logout completed');
+      return { success: true };
+    } catch (error) {
+      console.error('❌ [WORKER logout] Logout failed:', error);
+      return { success: false };
+    }
+  },
+
+  /**
    * Sign a Nostr event using the current session keys for a specific identity
    * Checks permissions before signing
    */
@@ -300,7 +542,7 @@ export const sessionManager = {
     event: any;
     identityIndex: number;
     origin?: string
-  }, crypto: NostrCrypto, handlers: any): Promise<{ event: any }> => {
+  }): Promise<{ event: any }> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.isUnlocked || isSessionExpired(session)) {
       throw new Error('Session expired or locked');
@@ -337,7 +579,7 @@ export const sessionManager = {
       privateKey = session.privateKey;
       publicKey = crypto.getPublicKey(privateKey);
     } else if (session.xpriv) {
-      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      const derived = crypto.deriveKeypairFromXpriv(session.xpriv, params.identityIndex);
       privateKey = derived.privateKey;
       publicKey = derived.publicKey;
     }
@@ -378,7 +620,7 @@ export const sessionManager = {
     message: string;
     identityIndex: number;
     origin?: string
-  }, crypto: NostrCrypto, handlers: any): Promise<{ signature: string }> => {
+  }): Promise<{ signature: string }> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.isUnlocked || isSessionExpired(session)) {
       throw new Error('Session expired or locked');
@@ -410,7 +652,7 @@ export const sessionManager = {
     if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
-      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      const derived = crypto.deriveKeypairFromXpriv(session.xpriv, params.identityIndex);
       privateKey = derived.privateKey;
     }
     if (!privateKey) throw new Error('No session key available for signing');
@@ -576,37 +818,101 @@ export const sessionManager = {
    * Create a new vault with username and PIN
    * Generates xpriv, encrypts with PIN, and creates active session
    */
-  createVault: async (params: CreateVaultParams, crypto: NostrCrypto): Promise<CreateVaultResult> => {
-    // Generate the vault
-    const vaultResult = crypto.createVault(params.username, params.pin);
+  createVault: async (params: CreateVaultParams): Promise<CreateVaultResult> => {
+    console.log('🔐 [createVault] Starting vault creation for username:', params.username);
 
-    // Handle result Map
-    let vault: any;
-    if (vaultResult instanceof Map) {
-      vault = {
-        username: vaultResult.get('username'),
-        publicKey: vaultResult.get('publicKey'),
-        privateKey: vaultResult.get('privateKey'),
-        xpriv: vaultResult.get('xpriv'),
-        derivationPath: vaultResult.get('derivationPath'),
-        encryptedVault: vaultResult.get('encryptedVault'),
-        salt: vaultResult.get('salt'),
+    // Generate the vault using singleton crypto instance
+    const vault = await crypto.createVault(params.username, params.pin);
+    console.log('✅ [createVault] Vault crypto generated:', {
+      username: vault.username,
+      publicKey: vault.publicKey.substring(0, 20) + '...'
+    });
+
+    // Generate password verifier for login authentication
+    const newPasswordSalt = await cryptoPrimitives.generateSalt();
+    const passwordSalt = newPasswordSalt.salt || newPasswordSalt;
+    console.log('🔑 [createVault] Password salt generated');
+
+    // Derive key from password
+    const passwordDeriveResult = await cryptoPrimitives.deriveKey({
+      password: params.password,
+      salt: passwordSalt
+    });
+    const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+
+    // Create and encrypt verifier
+    const passwordVerifier = await cryptoPrimitives.encryptData({
+      data: 'NostrPass_Password_Verifier_v1',
+      password: passwordKey
+    });
+
+    // Create default app permissions if appDomain provided
+    const appPermissions: Record<string, any> = {};
+    if (params.appDomain) {
+      appPermissions[params.appDomain] = {
+        appDomain: params.appDomain,
+        appName: params.appDomain,
+        permissions: {
+          getPublicKey: 'ALLOW' as PermissionLevel,
+          signEvent: 'ASK_EVERYTIME' as PermissionLevel,
+          nip04: 'ASK_EVERYTIME' as PermissionLevel,
+          nip44: 'ASK_EVERYTIME' as PermissionLevel
+        },
+        createdAt: Date.now(),
+        lastUsed: Date.now()
       };
-    } else {
-      vault = vaultResult;
     }
 
-    // Store encrypted vault data (xprivEncrypted only)
-    await vaultDB.saveVault({
+    // Create default identity (index 0)
+    const defaultIdentity = {
+      id: `identity-0-${Date.now()}`,
+      index: 0,
+      name: 'Main Identity',
+      publicKey: vault.publicKey,
+      purpose: 'default',
+      appPermissions,
+      createdAt: Date.now(),
+      lastUsed: Date.now()
+    };
+
+    // Store encrypted vault data with default identity and password verifier
+    const vaultDataToSave = {
       username: vault.username,
       publicKey: vault.publicKey,
       encryptedVault: vault.xprivEncrypted || vault.encryptedVault,
       salt: vault.salt,
       derivationPath: vault.derivationPath,
+      identities: [defaultIdentity],
+      passwordVerifier,
+      passwordSalt,
+      version: 1,
       createdAt: Date.now(),
       lastUnlocked: Date.now(),
-      sessionExpiry: Date.now() + (24 * 60 * 60 * 1000)
+      sessionExpiry: Date.now() + (24 * 60 * 60 * 1000),
+      updatedAt: Date.now()
+    };
+
+    console.log('💾 [createVault] Saving vault to IndexedDB:', {
+      username: vaultDataToSave.username,
+      hasPasswordVerifier: !!vaultDataToSave.passwordVerifier,
+      hasPasswordSalt: !!vaultDataToSave.passwordSalt,
+      identitiesCount: vaultDataToSave.identities.length
     });
+
+    await vaultDB.saveVault(vaultDataToSave);
+    console.log('✅ [createVault] Vault saved to IndexedDB successfully');
+
+    // Verify it was saved
+    const savedVault = await vaultDB.getVault(vault.username);
+    if (savedVault) {
+      console.log('✅ [createVault] Vault verified in IndexedDB:', {
+        username: savedVault.username,
+        hasPasswordVerifier: !!savedVault.passwordVerifier,
+        hasPasswordSalt: !!savedVault.passwordSalt
+      });
+    } else {
+      console.error('❌ [createVault] Failed to verify vault in IndexedDB!');
+    }
 
     // Create active session
     const session: ExtendedSession = {
@@ -627,9 +933,14 @@ export const sessionManager = {
     });
 
     return {
-      username: vault.username,
-      publicKey: vault.publicKey,
-      derivationPath: vault.derivationPath
+      success: true,
+      user: {
+        publicKey: vault.publicKey,
+        profile: {
+          username: vault.username,
+          storagePublicKey: vault.publicKey
+        }
+      }
     };
   },
 
@@ -953,22 +1264,11 @@ export const sessionManager = {
     );
 
     // Re-encrypt with new PIN
-    const newVault = crypto.createVaultFromKeys(
+    const vault = await crypto.createVaultFromKeys(
       params.username,
       privateKey,
       newPin
     );
-
-    // Handle result Map
-    let vault: any;
-    if (newVault instanceof Map) {
-      vault = {
-        encryptedVault: newVault.get('encryptedVault'),
-        salt: newVault.get('salt'),
-      };
-    } else {
-      vault = newVault;
-    }
 
     // Update vault
     await vaultDB.updateVault(params.username, {

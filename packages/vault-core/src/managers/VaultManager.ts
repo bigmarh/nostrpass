@@ -28,13 +28,19 @@ import { EventEmitter } from '../utils/EventEmitter';
 import type { VaultData, EventCallback, Unsubscribe } from '../types';
 
 export class VaultManager extends EventEmitter {
-  private worker: Worker;
+  private worker: Worker | any;
+  private isRpcMode: boolean = false;
   private currentVaultData: VaultData | null = null;
 
-  constructor(worker: Worker) {
+  constructor(worker: Worker | any) {
     super();
     this.worker = worker;
-    if (this.worker) {
+
+    // Detect if this is an RPC client
+    this.isRpcMode = worker && typeof worker.getVaultData === 'function';
+
+    // Only set up listeners for raw Worker mode
+    if (this.worker && !this.isRpcMode) {
       this.setupWorkerListeners();
     }
   }
@@ -43,7 +49,7 @@ export class VaultManager extends EventEmitter {
    * Set up listeners for worker messages related to vault
    */
   private setupWorkerListeners(): void {
-    if (!this.worker) return;
+    if (!this.worker || this.isRpcMode) return;
 
     this.worker.addEventListener('message', (event: MessageEvent) => {
       const { type, data } = event.data;
@@ -63,6 +69,15 @@ export class VaultManager extends EventEmitter {
    * Send message to worker and wait for response
    */
   private async sendToWorker<T = any>(type: string, data?: any): Promise<T> {
+    // RPC mode - call method directly
+    if (this.isRpcMode) {
+      if (typeof this.worker[type] === 'function') {
+        return await this.worker[type](data);
+      }
+      throw new Error(`Worker does not have method: ${type}`);
+    }
+
+    // Raw Worker mode - use postMessage
     return new Promise((resolve, reject) => {
       const requestId = `${type}_${Date.now()}_${Math.random()}`;
 
