@@ -14,12 +14,9 @@
     @apply md:border-2 md:border-black;
 }
 
-/* App background: use light/dark page colors on the html element */
+/* App background: transparent for embedded iframe, solid for standalone */
 html {
-    background-color: #ffffff; /* light background */
-}
-html.dark {
-    background-color: #0f172a; /* slate-900 for dark mode */
+    background-color: transparent;
 }
 
 html,
@@ -36,6 +33,7 @@ body {
 #root {
     width: 100%;
     min-height: 100vh; /* ensure root always covers full height */
+    background-color: transparent;
 }
 
 /* Mobile: full width */

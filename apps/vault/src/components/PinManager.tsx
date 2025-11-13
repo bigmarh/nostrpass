@@ -145,12 +145,12 @@ export const PinManager: Component<PinManagerProps> = (props) => {
     <>
       {/* PIN Unlock Modal */}
       <Show when={showPinUnlock()}>
-        <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div class="bg-white rounded-lg shadow-xl border-2 border-gray-300 p-8 text-center relative max-w-md w-full mx-4">
+        <div class="fixed inset-0 bg-white dark:bg-gray-900 flex items-center justify-center z-50 p-0 rounded-[16px] overflow-hidden">
+          <div class="bg-white dark:bg-gray-800 px-6 py-8 text-center relative w-full h-full flex flex-col justify-center">
             <Show when={!showRecovery() && !showPinReset()}>
               {/* Header */}
-              <div class="text-center mb-6">
-                <h2 class="text-xl font-semibold mb-2">Unlock Vault</h2>
+              <div class="text-center mb-7">
+                <h2 class="text-lg font-semibold mb-1.5">Unlock Vault</h2>
                 <p class="text-gray-600">Enter your PIN to unlock your vault</p>
               </div>
 

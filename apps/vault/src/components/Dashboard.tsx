@@ -3,7 +3,6 @@ import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 
 import { useAuth, useMessenger, useCryptoWorker, useDarkModeContext } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
-import { VaultTestConsole } from './VaultTestConsole';
 import { useVaultData } from '../hooks/useVaultData';
 import { IdentityManager } from './IdentityManager';
 import { PinManager } from './PinManager';
@@ -186,11 +185,6 @@ export const Dashboard: Component = () => {
                                 // PinManager will handle this internally
                             }}
                         />
-
-                        {/* Test Console - only in DEV mode */}
-                        <Show when={import.meta.env.DEV}>
-                            <VaultTestConsole />
-                        </Show>
                     </main>
 
                     <footer class="text-sm py-4 px-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center relative">

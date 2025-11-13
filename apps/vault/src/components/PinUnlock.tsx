@@ -112,9 +112,9 @@ export const PinUnlock: Component = () => {
 
 
     return (
-        <div class="flex justify-center md:h-screen items-center bg-white dark:bg-gray-900">
-            <div class="flex min-w-[400px] w-full max-w-2xl h-auto bg-white dark:bg-gray-800 black-outline flex-col rounded-lg">
-                <div class="flex flex-col items-center justify-center p-8">
+        <div class="flex justify-center items-center min-h-screen w-full">
+            <div class="flex w-full h-full bg-white dark:bg-gray-800 flex-col rounded-[16px] overflow-hidden">
+                <div class="flex flex-col items-center justify-center px-8 py-6 h-full">
                   
                     <Show when={error()}>
                         <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4 max-w-md text-center">

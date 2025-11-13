@@ -16,6 +16,7 @@ export var Msg;
     Msg["DECRYPT"] = "DECRYPT";
     Msg["GOT_ERROR"] = "GOT_ERROR";
     Msg["PROMPT_REQUIRED"] = "PROMPT_REQUIRED";
+    Msg["MANAGE_ACCOUNTS"] = "MANAGE_ACCOUNTS";
 })(Msg || (Msg = {}));
 export var ErrorCode;
 (function (ErrorCode) {

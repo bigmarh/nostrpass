@@ -63,6 +63,10 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
                 console.log('✅ Unlock was for an operation, notifying waiters');
                 (embassyInstance as any).notifyUnlocked();
             }
+
+            // Dispatch window event for NostrPassButton and other listeners
+            window.dispatchEvent(new CustomEvent('nostrpass:unlocked', { detail: data }));
+
             // Don't return anything - this is a notification, not a request/response
         }
     }

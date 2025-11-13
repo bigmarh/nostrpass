@@ -437,13 +437,50 @@ export const authHandlers: MessageHandler[] = [
   },
 
   {
-    route: 'GET_AUTH_STATUS',
+    route: Msg.AUTH_STATUS,
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
-      return {
-        isAuthenticated: !!currentUser,
-        publicKey: currentUser?.publicKey || null
-      };
+      const cryptoWorker = deps.getCryptoWorker();
+      const isLocked = deps.isVaultLocked();
+
+      if (!currentUser) {
+        return {
+          isAuthenticated: false,
+          isLocked: false,
+          user: null
+        };
+      }
+
+      // Get the default identity (index 0) for button display
+      try {
+        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+        const defaultIdentity = vaultData?.identities?.[0];
+
+        return {
+          isAuthenticated: true,
+          isLocked,
+          user: {
+            identityIndex: 0,
+            publicKey: defaultIdentity?.publicKey || currentUser.publicKey,
+            npub: defaultIdentity?.npub,
+            nickname: defaultIdentity?.nickname,
+            authorized: false // Will be determined by app-specific authorization
+          }
+        };
+      } catch (error) {
+        // If we can't get vault data (e.g., vault locked), still return basic auth status
+        return {
+          isAuthenticated: true,
+          isLocked: true, // If we can't get vault data, it's likely locked
+          user: {
+            identityIndex: 0,
+            publicKey: currentUser.publicKey,
+            npub: null,
+            nickname: currentUser.profile?.username,
+            authorized: false
+          }
+        };
+      }
     }
   },
 

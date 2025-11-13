@@ -38,6 +38,8 @@ interface NostrOperationOptions {
 
 interface AccountManagerOptions {
   forcePrompt?: boolean;
+  size?: 'full' | 'compact' | 'minimal';
+  buttonElement?: HTMLElement;
 }
 
 interface AccountIdentitySummary {
@@ -89,6 +91,7 @@ class NostrPassEmbassy {
   // Reserved for future cooldown logic; intentionally unused for now
   // private lastUnlockAt = 0;
   private unlockResolvers: Array<() => void> = [];
+  private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
   
   private waitForUnlock(): Promise<void> {
@@ -383,7 +386,11 @@ class NostrPassEmbassy {
       if (!this.backdropEl) {
         this.backdropEl = document.createElement('div');
         this.backdropEl.className = 'nostrpass-backdrop';
-        this.backdropEl.addEventListener('click', () => this.hide());
+        this.backdropEl.addEventListener('click', (e) => {
+          console.log('🎯 Backdrop clicked');
+          e.stopPropagation();
+          this.hide();
+        });
       }
 
       // Add to DOM: backdrop first, then iframe on top
@@ -394,28 +401,105 @@ class NostrPassEmbassy {
     });
   }
 
-  public show(page: string = 'vault', mode: 'full' | 'minimal' = 'full'): void {
+  public show(page: string = 'vault', mode: 'full' | 'compact' | 'minimal' = 'full', buttonElement?: HTMLElement): void {
     if (!this.iframe) {
       console.warn('Cannot show iframe - not created yet');
-      this.createIframe().then(() => this.show(page, mode));
+      this.createIframe().then(() => this.show(page, mode, buttonElement));
       return;
     }
 
     // Remove hidden class to show iframe
     this.iframe.classList.remove('nostrpass-iframe-hidden');
-    
+    this.iframe.classList.remove('nostrpass-iframe-visible');
+    this.iframe.classList.remove('nostrpass-iframe-compact');
+    this.iframe.classList.remove('nostrpass-iframe-minimal');
+
     // Apply the appropriate visibility mode
     if (mode === 'minimal') {
-      this.iframe.classList.remove('nostrpass-iframe-visible');
       this.iframe.classList.add('nostrpass-iframe-minimal');
+    } else if (mode === 'compact') {
+      this.iframe.classList.add('nostrpass-iframe-compact');
+
+      // Position compact mode relative to button if provided
+      if (buttonElement) {
+        const rect = buttonElement.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        const iframeWidth = 395;
+        const iframeHeight = 395;
+        const gap = 8;
+
+        let top: number;
+        let left: number;
+
+        // Determine vertical position (above or below button)
+        if (spaceBelow >= iframeHeight + gap) {
+          // Position below button
+          top = rect.bottom + gap;
+        } else if (spaceAbove >= iframeHeight + gap) {
+          // Position above button
+          top = rect.top - iframeHeight - gap;
+        } else {
+          // Fall back to centered if not enough space vertically
+          this.iframe.style.top = '50%';
+          this.iframe.style.left = '50%';
+          this.iframe.style.transform = 'translate(-50%, -50%)';
+          return;
+        }
+
+        // Determine horizontal position (keep within viewport)
+        // Try to align with left edge of button first
+        left = rect.left;
+
+        // Check if iframe would overflow right edge of viewport
+        if (left + iframeWidth > window.innerWidth - gap) {
+          // Align with right edge of button instead
+          left = rect.right - iframeWidth;
+        }
+
+        // Check if iframe would overflow left edge of viewport
+        if (left < gap) {
+          left = gap;
+        }
+
+        // Apply positioning
+        this.iframe.style.top = `${top}px`;
+        this.iframe.style.left = `${left}px`;
+        this.iframe.style.transform = 'none';
+      }
     } else {
-      this.iframe.classList.remove('nostrpass-iframe-minimal');
       this.iframe.classList.add('nostrpass-iframe-visible');
     }
 
-    // Show backdrop
+    // Show backdrop with appropriate styling
     if (this.backdropEl) {
-      this.backdropEl.style.display = 'block';
+      this.backdropEl.classList.add('visible');
+
+      // Always use transparent backdrop
+      this.backdropEl.style.background = 'transparent';
+      this.backdropEl.style.backdropFilter = 'none';
+    }
+
+    // Add click-outside handler for compact mode
+    if (mode === 'compact') {
+      // Remove any existing handler first
+      if (this.outsideClickHandler) {
+        document.removeEventListener('click', this.outsideClickHandler);
+      }
+
+      // Add new handler with a small delay to avoid immediate trigger
+      setTimeout(() => {
+        this.outsideClickHandler = (e: MouseEvent) => {
+          const target = e.target as HTMLElement;
+          // Check if click is outside iframe and backdrop
+          if (this.iframe && !this.iframe.contains(target) &&
+              this.backdropEl && this.backdropEl === target) {
+            console.log('🎯 Click outside iframe detected');
+            this.hide();
+          }
+        };
+        document.addEventListener('click', this.outsideClickHandler);
+      }, 100);
     }
 
     // Accessibility
@@ -439,7 +523,7 @@ class NostrPassEmbassy {
 
   public hide(): void {
     console.log('🔙 Embassy hide() method called');
-    
+
     if (!this.iframe) {
       console.warn('Cannot hide iframe - not created yet');
       return;
@@ -449,12 +533,19 @@ class NostrPassEmbassy {
 
     // Add hidden class to move off-screen
     this.iframe.classList.remove('nostrpass-iframe-visible');
+    this.iframe.classList.remove('nostrpass-iframe-compact');
     this.iframe.classList.remove('nostrpass-iframe-minimal');
     this.iframe.classList.add('nostrpass-iframe-hidden');
 
     // Hide backdrop
     if (this.backdropEl) {
-      this.backdropEl.style.display = 'none';
+      this.backdropEl.classList.remove('visible');
+    }
+
+    // Remove click-outside handler
+    if (this.outsideClickHandler) {
+      document.removeEventListener('click', this.outsideClickHandler);
+      this.outsideClickHandler = null;
     }
 
     // Accessibility
@@ -499,21 +590,48 @@ class NostrPassEmbassy {
         background-color: transparent !important;
       }
       
-      /* Visible state - fullscreen overlay with transparent background */
+      /* Visible state - Large modal for full dashboard */
       .nostrpass-iframe-visible {
         position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: min(900px, 95vw) !important;
+        height: min(700px, 90vh) !important;
+        max-height: 800px !important;
         opacity: 1 !important;
         visibility: visible !important;
         pointer-events: auto !important;
         border: none !important;
+        border-radius: 16px !important;
         background: transparent !important;
-        background-color: transparent !important;
-        z-index: 2147483647 !important; /* Maximum z-index */
-        color-scheme: light dark; /* Support both themes */
+        z-index: 2147483647 !important;
+        overflow: visible !important;
+      }
+
+      /* Compact state - Smaller modal for PIN unlock, account picker */
+      .nostrpass-iframe-compact {
+        position: fixed !important;
+        width: 395px !important;
+        height: 395px !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        border-radius: 16px !important;
+        background: transparent !important;
+        z-index: 2147483647 !important;
+        overflow: hidden !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+      }
+
+      @media (max-width: 500px) {
+        .nostrpass-iframe-compact {
+          width: 90vw !important;
+          height: 90vw !important;
+          max-width: 395px !important;
+          max-height: 395px !important;
+        }
       }
 
       /* Minimal state - centered modal for quick unlock */
@@ -536,18 +654,47 @@ class NostrPassEmbassy {
         color-scheme: light dark; /* Support both themes */
       }
 
-      /* Dimmed backdrop behind iframe - provides the modal overlay effect */
+      /* Dimmed backdrop behind iframe - Clerk-style subtle overlay */
       .nostrpass-backdrop {
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
         width: 100vw !important;
         height: 100vh !important;
-        background: rgba(0, 0, 0, 0.5) !important;
-        backdrop-filter: blur(2px) !important;
-        z-index: 2147483646 !important; /* Just beneath iframe */
+        background: rgba(0, 0, 0, 0.4) !important;
+        backdrop-filter: blur(4px) !important;
+        z-index: 2147483646 !important;
         pointer-events: auto !important;
-        display: none !important;
+        display: none;
+        animation: nostrpass-fade-in 0.2s ease !important;
+      }
+
+      .nostrpass-backdrop.visible {
+        display: block !important;
+      }
+
+      @keyframes nostrpass-fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes nostrpass-modal-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -48%);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, -50%);
+        }
+      }
+
+      .nostrpass-iframe-visible {
+        animation: nostrpass-modal-in 0.2s ease !important;
       }
       
       /* Debug mode - visible but smaller */
@@ -1101,6 +1248,21 @@ class NostrPassEmbassy {
     }
   }
 
+  async getAuthStatus(): Promise<any> {
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      const response = await this.messenger!.request(Msg.AUTH_STATUS, {});
+      return response;
+    } catch (error) {
+      console.error('Failed to get auth status:', error);
+      throw error;
+    }
+  }
+
   async manageAccount(options: AccountManagerOptions = {}): Promise<AccountManagerResult> {
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -1109,7 +1271,9 @@ class NostrPassEmbassy {
 
     const forcePrompt = options.forcePrompt ?? true;
 
-    this.show('vault', 'full');
+    // Use compact mode for initial auth/unlock, full mode for management
+    const mode = options.size || 'compact';
+    this.show('vault', mode, options.buttonElement);
 
     try {
       const response = await this.messenger!.request(Msg.MANAGE_ACCOUNTS, {
@@ -1117,13 +1281,12 @@ class NostrPassEmbassy {
         appDomain: this.config.appDomain,
         forcePrompt
       });
+      // Only hide on success
+      this.hide();
       return response;
-    } finally {
-      try {
-        this.hide();
-      } catch (error) {
-        console.warn('Failed to hide vault after manageAccount:', error);
-      }
+    } catch (error) {
+      // Don't hide on error - user needs to see the vault to unlock/login
+      throw error;
     }
   }
 
