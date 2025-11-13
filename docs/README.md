@@ -5,7 +5,7 @@ Welcome to the NostrPass documentation. This directory contains all technical do
 ---
 
 ## 📚 Getting Started
-
+◊
 ### For New Developers
 1. [Architecture Overview](ARCHITECTURE.md) - System architecture and design
 2. [Message Flow](MESSAGE_FLOW.md) - How components communicate

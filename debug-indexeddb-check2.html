@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>IndexedDB Debug - Check Vaults</title>
+</head>
+<body>
+  <h1>IndexedDB Vault Checker</h1>
+  <button onclick="checkVaults()">Check All Vaults</button>
+  <button onclick="clearVaults()">Clear All Vaults</button>
+  <pre id="output"></pre>
+
+  <script>
+    async function checkVaults() {
+      const output = document.getElementById('output');
+      output.textContent = 'Checking IndexedDB...\n';
+
+      try {
+        const db = await new Promise((resolve, reject) => {
+          const request = indexedDB.open('NostrPassVault', 2);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+
+        output.textContent += '\n✅ Database opened successfully\n';
+        output.textContent += `Object stores: ${Array.from(db.objectStoreNames).join(', ')}\n\n`;
+
+        // Read all vaults
+        const transaction = db.transaction(['vaults'], 'readonly');
+        const store = transaction.objectStore('vaults');
+        const allVaults = await new Promise((resolve, reject) => {
+          const request = store.getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+
+        output.textContent += `\n📦 Found ${allVaults.length} vaults:\n\n`;
+        allVaults.forEach((vault, i) => {
+          output.textContent += `Vault ${i + 1}:\n`;
+          output.textContent += `  Username: ${vault.username}\n`;
+          output.textContent += `  PublicKey: ${vault.publicKey}\n`;
+          output.textContent += `  Has encryptedVault: ${!!vault.encryptedVault}\n`;
+          output.textContent += `  Has passwordVerifier: ${!!vault.passwordVerifier}\n`;
+          output.textContent += `  Has passwordSalt: ${!!vault.passwordSalt}\n`;
+          output.textContent += `  Identities count: ${vault.identities?.length || 0}\n`;
+          output.textContent += `  Version: ${vault.version}\n`;
+          output.textContent += `  Created: ${vault.createdAt ? new Date(vault.createdAt).toISOString() : 'N/A'}\n`;
+          output.textContent += `  All keys: ${Object.keys(vault).join(', ')}\n`;
+          output.textContent += '\n';
+        });
+
+        db.close();
+      } catch (error) {
+        output.textContent += `\n❌ Error: ${error}\n`;
+        console.error(error);
+      }
+    }
+
+    async function clearVaults() {
+      if (!confirm('Are you sure you want to delete all vaults?')) return;
+      
+      try {
+        await new Promise((resolve, reject) => {
+          const request = indexedDB.deleteDatabase('NostrPassVault');
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+        document.getElementById('output').textContent = '✅ All vaults cleared!\n';
+      } catch (error) {
+        document.getElementById('output').textContent = `❌ Error: ${error}\n`;
+      }
+    }
+
+    // Auto-check on load
+    window.addEventListener('load', checkVaults);
+  </script>
+</body>
+</html>
