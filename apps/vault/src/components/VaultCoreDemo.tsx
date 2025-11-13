@@ -15,6 +15,10 @@ export function VaultCoreDemo() {
   const [username, setUsername] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [pin, setPin] = createSignal('');
+  const [identityName, setIdentityName] = createSignal('');
+  const [identityPurpose, setIdentityPurpose] = createSignal('');
+  const [showSignup, setShowSignup] = createSignal(false);
+  const [isCreatingAccount, setIsCreatingAccount] = createSignal(false);
 
   const handleLogin = async () => {
     const result = await auth.login(username(), password());
@@ -31,6 +35,49 @@ export function VaultCoreDemo() {
       console.log('Vault unlocked!');
     } else {
       console.error('Unlock failed:', result.error);
+    }
+  };
+
+  const handleSignup = async () => {
+    console.log('[VaultCoreDemo] handleSignup called', { username: username(), hasPassword: !!password(), hasPin: !!pin() });
+    setIsCreatingAccount(true);
+
+    try {
+      const result = await auth.createAccount(username(), password(), pin());
+      console.log('[VaultCoreDemo] createAccount result:', result);
+
+      if (result.success) {
+        console.log('✅ Account created!', result.user);
+        setShowSignup(false);
+        setUsername('');
+        setPassword('');
+        setPin('');
+      } else {
+        console.error('❌ Signup failed:', result.error);
+        alert(`Signup failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Signup error:', error);
+      alert(`Signup error: ${error}`);
+    } finally {
+      setIsCreatingAccount(false);
+    }
+  };
+
+  const handleCreateIdentity = async () => {
+    const user = auth.user();
+    if (!user) return;
+
+    try {
+      const identity = await identities.create(user.profile.username, {
+        name: identityName(),
+        purpose: identityPurpose() || 'general'
+      });
+      console.log('Identity created!', identity);
+      setIdentityName('');
+      setIdentityPurpose('');
+    } catch (error) {
+      console.error('Create identity failed:', error);
     }
   };
 
@@ -57,47 +104,138 @@ export function VaultCoreDemo() {
             <div>
               <p style={{ color: '#666' }}>Not logged in</p>
 
-              {/* Login Form */}
-              <div style={{ 'margin-top': '15px' }}>
-                <h3>Login</h3>
-                <input
-                  type="text"
-                  placeholder="Username"
-                  value={username()}
-                  onInput={(e) => setUsername(e.currentTarget.value)}
-                  style={{
-                    padding: '8px',
-                    'margin-right': '10px',
-                    'border-radius': '4px',
-                    border: '1px solid #ccc'
-                  }}
-                />
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={password()}
-                  onInput={(e) => setPassword(e.currentTarget.value)}
-                  style={{
-                    padding: '8px',
-                    'margin-right': '10px',
-                    'border-radius': '4px',
-                    border: '1px solid #ccc'
-                  }}
-                />
-                <button
-                  onClick={handleLogin}
-                  style={{
-                    padding: '8px 16px',
-                    'background-color': '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    'border-radius': '4px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Login
-                </button>
-              </div>
+              <Show
+                when={!showSignup()}
+                fallback={
+                  <div style={{ 'margin-top': '15px' }}>
+                    <h3>Create Account</h3>
+                    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '10px', 'max-width': '400px' }}>
+                      <input
+                        type="text"
+                        placeholder="Username"
+                        value={username()}
+                        onInput={(e) => setUsername(e.currentTarget.value)}
+                        style={{
+                          padding: '8px',
+                          'border-radius': '4px',
+                          border: '1px solid #ccc'
+                        }}
+                      />
+                      <input
+                        type="password"
+                        placeholder="Password"
+                        value={password()}
+                        onInput={(e) => setPassword(e.currentTarget.value)}
+                        style={{
+                          padding: '8px',
+                          'border-radius': '4px',
+                          border: '1px solid #ccc'
+                        }}
+                      />
+                      <input
+                        type="password"
+                        placeholder="6-digit PIN"
+                        value={pin()}
+                        onInput={(e) => setPin(e.currentTarget.value)}
+                        maxlength={6}
+                        style={{
+                          padding: '8px',
+                          'border-radius': '4px',
+                          border: '1px solid #ccc'
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          onClick={handleSignup}
+                          disabled={!username() || !password() || !pin() || isCreatingAccount()}
+                          style={{
+                            padding: '8px 16px',
+                            'background-color': (username() && password() && pin() && !isCreatingAccount()) ? '#4CAF50' : '#ccc',
+                            color: 'white',
+                            border: 'none',
+                            'border-radius': '4px',
+                            cursor: (username() && password() && pin() && !isCreatingAccount()) ? 'pointer' : 'not-allowed',
+                            flex: '1'
+                          }}
+                        >
+                          {isCreatingAccount() ? 'Creating...' : 'Create Account'}
+                        </button>
+                        <button
+                          onClick={() => setShowSignup(false)}
+                          style={{
+                            padding: '8px 16px',
+                            'background-color': '#666',
+                            color: 'white',
+                            border: 'none',
+                            'border-radius': '4px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                }
+              >
+                {/* Login Form */}
+                <div style={{ 'margin-top': '15px' }}>
+                  <h3>Login</h3>
+                  <div style={{ display: 'flex', gap: '10px', 'align-items': 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Username"
+                      value={username()}
+                      onInput={(e) => setUsername(e.currentTarget.value)}
+                      style={{
+                        padding: '8px',
+                        'border-radius': '4px',
+                        border: '1px solid #ccc',
+                        flex: '1'
+                      }}
+                    />
+                    <input
+                      type="password"
+                      placeholder="Password"
+                      value={password()}
+                      onInput={(e) => setPassword(e.currentTarget.value)}
+                      style={{
+                        padding: '8px',
+                        'border-radius': '4px',
+                        border: '1px solid #ccc',
+                        flex: '1'
+                      }}
+                    />
+                    <button
+                      onClick={handleLogin}
+                      style={{
+                        padding: '8px 16px',
+                        'background-color': '#4CAF50',
+                        color: 'white',
+                        border: 'none',
+                        'border-radius': '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Login
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setShowSignup(true)}
+                    style={{
+                      padding: '6px 12px',
+                      'background-color': 'transparent',
+                      color: '#2196F3',
+                      border: 'none',
+                      cursor: 'pointer',
+                      'margin-top': '10px',
+                      'text-decoration': 'underline'
+                    }}
+                  >
+                    Create new account
+                  </button>
+                </div>
+              </Show>
             </div>
           }
         >
@@ -193,6 +331,52 @@ export function VaultCoreDemo() {
           'margin-bottom': '20px'
         }}>
           <h2>Identities</h2>
+
+          {/* Create Identity Form */}
+          <div style={{ 'margin-bottom': '15px', 'padding-bottom': '15px', 'border-bottom': '1px solid #ddd' }}>
+            <h3 style={{ 'font-size': '16px', 'margin-bottom': '10px' }}>Create New Identity</h3>
+            <div style={{ display: 'flex', gap: '10px', 'align-items': 'center' }}>
+              <input
+                type="text"
+                placeholder="Name (e.g., Personal)"
+                value={identityName()}
+                onInput={(e) => setIdentityName(e.currentTarget.value)}
+                style={{
+                  padding: '8px',
+                  'border-radius': '4px',
+                  border: '1px solid #ccc',
+                  flex: '1'
+                }}
+              />
+              <input
+                type="text"
+                placeholder="Purpose (e.g., social)"
+                value={identityPurpose()}
+                onInput={(e) => setIdentityPurpose(e.currentTarget.value)}
+                style={{
+                  padding: '8px',
+                  'border-radius': '4px',
+                  border: '1px solid #ccc',
+                  flex: '1'
+                }}
+              />
+              <button
+                onClick={handleCreateIdentity}
+                disabled={!identityName()}
+                style={{
+                  padding: '8px 16px',
+                  'background-color': identityName() ? '#4CAF50' : '#ccc',
+                  color: 'white',
+                  border: 'none',
+                  'border-radius': '4px',
+                  cursor: identityName() ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+
           <Show
             when={!vaultData.loading()}
             fallback={<p>Loading identities...</p>}

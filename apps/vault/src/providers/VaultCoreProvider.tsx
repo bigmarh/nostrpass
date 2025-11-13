@@ -59,6 +59,12 @@ function createAuth(vault: Accessor<VaultCore | null>) {
     return v.auth.login(username, password);
   };
 
+  const createAccount = async (username: string, password: string, pin: string, appDomain?: string) => {
+    const v = vault();
+    if (!v) return { success: false, error: 'Vault not initialized' };
+    return v.auth.createAccount(username, password, pin, appDomain);
+  };
+
   const logout = async () => {
     const v = vault();
     if (!v) return;
@@ -81,6 +87,7 @@ function createAuth(vault: Accessor<VaultCore | null>) {
     user,
     isLocked,
     login,
+    createAccount,
     logout,
     unlockVault,
     lockVault
@@ -127,11 +134,11 @@ function createIdentities(vault: Accessor<VaultCore | null>, username: Accessor<
 
   const list = () => vaultData.data()?.identities || [];
 
-  const create = async (options: { name: string; purpose?: string }) => {
-    const v = vault();
-    const u = username();
-    if (!v || !u) return null;
-    return v.identities.createIdentity(u, options);
+  const create = async (username: string, options: { name: string; purpose?: string }) => {
+    // For now, return a placeholder since createIdentity doesn't exist in worker yet
+    // TODO: Add createIdentity to worker session-manager
+    console.warn('[VaultCoreProvider] createIdentity not yet implemented in worker');
+    return null;
   };
 
   return {
@@ -141,33 +148,29 @@ function createIdentities(vault: Accessor<VaultCore | null>, username: Accessor<
 }
 
 function createPermissions(vault: Accessor<VaultCore | null>, username: Accessor<string | null>) {
+  const vaultData = createVaultData(vault, username);
   const [list, setList] = createSignal<AppPermissions[]>([]);
   const [loading, setLoading] = createSignal(false);
 
+  // Derive permissions from vault data instead of calling getAllAppPermissions (which doesn't exist yet)
   createEffect(() => {
-    const v = vault();
-    const u = username();
+    const data = vaultData.data();
+    if (!data) {
+      setList([]);
+      return;
+    }
 
-    if (!v || !u) return;
-
-    setLoading(true);
-    v.permissions.getAllAppPermissions(u)
-      .then(setList)
-      .catch(err => console.error('Failed to load permissions:', err))
-      .finally(() => setLoading(false));
-
-    const unsubUpdated = v.permissions.onPermissionsUpdated(() => {
-      v.permissions.getAllAppPermissions(u).then(setList);
+    // Collect all app permissions from all identities
+    const allPermissions: AppPermissions[] = [];
+    data.identities?.forEach((identity: any) => {
+      if (identity.appPermissions) {
+        Object.values(identity.appPermissions).forEach((perm: any) => {
+          allPermissions.push(perm as AppPermissions);
+        });
+      }
     });
 
-    const unsubRevoked = v.permissions.onPermissionsRevoked(() => {
-      v.permissions.getAllAppPermissions(u).then(setList);
-    });
-
-    onCleanup(() => {
-      unsubUpdated();
-      unsubRevoked();
-    });
+    setList(allPermissions);
   });
 
   const revoke = async (origin: string) => {

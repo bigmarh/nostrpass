@@ -13,7 +13,9 @@ export function getCryptoWorker(): any {
     // Attempt 1: Module SharedWorker using unified worker (supports Shared/Dedicated)
     try {
       const workerUrl = new URL('../workers/crypto.worker.ts', import.meta.url);
-      const shared = new SharedWorker(workerUrl, { type: 'module', name: 'nostrpass-crypto' });
+      // Add cache buster to force reload of worker
+      workerUrl.searchParams.set('v', Date.now().toString());
+      const shared = new SharedWorker(workerUrl, { type: 'module', name: 'nostrpass-crypto-v2' });
       sharedPort = shared.port as MessagePort;
       sharedPort.start();
       console.log('[NostrPass] Crypto: using Module SharedWorker (crypto.worker.ts)');

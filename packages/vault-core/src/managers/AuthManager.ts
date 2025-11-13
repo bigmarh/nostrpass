@@ -199,6 +199,66 @@ export class AuthManager extends EventEmitter {
   }
 
   /**
+   * Create a new account/vault
+   *
+   * @param username - Username
+   * @param password - Password
+   * @param pin - 6-digit PIN
+   * @returns Create account result
+   *
+   * @example
+   * ```typescript
+   * const result = await auth.createAccount('alice', 'password123', '123456');
+   * if (result.success) {
+   *   console.log('Account created!', result.user);
+   * }
+   * ```
+   */
+  async createAccount(username: string, password: string, pin: string, appDomain?: string): Promise<LoginResult> {
+    try {
+      // Only pass appDomain if explicitly provided by the developer
+      // This prevents the vault from auto-approving itself
+      const result = await this.sendToWorker<{
+        success: boolean;
+        user?: {
+          publicKey: string;
+          profile: { username: string; storagePublicKey?: string };
+        };
+        error?: string;
+      }>('createVault', {
+        username,
+        password,
+        pin,
+        environment: this.environment,
+        relays: this.relays,
+        appDomain
+      });
+
+      console.log('[AuthManager] Create account result:', result);
+
+      if (result.success && result.user) {
+        this.currentUser = result.user;
+        this.isLocked = false;
+
+        this.emit('user-logged-in', this.currentUser);
+        this.emit('auth-state-changed', this.currentUser);
+        this.emit('lock-state-changed', this.isLocked);
+
+        return { success: true, user: this.currentUser };
+      }
+
+      console.error('[AuthManager] Create account failed, result:', result);
+      return { success: false, error: result.error || 'Create account failed' };
+    } catch (error) {
+      console.error('[AuthManager] Create account error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Create account failed'
+      };
+    }
+  }
+
+  /**
    * Logout the current user
    *
    * @example

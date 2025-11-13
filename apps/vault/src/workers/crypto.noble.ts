@@ -408,6 +408,85 @@ export class NostrCrypto {
   }
 
   /**
+   * Create a new vault with username and PIN
+   * Generates xpriv, derives keypair, encrypts with PIN
+   */
+  async createVault(username: string, pin: string): Promise<{
+    username: string;
+    publicKey: string;
+    privateKey: string;
+    xpriv: string;
+    derivationPath: string;
+    encryptedVault: string;
+    salt: string;
+  }> {
+    // Generate xpriv
+    const xpriv = this.generateXpriv();
+
+    // Derive the main keypair (index 0)
+    const keypair = this.deriveKeypairFromXpriv(xpriv, 0);
+
+    // Encrypt xpriv with PIN
+    const encrypted = await this.encryptData(xpriv, pin);
+
+    // Extract salt from encrypted data
+    const combined = base64.decode(encrypted);
+    const salt = bytesToHex(combined.slice(0, 32));
+
+    return {
+      username,
+      publicKey: keypair.publicKey,
+      privateKey: keypair.privateKey,
+      xpriv,
+      derivationPath: keypair.path,
+      encryptedVault: encrypted,
+      salt
+    };
+  }
+
+  /**
+   * Create vault from existing keys (for re-encryption)
+   */
+  async createVaultFromKeys(username: string, privateKey: string, pin: string): Promise<{
+    encryptedVault: string;
+    salt: string;
+  }> {
+    // For now, we'll just encrypt the private key
+    // In a full implementation, you'd want to encrypt the xpriv
+    const encrypted = await this.encryptData(privateKey, pin);
+
+    // Extract salt from encrypted data
+    const combined = base64.decode(encrypted);
+    const salt = bytesToHex(combined.slice(0, 32));
+
+    return {
+      encryptedVault: encrypted,
+      salt
+    };
+  }
+
+  /**
+   * Decrypt vault with PIN
+   */
+  async decryptVault(encryptedVault: string, pin: string): Promise<{
+    xpriv: string;
+    privateKey: string;
+    publicKey: string;
+  }> {
+    // Decrypt the xpriv
+    const xpriv = await this.decryptData(encryptedVault, pin);
+
+    // Derive the main keypair (index 0) from xpriv
+    const keypair = this.deriveKeypairFromXpriv(xpriv, 0);
+
+    return {
+      xpriv,
+      privateKey: keypair.privateKey,
+      publicKey: keypair.publicKey
+    };
+  }
+
+  /**
    * NIP-04 encryption
    * Encrypts plaintext using sender's private key and recipient's public key
    */
