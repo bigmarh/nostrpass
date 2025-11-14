@@ -793,6 +793,10 @@ export class NostrPassButton {
     btn.innerHTML = `<span class="nostrpass-loading"></span> <span>Signing in...</span>`;
 
     try {
+      // Open login page in compact mode positioned near the button
+      this.embassy.openPage('login', { buttonElement: btn });
+
+      // Wait for authentication
       const result = await this.embassy.manageAccount({
         forcePrompt: true,
         buttonElement: btn

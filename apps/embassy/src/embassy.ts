@@ -84,7 +84,7 @@ interface VaultPageConfig {
 const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
   login: {
     route: '',  // Root route for login/signup
-    defaultSize: 'full',
+    defaultSize: 'compact',  // Compact modal for login/signup
   },
   unlock: {
     route: '/unlock-modal',
