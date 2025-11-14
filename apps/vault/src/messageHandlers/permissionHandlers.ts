@@ -27,9 +27,11 @@ export const permissionHandlers: MessageHandler[] = [
       const permissionResult = await deps.checkPermission(action, origin, eventKind, identityIndex);
       const granted = !!permissionResult?.allowed || permissionResult?.sessionGranted === true;
       const needsPrompt = permissionResult?.level === 'ASK_EVERYTIME';
+      const isLocked = deps.isVaultLocked();
       return {
         granted,
         needsPrompt,
+        isLocked,
         action,
         origin,
         level: permissionResult?.level

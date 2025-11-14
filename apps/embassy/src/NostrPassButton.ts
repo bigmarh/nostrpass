@@ -590,21 +590,21 @@ export class NostrPassButton {
 
       // If vault is locked, show PIN unlock first
       if (authStatus?.isLocked) {
-        console.log('[NostrPassButton] Vault locked, showing unlock modal...');
+        console.log('[NostrPassButton] Vault locked, showing unlock page...');
         const btn = this.container.querySelector('[data-action="toggle-menu"]') as HTMLButtonElement;
 
-        // Show compact unlock modal
-        this.embassy.show('unlock', 'compact', btn);
+        // Open unlock page in compact mode
+        this.embassy.openPage('unlock', { buttonElement: btn });
 
         // Listen for unlock event
         const unlockListener = () => {
           console.log('[NostrPassButton] Vault unlocked, hiding modal and showing dropdown...');
           window.removeEventListener('nostrpass:unlocked', unlockListener);
 
-          // Hide the unlock modal
+          // Hide the vault modal
           this.embassy.hide();
 
-          // Small delay to let modal close before showing dropdown
+          // Show dropdown after a short delay
           setTimeout(() => {
             this.openDropdown();
           }, 100);
@@ -664,11 +664,9 @@ export class NostrPassButton {
   }
 
   private async handleManageAccount() {
-    const btn = this.container.querySelector('[data-action="toggle-menu"]') as HTMLButtonElement;
-
     try {
-      // Just open the vault dashboard directly - user is already logged in
-      this.embassy.show('vault', 'full', btn);
+      // Open the vault dashboard - user is already logged in
+      this.embassy.openPage('dashboard');
     } catch (error) {
       console.error('Failed to open vault:', error);
       this.config.onError?.(error);

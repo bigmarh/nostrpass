@@ -65,6 +65,43 @@ interface AccountManagerButtonOptions extends AccountManagerOptions {
   onError?: (error: unknown) => void;
 }
 
+/**
+ * Vault pages with predefined routes and default sizes
+ */
+type VaultPage =
+  | 'login'        // Login/signup flow - full size modal
+  | 'unlock'       // Quick unlock (PIN only) - compact dropdown
+  | 'dashboard'    // Full vault dashboard - full size modal
+  | 'account'      // Account switcher/manager - compact dropdown
+  ;
+
+interface VaultPageConfig {
+  route: string;
+  defaultSize: 'full' | 'compact' | 'minimal';
+  autoCloseOnSuccess?: boolean; // Auto-hide after successful action
+}
+
+const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
+  login: {
+    route: '',  // Root route for login/signup
+    defaultSize: 'full',
+  },
+  unlock: {
+    route: '/unlock-modal',
+    defaultSize: 'compact',
+    autoCloseOnSuccess: true,
+  },
+  dashboard: {
+    route: '/dashboard',
+    defaultSize: 'full',
+  },
+  account: {
+    route: '/account-switcher',
+    defaultSize: 'compact',
+    autoCloseOnSuccess: true,
+  },
+};
+
 interface NostrProvider {
   getPublicKey(options?: NostrOperationOptions): Promise<string>;
   signEvent(event: NostrEvent, options?: NostrOperationOptions): Promise<NostrEvent>;
@@ -401,26 +438,57 @@ class NostrPassEmbassy {
     });
   }
 
-  public show(page: string = 'vault', mode: 'full' | 'compact' | 'minimal' = 'full', buttonElement?: HTMLElement): void {
+  /**
+   * Open a specific vault page
+   * @param page - The vault page to open
+   * @param options - Optional size override and button element for positioning
+   */
+  public openPage(
+    page: VaultPage,
+    options?: { size?: 'full' | 'compact' | 'minimal'; buttonElement?: HTMLElement }
+  ): void {
     if (!this.iframe) {
       console.warn('Cannot show iframe - not created yet');
-      this.createIframe().then(() => this.show(page, mode, buttonElement));
+      this.createIframe().then(() => this.openPage(page, options));
       return;
     }
 
-    // Remove hidden class to show iframe
+    const pageConfig = VAULT_PAGES[page];
+    const size = options?.size || pageConfig.defaultSize;
+    const buttonElement = options?.buttonElement;
+
+    // Navigate to the requested page
+    const appDomain = sanitizeDomain(this.config.appDomain!);
+    const targetPath = pageConfig.route ? `/${appDomain}${pageConfig.route}` : `/${appDomain}`;
+
+    const currentUrl = new URL(this.iframe.src);
+    if (currentUrl.pathname !== targetPath) {
+      const newUrl = new URL(this.config.vaultUrl!);
+      newUrl.pathname = targetPath;
+      newUrl.searchParams.set('appName', this.config.appName!);
+      newUrl.searchParams.set('appDomain', this.config.appDomain!);
+      newUrl.searchParams.set('theme', this.config.theme!);
+      this.iframe.src = newUrl.toString();
+      console.log('🔄 Opening vault page:', page, 'at', newUrl.toString());
+    }
+
+    // Apply size styling and positioning
     this.iframe.classList.remove('nostrpass-iframe-hidden');
     this.iframe.classList.remove('nostrpass-iframe-visible');
     this.iframe.classList.remove('nostrpass-iframe-compact');
     this.iframe.classList.remove('nostrpass-iframe-minimal');
 
-    // Apply the appropriate visibility mode
-    if (mode === 'minimal') {
+    // Clear any inline styles that might have been set for compact mode
+    this.iframe.style.top = '';
+    this.iframe.style.left = '';
+    this.iframe.style.transform = '';
+
+    if (size === 'minimal') {
       this.iframe.classList.add('nostrpass-iframe-minimal');
-    } else if (mode === 'compact') {
+    } else if (size === 'compact') {
       this.iframe.classList.add('nostrpass-iframe-compact');
 
-      // Position compact mode relative to button if provided
+      // Position compact mode relative to button if provided, otherwise center
       if (buttonElement) {
         const rect = buttonElement.getBoundingClientRect();
         const spaceBelow = window.innerHeight - rect.bottom;
@@ -434,13 +502,11 @@ class NostrPassEmbassy {
 
         // Determine vertical position (above or below button)
         if (spaceBelow >= iframeHeight + gap) {
-          // Position below button
           top = rect.bottom + gap;
         } else if (spaceAbove >= iframeHeight + gap) {
-          // Position above button
           top = rect.top - iframeHeight - gap;
         } else {
-          // Fall back to centered if not enough space vertically
+          // Centered fallback
           this.iframe.style.top = '50%';
           this.iframe.style.left = '50%';
           this.iframe.style.transform = 'translate(-50%, -50%)';
@@ -448,24 +514,22 @@ class NostrPassEmbassy {
         }
 
         // Determine horizontal position (keep within viewport)
-        // Try to align with left edge of button first
         left = rect.left;
-
-        // Check if iframe would overflow right edge of viewport
         if (left + iframeWidth > window.innerWidth - gap) {
-          // Align with right edge of button instead
           left = rect.right - iframeWidth;
         }
-
-        // Check if iframe would overflow left edge of viewport
         if (left < gap) {
           left = gap;
         }
 
-        // Apply positioning
         this.iframe.style.top = `${top}px`;
         this.iframe.style.left = `${left}px`;
         this.iframe.style.transform = 'none';
+      } else {
+        // No button provided, center the compact modal
+        this.iframe.style.top = '50%';
+        this.iframe.style.left = '50%';
+        this.iframe.style.transform = 'translate(-50%, -50%)';
       }
     } else {
       this.iframe.classList.add('nostrpass-iframe-visible');
@@ -474,24 +538,19 @@ class NostrPassEmbassy {
     // Show backdrop with appropriate styling
     if (this.backdropEl) {
       this.backdropEl.classList.add('visible');
-
       // Always use transparent backdrop
       this.backdropEl.style.background = 'transparent';
       this.backdropEl.style.backdropFilter = 'none';
     }
 
     // Add click-outside handler for compact mode
-    if (mode === 'compact') {
-      // Remove any existing handler first
+    if (size === 'compact') {
       if (this.outsideClickHandler) {
         document.removeEventListener('click', this.outsideClickHandler);
       }
-
-      // Add new handler with a small delay to avoid immediate trigger
       setTimeout(() => {
         this.outsideClickHandler = (e: MouseEvent) => {
           const target = e.target as HTMLElement;
-          // Check if click is outside iframe and backdrop
           if (this.iframe && !this.iframe.contains(target) &&
               this.backdropEl && this.backdropEl === target) {
             console.log('🎯 Click outside iframe detected');
@@ -505,20 +564,25 @@ class NostrPassEmbassy {
     // Accessibility
     this.iframe.setAttribute('aria-hidden', 'false');
     this.iframe.removeAttribute('tabindex');
+    document.body.style.overflow = 'hidden';
+  }
 
-    document.body.style.overflow = 'hidden'; // Prevent background scrolling
-
-    // Navigate to appropriate page based on mode using message passing (not iframe reload)
-    if (mode === 'minimal' && page === 'vault' && this.messenger) {
-      // Tell the vault to navigate to unlock-quick internally
-      try {
-        this.messenger.send('NAVIGATE_TO_UNLOCK', {});
-      } catch (err) {
-        console.warn('Failed to send navigation message:', err);
-      }
+  /**
+   * Legacy method for backward compatibility
+   * @deprecated Use openPage() instead
+   */
+  public show(page: string = 'vault', mode: 'full' | 'compact' | 'minimal' = 'full', buttonElement?: HTMLElement): void {
+    // Map old page names to new VaultPage type
+    let vaultPage: VaultPage;
+    if (page === 'unlock' || page === 'unlock-modal') {
+      vaultPage = 'unlock';
+    } else if (page === 'dashboard') {
+      vaultPage = 'dashboard';
+    } else {
+      vaultPage = 'login'; // default to login page
     }
 
-    if (this.config.debug) console.log('Iframe shown in', mode, 'mode');
+    this.openPage(vaultPage, { size: mode, buttonElement });
   }
 
   public hide(): void {
@@ -593,17 +657,16 @@ class NostrPassEmbassy {
       /* Visible state - Large modal for full dashboard */
       .nostrpass-iframe-visible {
         position: fixed !important;
-        top: 50% !important;
-        left: 50% !important;
-        transform: translate(-50%, -50%) !important;
-        width: min(900px, 95vw) !important;
-        height: min(700px, 90vh) !important;
-        max-height: 800px !important;
+        top: 0 !important;
+        left: 0 !important;
+        transform: none !important;
+        width: 100vw !important;
+        height: 100vh !important;
         opacity: 1 !important;
         visibility: visible !important;
         pointer-events: auto !important;
         border: none !important;
-        border-radius: 16px !important;
+        border-radius: 0 !important;
         background: transparent !important;
         z-index: 2147483647 !important;
         overflow: visible !important;
@@ -860,9 +923,9 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           this.show('vault', 'full');
         }
@@ -927,9 +990,9 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           this.show('vault', 'full');
         }
@@ -1012,9 +1075,9 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           this.show('vault', 'full');
         }
@@ -1098,9 +1161,9 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           this.show('vault', 'full');
         }
@@ -1185,9 +1248,9 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           this.show('vault', 'full');
         }

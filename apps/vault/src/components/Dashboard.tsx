@@ -71,9 +71,8 @@ export const Dashboard: Component = () => {
 
     const toggleVaultLock = async () => {
         if (isVaultLocked()) {
-            // If locked, the PinManager will handle showing the unlock modal
-            // We just need to load vault data for recovery
-            await loadVaultData();
+            // Navigate to quick unlock page
+            navigate(`/${params.app}/unlock-modal`);
         } else {
             // If unlocked, lock the vault
             await lockVault();
@@ -94,9 +93,9 @@ export const Dashboard: Component = () => {
     };
 
     return (
-        <div class="w-full h-full bg-white dark:bg-gray-900">
-            <div class="flex flex-col w-full md:max-w-2xl md:mx-auto gap-0 md:gap-4 min-h-screen md:min-h-0">
-                <div class="bg-white dark:bg-gray-800 text-black dark:text-gray-100 border-0 md:border border-gray-700 dark:border-gray-600 md:rounded-lg md:shadow-2xl flex-1 md:flex-none">
+        <div class="w-full min-h-screen bg-white dark:bg-gray-900">
+            <div class="flex flex-col w-full md:max-w-2xl md:mx-auto gap-0 md:gap-4 min-h-screen">
+                <div class="bg-white dark:bg-gray-800 text-black dark:text-gray-100 border-0 md:border border-gray-700 dark:border-gray-600 md:rounded-lg md:shadow-2xl flex-1">
                     <header>
                         {/* Top row - Action buttons */}
                         <div class={`flex justify-between p-2 ${isVaultLocked() ? 'bg-orange-100 dark:bg-orange-900 border-orange-200 dark:border-orange-700' : 'bg-green-100 dark:bg-green-900 border-green-200 dark:border-green-700'} rounded-t-lg p-4 items-center gap-2 border-b`}>
