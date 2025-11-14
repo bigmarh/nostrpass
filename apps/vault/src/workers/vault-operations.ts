@@ -64,9 +64,9 @@ export function setLogSessionState(logger: (action: string, username: string) =>
  * @param params - Object containing username
  * @returns The vault data or null if not found
  */
-async function getVaultData(params: { username: string }): Promise<VaultData | null> {
+async function getVaultData(params: { username: string; includeEncryptedVault?: boolean }): Promise<VaultData | null> {
   try {
-    console.log('📥 [getVaultData] Request received for username:', params.username);
+    console.log('📥 [getVaultData] Request received for username:', params.username, 'includeEncryptedVault:', params.includeEncryptedVault);
 
     console.log('🔄 [getVaultData] Ensuring crypto ready...');
     await ensureCryptoReady();
@@ -92,11 +92,11 @@ async function getVaultData(params: { username: string }): Promise<VaultData | n
       identities: vaultData.identities
     });
 
-    // Return the vault data in the expected format (including password verification fields!)
-    return {
+    // Security: Only include encrypted vault when explicitly requested (for unlock operations)
+    // Normal operations (auth status, identity queries) don't need the encrypted xpriv
+    const result: any = {
       username: vaultData.username,
       publicKey: vaultData.publicKey,
-      xprivEncrypted: vaultData.encryptedVault,
       salt: vaultData.salt,
       passwordSalt: (vaultData as any).passwordSalt, // CRITICAL: Include for password verification
       passwordVerifier: (vaultData as any).passwordVerifier, // CRITICAL: Include for password verification
@@ -108,7 +108,14 @@ async function getVaultData(params: { username: string }): Promise<VaultData | n
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
       createdAt: vaultData.createdAt,
       version: (vaultData as any).version || 1
-    } as any;
+    };
+
+    // Only include encrypted vault when explicitly requested
+    if (params.includeEncryptedVault) {
+      result.xprivEncrypted = vaultData.encryptedVault;
+    }
+
+    return result;
   } catch (error) {
     console.error('❌ [getVaultData] Error:', error);
     throw error;

@@ -81,7 +81,7 @@ export const QuickUnlock: Component = () => {
     };
 
     return (
-        <div class="flex flex-col items-center justify-center w-full h-full dark:bg-gray-800 p-2 rounded-2xl overflow-hidden">
+        <div class="flex flex-col items-center justify-center w-full h-full p-2 rounded-2xl overflow-hidden">
             {error() && (
                 <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-2 py-0.5 rounded-lg text-[10px] mb-0.5 text-center max-w-[260px]">
                     {error()}
