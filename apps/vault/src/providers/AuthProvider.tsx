@@ -700,7 +700,9 @@ export const AuthProvider: ParentComponent = (props) => {
     try {
       // Step 1: Get vault data (need encrypted vault for unlock operation)
       console.log('📦 [UNLOCK] Step 1: Fetching vault data...');
-      const freshVaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username, includeEncryptedVault: true });
+      const params = { username: currentUser.profile.username, includeEncryptedVault: true };
+      console.log('📦 [UNLOCK] Calling getVaultData with params:', JSON.stringify(params));
+      const freshVaultData = await cryptoWorker.getVaultData(params);
       if (!freshVaultData) {
         console.error('❌ [UNLOCK] No vault data found');
         throw new Error('No vault data found');

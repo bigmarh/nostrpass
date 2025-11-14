@@ -66,7 +66,12 @@ export function setLogSessionState(logger: (action: string, username: string) =>
  */
 async function getVaultData(params: { username: string; includeEncryptedVault?: boolean }): Promise<VaultData | null> {
   try {
-    console.log('📥 [getVaultData] Request received for username:', params.username, 'includeEncryptedVault:', params.includeEncryptedVault);
+    console.log('📥 [getVaultData] ===== REQUEST START =====');
+    console.log('📥 [getVaultData] Full params object:', JSON.stringify(params));
+    console.log('📥 [getVaultData] username:', params.username);
+    console.log('📥 [getVaultData] includeEncryptedVault value:', params.includeEncryptedVault);
+    console.log('📥 [getVaultData] includeEncryptedVault type:', typeof params.includeEncryptedVault);
+    console.log('📥 [getVaultData] Has property "includeEncryptedVault":', 'includeEncryptedVault' in params);
 
     console.log('🔄 [getVaultData] Ensuring crypto ready...');
     await ensureCryptoReady();
