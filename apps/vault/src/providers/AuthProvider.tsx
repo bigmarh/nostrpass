@@ -703,6 +703,8 @@ export const AuthProvider: ParentComponent = (props) => {
       const params = { username: currentUser.profile.username, includeEncryptedVault: true };
       console.log('📦 [UNLOCK] Calling getVaultData with params:', JSON.stringify(params));
       const freshVaultData = await cryptoWorker.getVaultData(params);
+      console.log('📦 [UNLOCK] Worker returned freshVaultData:', freshVaultData);
+      console.log('📦 [UNLOCK] freshVaultData keys:', freshVaultData ? Object.keys(freshVaultData) : 'null');
       if (!freshVaultData) {
         console.error('❌ [UNLOCK] No vault data found');
         throw new Error('No vault data found');
@@ -710,7 +712,8 @@ export const AuthProvider: ParentComponent = (props) => {
       console.log('✅ [UNLOCK] Vault data retrieved:', {
         hasXprivEncrypted: !!(freshVaultData as any).xprivEncrypted,
         xprivEncryptedLength: (freshVaultData as any).xprivEncrypted?.length,
-        salt: (freshVaultData as any).salt
+        salt: (freshVaultData as any).salt,
+        allKeys: Object.keys(freshVaultData)
       });
       
       const xprivEncryptedBlob = (freshVaultData as any).xprivEncrypted;
