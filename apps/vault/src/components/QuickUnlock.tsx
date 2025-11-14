@@ -81,15 +81,15 @@ export const QuickUnlock: Component = () => {
     };
 
     return (
-        <div class="flex flex-col items-center justify-center w-full h-full bg-white dark:bg-gray-800 p-3 rounded-2xl overflow-hidden">
+        <div class="flex flex-col items-center justify-center w-full h-full dark:bg-gray-800 p-2 rounded-2xl overflow-hidden">
             {error() && (
-                <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-2 py-1 rounded-lg text-[10px] mb-1 text-center max-w-[260px]">
+                <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-2 py-0.5 rounded-lg text-[10px] mb-0.5 text-center max-w-[260px]">
                     {error()}
                 </div>
             )}
 
             {isUnlocking() && (
-                <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-400 px-2 py-1 rounded-lg text-[10px] mb-1 flex items-center justify-center gap-1">
+                <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-lg text-[10px] mb-0.5 flex items-center justify-center gap-1">
                     <svg class="animate-spin h-3 w-3 text-blue-700 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>

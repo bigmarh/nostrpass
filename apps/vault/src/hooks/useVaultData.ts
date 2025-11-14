@@ -78,6 +78,25 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
       
       // Directly update the signal with the new data
       setVaultData(updatedData);
+      
+      // Dispatch refresh event for this tab and other components
+      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+        detail: { username: currentUsername, source: 'local-update' }
+      }));
+
+      // Notify parent window about vault data update
+      try {
+        const { getMessenger } = await import('../providers/MessengerProvider');
+        const messenger = getMessenger();
+        if (messenger?.isReady()) {
+          messenger.send('VAULT_DATA_UPDATED', {
+            username: currentUsername,
+            timestamp: Date.now()
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to notify parent of vault data update:', err);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update vault data';
       setError(errorMessage);

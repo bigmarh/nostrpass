@@ -18,6 +18,56 @@ export const AccountPickerController: Component = () => {
   const [detail, setDetail] = createSignal<AccountPickerEventDetail | null>(null);
   const [identities, setIdentities] = createSignal<any[]>([]);
 
+  // Helper function to load and set identities
+  const loadIdentities = async (appOrigin: string, currentDetail?: AccountPickerEventDetail | null) => {
+    const currentUser = auth.user();
+    if (!currentUser) {
+      return;
+    }
+
+    let appKey = appOrigin;
+    try {
+      appKey = sanitizeDomain(new URL(appOrigin).host || appOrigin);
+    } catch {
+      appKey = sanitizeDomain(appOrigin);
+    }
+
+    try {
+      const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
+      if (vaultData?.identities && vaultData.identities.length > 0) {
+        // Show ALL identities with their indices
+        // Mark which ones are already authorized for UI indication
+        const allIdentities = vaultData.identities.map((identity: any, index: number) => ({
+          identity,
+          index,
+          isAuthorized: !!(identity?.appPermissions && identity.appPermissions[appKey])
+        }));
+
+        setIdentities(allIdentities);
+        // Only update detail if we're opening the picker (not refreshing)
+        if (currentDetail) {
+          setDetail(currentDetail);
+          setVisible(true);
+        }
+      } else {
+        console.error('No identities available for selection');
+        // Dispatch rejection event only if we have a request ID
+        if (currentDetail?.requestId) {
+          window.dispatchEvent(new CustomEvent('account-picker-rejected', {
+            detail: { requestId: currentDetail.requestId, error: 'No identities available' }
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load identities:', error);
+      if (currentDetail?.requestId) {
+        window.dispatchEvent(new CustomEvent('account-picker-rejected', {
+          detail: { requestId: currentDetail.requestId, error: 'Failed to load identities' }
+        }));
+      }
+    }
+  };
+
   const onEvent = async (e: Event) => {
     const ce = e as CustomEvent<AccountPickerEventDetail>;
     const currentUser = auth.user();
@@ -38,53 +88,26 @@ export const AccountPickerController: Component = () => {
       return;
     }
 
-    let appKey = ce.detail.appOrigin;
-    try {
-      appKey = sanitizeDomain(new URL(ce.detail.appOrigin).host || ce.detail.appOrigin);
-    } catch {
-      appKey = sanitizeDomain(ce.detail.appOrigin);
-    }
+    await loadIdentities(ce.detail.appOrigin, ce.detail);
+  };
 
-    // Load all identities from vault - show all so user can pick and authorize
-    try {
-      const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
-      if (vaultData?.identities && vaultData.identities.length > 0) {
-        // Show ALL identities with their indices
-        // Mark which ones are already authorized for UI indication
-        const allIdentities = vaultData.identities.map((identity: any, index: number) => ({
-          identity,
-          index,
-          isAuthorized: !!(identity?.appPermissions && identity.appPermissions[appKey])
-        }));
-
-        setIdentities(allIdentities);
-        setDetail(ce.detail);
-        setVisible(true);
-      } else {
-        console.error('No identities available for selection');
-        // Dispatch rejection event
-        if (ce.detail.requestId) {
-          window.dispatchEvent(new CustomEvent('account-picker-rejected', {
-            detail: { requestId: ce.detail.requestId, error: 'No identities available' }
-          }));
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load identities:', error);
-      if (ce.detail.requestId) {
-        window.dispatchEvent(new CustomEvent('account-picker-rejected', {
-          detail: { requestId: ce.detail.requestId, error: 'Failed to load identities' }
-        }));
-      }
+  // Handle vault data refresh - reload identities if picker is visible
+  const onVaultDataRefresh = async (e: Event) => {
+    const currentDetail = detail();
+    if (visible() && currentDetail) {
+      // Reload identities when vault data changes and picker is open
+      await loadIdentities(currentDetail.appOrigin, null);
     }
   };
 
   onMount(() => {
     window.addEventListener('vault-account-picker', onEvent as EventListener);
+    window.addEventListener('vault-data-refresh', onVaultDataRefresh as EventListener);
   });
 
   onCleanup(() => {
     window.removeEventListener('vault-account-picker', onEvent as EventListener);
+    window.removeEventListener('vault-data-refresh', onVaultDataRefresh as EventListener);
   });
 
   const handleSelect = async (identityIndex: number) => {

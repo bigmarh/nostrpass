@@ -71,7 +71,7 @@ const PinPad: Component<PinPadProps> = (props) => {
   return (
     <div class="w-full flex flex-col items-center">
       {/* PIN Display - Clerk style */}
-      <div class={`flex justify-center gap-1.5 mb-4 ${isShaking() ? 'shake-animation' : ''}`}>
+      <div class={`flex justify-center gap-1.5 mb-2 ${isShaking() ? 'shake-animation' : ''}`}>
         {Array.from({ length: 6 }).map((_, index) => (
           <div class={`w-2 h-2 rounded-full transition-all duration-200 ${index < currentPin().length
             ? 'bg-gray-900 dark:bg-gray-100 scale-110'
@@ -80,8 +80,8 @@ const PinPad: Component<PinPadProps> = (props) => {
         ))}
       </div>
 
-      {/* PIN Pad - Fits perfectly in 395x395 */}
-      <div class="grid grid-cols-3 gap-1.5 w-full max-w-[240px] mx-auto">
+      {/* PIN Pad - Compact layout */}
+      <div class="grid grid-cols-3  w-full max-w-[220px] mx-auto">
         {scrambledNumbers().map((num) => (
           <button
             class="aspect-square border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-md text-base font-semibold cursor-pointer transition-all flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"

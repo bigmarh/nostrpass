@@ -767,7 +767,7 @@ export const sessionManager = {
    * Derive identity keypair using xpriv from the current session
    * Requires unlocked session with xpriv
    */
-  deriveIdentityFromSession: async (params: { username: string; index: number }, handlers: any): Promise<{ publicKey: string; path: string }> => {
+  deriveIdentityFromSession: async (params: { username: string; index: number }): Promise<{ publicKey: string; path: string }> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.xpriv) {
       throw new Error('No xpriv in session - please unlock with PIN first');
@@ -775,8 +775,8 @@ export const sessionManager = {
 
     const xpriv = session.xpriv;
 
-    // Use existing derive helper
-    const derived = await handlers.deriveKeypairFromXpriv({ xpriv, index: params.index });
+    // Use cryptoPrimitives directly (already imported)
+    const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv, index: params.index });
 
     let publicKey: string;
     let path: string;

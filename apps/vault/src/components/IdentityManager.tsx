@@ -635,7 +635,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         <For each={filteredIdentities()}>
           {(identity) => (
             <div
-              class={`flex flex-col cursor-pointer border rounded-lg p-4 justify-between items-center hover:shadow-md dark:hover:shadow-lg transition-all ${identity.isActive ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              class={`flex flex-col border rounded-lg p-4 justify-between items-center hover:shadow-md dark:hover:shadow-lg transition-all ${identity.isActive ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
             >
               <div class="flex flex-row justify-between w-full items-center ">

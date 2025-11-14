@@ -68,6 +68,11 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
             window.dispatchEvent(new CustomEvent('nostrpass:unlocked', { detail: data }));
 
             // Don't return anything - this is a notification, not a request/response
+        },
+        VAULT_DATA_UPDATED: (data: any) => {
+            console.log('📦 Vault data updated signal received from vault iframe', data);
+            // Dispatch window event for NostrPassButton and other listeners
+            window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: data }));
         }
     }
 };

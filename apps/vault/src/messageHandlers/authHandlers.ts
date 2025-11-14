@@ -451,20 +451,37 @@ export const authHandlers: MessageHandler[] = [
         };
       }
 
-      // Get the default identity (index 0) for button display
+      // Get the active identity for this app
       try {
         const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
-        const defaultIdentity = vaultData?.identities?.[0];
+        const appOrigin = context?.origin;
+
+        // Get app key
+        let appKey = appOrigin;
+        try {
+          const sanitizeDomain = (await import('@nostrpass/nostrHelpers')).sanitizeDomain;
+          appKey = sanitizeDomain(new URL(appOrigin).host || appOrigin);
+        } catch {
+          // appKey already set to appOrigin
+        }
+
+        // Get the active identity index for this app, default to 0
+        const activeIdentityIndex = vaultData?.activeIdentityByApp?.[appKey] ?? 0;
+        const activeIdentity = vaultData?.identities?.[activeIdentityIndex];
+
+        // Check if this identity is authorized for the app
+        const isAuthorized = !!(activeIdentity?.appPermissions && activeIdentity.appPermissions[appKey]);
 
         return {
           isAuthenticated: true,
           isLocked,
+          username: currentUser.profile?.username,
           user: {
-            identityIndex: 0,
-            publicKey: defaultIdentity?.publicKey || currentUser.publicKey,
-            npub: defaultIdentity?.npub,
-            nickname: defaultIdentity?.nickname,
-            authorized: false // Will be determined by app-specific authorization
+            identityIndex: activeIdentityIndex,
+            publicKey: activeIdentity?.publicKey || currentUser.publicKey,
+            npub: activeIdentity?.npub,
+            nickname: activeIdentity?.nickname,
+            authorized: isAuthorized
           }
         };
       } catch (error) {
@@ -472,6 +489,7 @@ export const authHandlers: MessageHandler[] = [
         return {
           isAuthenticated: true,
           isLocked: true, // If we can't get vault data, it's likely locked
+          username: currentUser.profile?.username,
           user: {
             identityIndex: 0,
             publicKey: currentUser.publicKey,
@@ -488,6 +506,159 @@ export const authHandlers: MessageHandler[] = [
     route: 'AUTH_STATUS_RESPONSE',
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       // Just acknowledge - parent is confirming receipt of AUTH_STATUS
+    }
+  },
+
+  {
+    route: 'GET_ALL_IDENTITIES',
+    handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
+      const currentUser = deps.getUser();
+      const cryptoWorker = deps.getCryptoWorker();
+      const appOrigin = context?.origin;
+
+      if (!currentUser) {
+        return { identities: [], activeIdentityIndex: null };
+      }
+
+      try {
+        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+
+        if (!vaultData?.identities || vaultData.identities.length === 0) {
+          return { identities: [], activeIdentityIndex: null };
+        }
+
+        // Get app key for checking which identity is active for this app
+        let appKey = appOrigin;
+        try {
+          const sanitizeDomain = (await import('@nostrpass/nostrHelpers')).sanitizeDomain;
+          appKey = sanitizeDomain(new URL(appOrigin).host || appOrigin);
+        } catch {
+          // appKey already set to appOrigin
+        }
+
+        const activeIdentityIndex = vaultData.activeIdentityByApp?.[appKey] ?? null;
+
+        // Return only identities that are authorized for this app
+        const identities = vaultData.identities
+          .map((identity: any, index: number) => ({
+            index,
+            nickname: identity.nickname || `Identity ${index + 1}`,
+            publicKey: identity.publicKey,
+            npub: identity.npub,
+            createdAt: identity.createdAt,
+            isActive: activeIdentityIndex === index,
+            isAuthorized: !!(identity.appPermissions && identity.appPermissions[appKey])
+          }))
+          .filter((identity: any) => identity.isAuthorized); // Only return authorized identities
+
+        return {
+          identities,
+          activeIdentityIndex
+        };
+      } catch (error) {
+        console.error('Failed to get all identities:', error);
+        return { identities: [], activeIdentityIndex: null };
+      }
+    }
+  },
+
+  {
+    route: Msg.SWITCH_IDENTITY,
+    handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
+      const currentUser = deps.getUser();
+      const cryptoWorker = deps.getCryptoWorker();
+      const appOrigin = context?.origin;
+      const identityIndex = data?.identityIndex;
+
+      if (!currentUser) {
+        throw new Error('Not authenticated');
+      }
+
+      if (typeof identityIndex !== 'number' || identityIndex < 0) {
+        throw new Error('Invalid identity index');
+      }
+
+      try {
+        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+
+        if (!vaultData?.identities || identityIndex >= vaultData.identities.length) {
+          throw new Error('Identity not found');
+        }
+
+        const identity = vaultData.identities[identityIndex];
+
+        // Get app key
+        let appKey = appOrigin;
+        try {
+          const sanitizeDomain = (await import('@nostrpass/nostrHelpers')).sanitizeDomain;
+          appKey = sanitizeDomain(new URL(appOrigin).host || appOrigin);
+        } catch {
+          // appKey already set to appOrigin
+        }
+
+        console.log('[SWITCH_IDENTITY] Checking authorization:', {
+          identityIndex,
+          appOrigin,
+          appKey,
+          identityAppPermissions: identity.appPermissions,
+          hasAppKey: !!(identity.appPermissions && identity.appPermissions[appKey])
+        });
+
+        // Check if identity is authorized for this app
+        const isAuthorized = !!(identity.appPermissions && identity.appPermissions[appKey]);
+
+        if (!isAuthorized) {
+          console.error('[SWITCH_IDENTITY] Identity not authorized:', {
+            identityIndex,
+            appKey,
+            availableKeys: identity.appPermissions ? Object.keys(identity.appPermissions) : []
+          });
+          throw new Error('Requested identity not authorized for this application');
+        }
+
+        // Update active identity for this app
+        const vaultDataService = (await import('../services/vaultDataService')).vaultDataService;
+        await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
+          activeIdentityByApp: {
+            ...(current.activeIdentityByApp || {}),
+            [appKey]: identityIndex
+          }
+        }), { syncToNostr: false });
+
+        // Trigger vault data refresh event
+        window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+          detail: { username: currentUser.profile.username }
+        }));
+
+        // Notify parent window about vault data update
+        try {
+          const { getMessenger } = await import('../providers/MessengerProvider');
+          const messenger = getMessenger();
+          if (messenger?.isReady()) {
+            messenger.send('VAULT_DATA_UPDATED', {
+              username: currentUser.profile.username,
+              timestamp: Date.now()
+            });
+          }
+        } catch (err) {
+          console.warn('Failed to notify parent of vault data update:', err);
+        }
+
+        // Return the new active identity
+        return {
+          success: true,
+          identityIndex,
+          identity: {
+            nickname: identity.nickname,
+            publicKey: identity.publicKey,
+            npub: identity.npub,
+            authorized: true
+          }
+        };
+      } catch (error) {
+        console.error('Failed to switch identity:', error);
+        throw error;
+      }
     }
   }
 ];

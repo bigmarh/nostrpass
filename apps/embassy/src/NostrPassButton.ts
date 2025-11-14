@@ -67,15 +67,27 @@ export class NostrPassButton {
     
     // Append to DOM if specified
     if (config.appendTo) {
-      const target = typeof config.appendTo === 'string' 
+      const target = typeof config.appendTo === 'string'
         ? document.querySelector(config.appendTo)
         : config.appendTo;
-      
+
       if (target) {
         target.appendChild(this.container);
       }
     }
 
+    // Listen for vault data changes to refresh the button
+    this.setupEventListeners();
+  }
+
+  private setupEventListeners() {
+    // Listen for vault-data-refresh events to update the dropdown
+    window.addEventListener('vault-data-refresh', () => {
+      if (this.currentUser && this.isDropdownOpen) {
+        // Re-render the button to refresh identities list
+        this.render();
+      }
+    });
   }
 
   private updateTheme() {
@@ -248,7 +260,7 @@ export class NostrPassButton {
         position: absolute;
         top: calc(100% + 8px);
         right: 0;
-        min-width: 240px;
+        min-width: 320px;
         background: #fff;
         border: 1px solid #e5e7eb;
         border-radius: 12px;
@@ -274,6 +286,16 @@ export class NostrPassButton {
 
       .nostrpass-dropdown-section {
         padding: 8px;
+      }
+
+      .nostrpass-dropdown-section.nostrpass-dropdown-header {
+        background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+      }
+
+      [data-theme="dark"] .nostrpass-dropdown-section.nostrpass-dropdown-header {
+        background: #111827;
+        border-bottom-color: #374151;
       }
 
       .nostrpass-dropdown-divider {
@@ -389,6 +411,135 @@ export class NostrPassButton {
         color: #9ca3af;
       }
 
+      /* Identity switcher styles */
+      .nostrpass-identity-item {
+        cursor: pointer;
+      }
+
+      .nostrpass-identity-active {
+        opacity: 0.7;
+        cursor: default;
+      }
+
+      .nostrpass-identity-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 12px;
+        background: #000;
+        color: #fff;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+
+      [data-theme="dark"] .nostrpass-identity-avatar {
+        background: #fff;
+        color: #000;
+      }
+
+      .nostrpass-identity-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .nostrpass-identity-name {
+        font-weight: 500;
+        font-size: 14px;
+        color: #111827;
+      }
+
+      [data-theme="dark"] .nostrpass-identity-name {
+        color: #f9fafb;
+      }
+
+      .nostrpass-identity-npub {
+        font-size: 11px;
+        color: #6b7280;
+        font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+        margin-top: 2px;
+      }
+
+      [data-theme="dark"] .nostrpass-identity-npub {
+        color: #9ca3af;
+      }
+
+      .nostrpass-identity-check {
+        flex-shrink: 0;
+      }
+
+      .nostrpass-identity-badge {
+        font-size: 10px;
+        color: #f59e0b;
+        background: #fef3c7;
+        padding: 2px 6px;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+
+      [data-theme="dark"] .nostrpass-identity-badge {
+        color: #fbbf24;
+        background: #78350f;
+      }
+
+      /* Username in user info */
+      .nostrpass-dropdown-username {
+        font-size: 13px;
+        color: #6b7280;
+        margin-top: 2px;
+      }
+
+      [data-theme="dark"] .nostrpass-dropdown-username {
+        color: #9ca3af;
+      }
+
+      /* Footer with logo */
+      .nostrpass-dropdown-footer {
+        padding: 12px 16px;
+        border-top: 1px solid #e5e7eb;
+        background: #f9fafb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      [data-theme="dark"] .nostrpass-dropdown-footer {
+        background: #111827;
+        border-top-color: #374151;
+      }
+
+      .nostrpass-footer-text {
+        font-size: 12px;
+        color: #6b7280;
+      }
+
+      [data-theme="dark"] .nostrpass-footer-text {
+        color: #9ca3af;
+      }
+
+      .nostrpass-footer-logo {
+        font-size: 12px;
+        font-weight: 600;
+        color: #111827;
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
+
+      [data-theme="dark"] .nostrpass-footer-logo {
+        color: #f9fafb;
+      }
+
+      .nostrpass-footer-logo:hover {
+        color: #6366f1;
+      }
+
+      [data-theme="dark"] .nostrpass-footer-logo:hover {
+        color: #818cf8;
+      }
+
       /* Loading state */
       .nostrpass-loading {
         display: inline-block;
@@ -427,10 +578,59 @@ export class NostrPassButton {
     btn.addEventListener('click', () => this.handleSignIn());
   }
 
-  private renderUserButton() {
+  private async renderUserButton() {
     const user = this.currentUser!;
     const initials = this.getUserInitials(user);
     const displayName = user.nickname || `Identity ${user.identityIndex + 1}`;
+
+    // Fetch username and all identities
+    let username = '';
+    let allIdentities: any[] = [];
+    try {
+      const authStatus = await this.embassy.getAuthStatus();
+      username = authStatus?.username || '';
+    } catch (error) {
+      console.warn('Failed to fetch auth status:', error);
+    }
+
+    try {
+      const response = await this.embassy.getAllIdentities();
+      allIdentities = response?.identities || [];
+    } catch (error) {
+      console.warn('Failed to fetch all identities:', error);
+    }
+
+    // Build identities list HTML
+    let identitiesHTML = '';
+    if (allIdentities.length > 1) {
+      identitiesHTML = `
+        <div class="nostrpass-dropdown-divider"></div>
+        <div class="nostrpass-dropdown-section">
+          <div style="padding: 8px 12px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
+            Switch Identity
+          </div>
+          ${allIdentities.map((identity: any) => {
+            const isCurrentIdentity = identity.index === user.identityIndex;
+            const idInitials = identity.nickname ? this.getInitialsFromName(identity.nickname) : `I${identity.index + 1}`;
+            return `
+              <button class="nostrpass-dropdown-item nostrpass-identity-item ${isCurrentIdentity ? 'nostrpass-identity-active' : ''}" data-action="switch-identity" data-identity-index="${identity.index}">
+                <div class="nostrpass-identity-avatar">
+                  ${idInitials}
+                </div>
+                <div class="nostrpass-identity-info">
+                  <div class="nostrpass-identity-name">
+                    ${identity.nickname || `Identity ${identity.index + 1}`}
+                  </div>
+                  ${identity.npub ? `<div class="nostrpass-identity-npub">${identity.npub.slice(0, 12)}...</div>` : ''}
+                </div>
+                ${isCurrentIdentity ? `<svg class="nostrpass-identity-check" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.333 4L6 11.333 2.667 8" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
+                ${!identity.isAuthorized && !isCurrentIdentity ? `<span class="nostrpass-identity-badge">Not authorized</span>` : ''}
+              </button>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
 
     this.container.innerHTML = `
       <div class="nostrpass-user-menu">
@@ -445,7 +645,7 @@ export class NostrPassButton {
           </svg>
         </button>
         <div class="nostrpass-dropdown" data-dropdown>
-          <div class="nostrpass-dropdown-section">
+          <div class="nostrpass-dropdown-section nostrpass-dropdown-header">
             <div class="nostrpass-dropdown-user-info">
               ${user.avatar
                 ? `<img src="${user.avatar}" alt="${displayName}" class="nostrpass-dropdown-avatar" />`
@@ -453,10 +653,11 @@ export class NostrPassButton {
               }
               <div class="nostrpass-dropdown-user-details">
                 <div class="nostrpass-dropdown-name">${displayName}</div>
-                ${user.npub ? `<div class="nostrpass-dropdown-npub">${user.npub.slice(0, 16)}...</div>` : ''}
+                ${username ? `<div class="nostrpass-dropdown-username">${username}</div>` : user.npub ? `<div class="nostrpass-dropdown-npub">${user.npub.slice(0, 16)}...</div>` : ''}
               </div>
             </div>
           </div>
+          ${identitiesHTML}
           <div class="nostrpass-dropdown-divider"></div>
           <div class="nostrpass-dropdown-section">
             <button class="nostrpass-dropdown-item" data-action="manage-account">
@@ -473,6 +674,10 @@ export class NostrPassButton {
               <span>Sign out</span>
             </button>
           </div>
+          <div class="nostrpass-dropdown-footer">
+            <span class="nostrpass-footer-text">Secured by</span>
+            <a href="https://nostrpass.com" target="_blank" class="nostrpass-footer-logo">NostrPass</a>
+          </div>
         </div>
       </div>
     `;
@@ -482,6 +687,18 @@ export class NostrPassButton {
     userBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.toggleDropdown();
+    });
+
+    // Switch identity buttons
+    const switchBtns = this.container.querySelectorAll('[data-action="switch-identity"]');
+    switchBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const identityIndex = parseInt((e.currentTarget as HTMLElement).getAttribute('data-identity-index') || '0');
+        const isCurrentIdentity = identityIndex === user.identityIndex;
+        if (!isCurrentIdentity) {
+          this.handleSwitchIdentity(identityIndex);
+        }
+      });
     });
 
     const manageBtn = this.container.querySelector('[data-action="manage-account"]') as HTMLButtonElement;
@@ -495,6 +712,65 @@ export class NostrPassButton {
       this.closeDropdown();
       this.handleSignOut();
     });
+  }
+
+  private getInitialsFromName(name: string): string {
+    const parts = name.split(' ');
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`;
+    }
+    return name.slice(0, 2);
+  }
+
+  private async handleSwitchIdentity(identityIndex: number) {
+    this.closeDropdown();
+
+    try {
+      // Switch identity directly without opening the vault
+      const result = await this.embassy.switchIdentity(identityIndex);
+
+      // Update current user if successful
+      if (result?.success && result?.identity) {
+        this.currentUser = {
+          identityIndex: result.identityIndex,
+          publicKey: result.identity.publicKey,
+          npub: result.identity.npub,
+          nickname: result.identity.nickname,
+          authorized: result.identity.authorized || false
+        };
+        this.saveSession(this.currentUser);
+        await this.render();
+      }
+    } catch (error: any) {
+      console.error('Failed to switch identity:', error);
+
+      // If identity is not authorized, open the vault to authorize it
+      if (error?.message?.includes('not authorized')) {
+        try {
+          const result = await this.embassy.manageAccount({
+            forcePrompt: true,
+            buttonElement: this.container.querySelector('[data-action="toggle-menu"]') as HTMLButtonElement
+          });
+
+          if (result?.identity) {
+            this.currentUser = {
+              identityIndex: result.identityIndex,
+              publicKey: result.identity.publicKey,
+              npub: result.identity.npub,
+              nickname: result.identity.nickname,
+              authorized: result.identity.authorized || false
+            };
+            this.saveSession(this.currentUser);
+            await this.render();
+          }
+        } catch (manageError) {
+          console.error('Failed to authorize identity:', manageError);
+          this.config.onError?.(manageError);
+        }
+      } else {
+        this.config.onError?.(error);
+      }
+    }
   }
 
   private getUserInitials(user: UserInfo): string {

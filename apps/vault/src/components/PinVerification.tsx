@@ -52,7 +52,7 @@ const PinVerification: Component<PinVerificationProps> = (props) => {
   return (
     <div class="w-full mx-auto">
       <Show when={error()}>
-        <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-2 py-1 rounded-md text-[10px] mb-2 text-center">
+        <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-2 py-0.5 rounded-md text-[10px] mb-1 text-center">
           {error()}
         </div>
       </Show>

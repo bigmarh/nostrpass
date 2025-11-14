@@ -907,7 +907,16 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: check if a prompt is needed
       let unlockPromise: Promise<void> | null = null;
@@ -973,7 +982,16 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed, so the op can proceed without error
       let unlockPromise: Promise<void> | null = null;
@@ -1059,7 +1077,16 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed so the op can proceed
       let unlockPromise: Promise<void> | null = null;
@@ -1145,7 +1172,16 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
@@ -1232,7 +1268,16 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
@@ -1322,6 +1367,36 @@ class NostrPassEmbassy {
       return response;
     } catch (error) {
       console.error('Failed to get auth status:', error);
+      throw error;
+    }
+  }
+
+  async getAllIdentities(): Promise<any> {
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      const response = await this.messenger!.request(Msg.GET_ALL_IDENTITIES, {});
+      return response;
+    } catch (error) {
+      console.error('Failed to get all identities:', error);
+      throw error;
+    }
+  }
+
+  async switchIdentity(identityIndex: number): Promise<any> {
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      const response = await this.messenger!.request(Msg.SWITCH_IDENTITY, { identityIndex });
+      return response;
+    } catch (error) {
+      console.error('Failed to switch identity:', error);
       throw error;
     }
   }
