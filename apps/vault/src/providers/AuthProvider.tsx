@@ -705,6 +705,9 @@ export const AuthProvider: ParentComponent = (props) => {
       const freshVaultData = await cryptoWorker.getVaultData(params);
       console.log('📦 [UNLOCK] Worker returned freshVaultData:', freshVaultData);
       console.log('📦 [UNLOCK] freshVaultData keys:', freshVaultData ? Object.keys(freshVaultData) : 'null');
+      console.log('📦 [UNLOCK] xprivEncrypted value:', (freshVaultData as any)?.xprivEncrypted);
+      console.log('📦 [UNLOCK] xprivEncrypted type:', typeof (freshVaultData as any)?.xprivEncrypted);
+      console.log('📦 [UNLOCK] xprivEncrypted length:', (freshVaultData as any)?.xprivEncrypted?.length);
       if (!freshVaultData) {
         console.error('❌ [UNLOCK] No vault data found');
         throw new Error('No vault data found');
