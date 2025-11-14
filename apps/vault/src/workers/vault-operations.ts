@@ -117,8 +117,31 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
 
     // Only include encrypted vault when explicitly requested
     if (params.includeEncryptedVault) {
-      console.log('🔐 [getVaultData] Including encrypted vault, length:', vaultData.encryptedVault?.length);
-      result.xprivEncrypted = vaultData.encryptedVault;
+      console.log('🔐 [getVaultData] Requested encrypted vault');
+      console.log('🔐 [getVaultData] vaultData.encryptedVault:', vaultData.encryptedVault);
+      console.log('🔐 [getVaultData] vaultData.encryptedVault length:', vaultData.encryptedVault?.length);
+
+      // Try encryptedVault first, fallback to xprivs store
+      if (vaultData.encryptedVault) {
+        result.xprivEncrypted = vaultData.encryptedVault;
+        result.salt = vaultData.salt || '';
+        console.log('✅ [getVaultData] Using encryptedVault from main vault store');
+      } else {
+        // Fallback: try to get from xprivs store
+        console.log('⚠️ [getVaultData] encryptedVault not found, checking xprivs store...');
+        try {
+          const xprivData = await vaultDB.getXpriv(params.username);
+          if (xprivData?.xprivEncrypted) {
+            result.xprivEncrypted = xprivData.xprivEncrypted;
+            result.salt = xprivData.salt || '';
+            console.log('✅ [getVaultData] Using xprivEncrypted from xprivs store, length:', xprivData.xprivEncrypted.length);
+          } else {
+            console.error('❌ [getVaultData] No encrypted vault found in either store!');
+          }
+        } catch (err) {
+          console.error('❌ [getVaultData] Error checking xprivs store:', err);
+        }
+      }
     } else {
       console.log('🔒 [getVaultData] NOT including encrypted vault (not requested)');
     }
