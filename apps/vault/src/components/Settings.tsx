@@ -146,37 +146,37 @@ export const Settings: Component = () => {
 
   return (
     <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div class="max-w-6xl mx-auto p-4">
+      <div class="max-w-4xl mx-auto p-6">
         {/* Header */}
-        <div class="flex items-center gap-4 mb-6">
+        <div class="flex items-center gap-3 mb-8">
           <button
             onClick={handleBack}
             class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
           >
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
-            Settings
+          <div>
+            <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">Settings</h1>
             <Show when={currentIdentity()}>
-              <span class="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">
-                - {currentIdentity()?.nickname || 'Personal'}
-              </span>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                {currentIdentity()?.nickname || 'Personal'}
+              </p>
             </Show>
-          </h1>
+          </div>
         </div>
 
         {/* Tab Navigation */}
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm mb-6">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-6 overflow-hidden">
           <div class="flex border-b border-gray-200 dark:border-gray-700">
             {tabs.map(tab => (
               <button
                 onClick={() => setActiveTab(tab.id)}
-                class={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+                class={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
                   activeTab() === tab.id
-                    ? 'text-blue-600 border-b-2 border-blue-600'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                    ? 'text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-900 border-b-2 border-gray-900 dark:border-white'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-900/50'
                 }`}
               >
                 <span class="mr-2">{tab.icon}</span>
@@ -188,28 +188,29 @@ export const Settings: Component = () => {
 
         {/* Tab Content */}
         <Show when={activeTab() === 'identity'}>
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-              Current Identity
-            </h2>
-            <div class="space-y-4">
+          <div class="space-y-4">
+            {/* Identity Details Card */}
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+              <div class="px-6 py-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wide">
+                  Identity Details
+                </h2>
+              </div>
+              <div class="p-6 space-y-5">
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">
                   Identity Name
                 </label>
-                <Show 
+                <Show
                   when={editingNickname()}
                   fallback={
                     <div class="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={currentIdentity()?.nickname || 'Personal'}
-                        disabled
-                        class="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400"
-                      />
+                      <div class="flex-1 px-4 py-2.5 bg-gray-50 dark:bg-gray-900 rounded-lg text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700">
+                        {currentIdentity()?.nickname || 'Personal'}
+                      </div>
                       <button
                         onClick={() => setEditingNickname(true)}
-                        class="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm"
+                        class="px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
                       >
                         Edit
                       </button>
@@ -221,12 +222,12 @@ export const Settings: Component = () => {
                       type="text"
                       value={newNickname()}
                       onInput={(e) => setNewNickname(e.currentTarget.value)}
-                      class="flex-1 px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      class="flex-1 px-4 py-2.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-900 dark:focus:ring-white focus:border-transparent text-gray-900 dark:text-white"
                       placeholder="Enter identity name"
                     />
                     <button
                       onClick={saveIdentityNickname}
-                      class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                      class="px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors text-sm font-medium"
                     >
                       Save
                     </button>
@@ -235,7 +236,7 @@ export const Settings: Component = () => {
                         setEditingNickname(false);
                         setNewNickname(currentIdentity()?.nickname || 'Personal');
                       }}
-                      class="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-sm"
+                      class="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
                     >
                       Cancel
                     </button>
@@ -243,88 +244,72 @@ export const Settings: Component = () => {
                 </Show>
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">
                   Public Key
                 </label>
                 <div class="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={identityPublicKey()}
-                    disabled
-                    class="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 font-mono text-xs"
-                  />
+                  <div class="flex-1 px-4 py-2.5 bg-gray-50 dark:bg-gray-900 rounded-lg text-gray-600 dark:text-gray-400 font-mono text-xs border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div class="truncate">{identityPublicKey()}</div>
+                  </div>
                   <button
                     onClick={() => navigator.clipboard.writeText(identityPublicKey())}
-                    class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                    class="px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
                   >
                     Copy
                   </button>
                 </div>
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">
                   Connected Apps
                 </label>
-                <div class="px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400">
+                <div class="px-4 py-2.5 bg-gray-50 dark:bg-gray-900 rounded-lg text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700">
                   {Object.keys(currentIdentity()?.appPermissions || {}).length} apps
                 </div>
               </div>
-              <Show when={currentIdentity()?.settings}>
-                <div>
-                  <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Identity Settings
-                  </h3>
-                  <div class="space-y-2">
-                    <div class="flex items-center justify-between">
-                      <span class="text-sm text-gray-600 dark:text-gray-400">Theme</span>
-                      <span class="text-sm text-gray-900 dark:text-white">
-                        {currentIdentity()?.settings?.theme || 'System'}
-                      </span>
-                    </div>
-                    <Show when={currentIdentity()?.settings?.defaultRelays}>
-                      <div class="flex items-center justify-between">
-                        <span class="text-sm text-gray-600 dark:text-gray-400">Custom Relays</span>
-                        <span class="text-sm text-gray-900 dark:text-white">
-                          {currentIdentity()?.settings?.defaultRelays?.length || 0}
-                        </span>
-                      </div>
-                    </Show>
-                  </div>
-                </div>
-              </Show>
-              
-              <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                <div class="space-y-4">
-                  <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Identities</h3>
-                  <div class="grid gap-3">
-                    <For each={allIdentities()}>
-                      {(id, idx) => (
-                        <div class={`flex items-center justify-between p-3 rounded-lg border ${activeIndexForApp() === idx() ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700'}`}>
+              </div>
+            </div>
+
+            {/* All Identities Card */}
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+              <div class="px-6 py-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wide">
+                  All Identities
+                </h2>
+              </div>
+              <div class="p-6">
+                <div class="space-y-2">
+                  <For each={allIdentities()}>
+                    {(id, idx) => (
+                      <div class={`flex items-center justify-between p-4 rounded-lg border transition-all ${activeIndexForApp() === idx() ? 'border-gray-900 dark:border-white bg-gray-50 dark:bg-gray-900' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
+                        <div class="flex items-center gap-3">
+                          <div class={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold ${activeIndexForApp() === idx() ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>
+                            {id.nickname?.slice(0, 2).toUpperCase() || (idx() === 0 ? 'PE' : `I${idx()}`)}
+                          </div>
                           <div>
                             <div class="text-sm text-gray-900 dark:text-white font-medium">{id.nickname || (idx() === 0 ? 'Personal' : `Identity ${idx()}`)}</div>
-                            <div class="text-xs text-gray-600 dark:text-gray-400">Index {idx()}</div>
-                          </div>
-                          <div class="flex items-center gap-2">
-                            <Show when={activeIndexForApp() === idx()} fallback={
-                              <button
-                                onClick={() => makeActiveForThisApp(idx())}
-                                class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                              >
-                                Use for this app
-                              </button>
-                            }>
-                              <span class="text-xs px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Active</span>
-                            </Show>
+                            <div class="text-xs text-gray-500 dark:text-gray-400">Identity #{idx()}</div>
                           </div>
                         </div>
-                      )}
-                    </For>
-                  </div>
-                  <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
-                    You are viewing settings for the "{currentIdentity()?.nickname || 'Personal'}" identity.
-                    Each identity maintains its own permissions and settings.
-                  </p>
+                        <div class="flex items-center gap-2">
+                          <Show when={activeIndexForApp() === idx()} fallback={
+                            <button
+                              onClick={() => makeActiveForThisApp(idx())}
+                              class="px-4 py-2 text-sm font-medium bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
+                            >
+                              Use for this app
+                            </button>
+                          }>
+                            <span class="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 font-medium">Active</span>
+                          </Show>
+                        </div>
+                      </div>
+                    )}
+                  </For>
                 </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 text-center mt-4">
+                  Each identity maintains its own permissions and settings for different apps.
+                </p>
               </div>
             </div>
           </div>
@@ -335,16 +320,29 @@ export const Settings: Component = () => {
         </Show>
 
         <Show when={activeTab() === 'security'}>
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-              Security Settings
-            </h2>
-            <div class="space-y-6">
-              <SessionsSection />
-              <RelaysSection />
-              <div>
-                <h3 class="font-medium mb-2 text-gray-900 dark:text-white">Session Timeout</h3>
-                <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          <div class="space-y-4">
+            {/* Sessions & Relays */}
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+              <div class="px-6 py-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wide">
+                  Sessions & Relays
+                </h2>
+              </div>
+              <div class="p-6 space-y-6">
+                <SessionsSection />
+                <RelaysSection />
+              </div>
+            </div>
+
+            {/* Session Timeout */}
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+              <div class="px-6 py-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wide">
+                  Session Timeout
+                </h2>
+              </div>
+              <div class="p-6">
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
                   Your session will automatically lock after this period of inactivity
                 </p>
                 <select
@@ -358,7 +356,7 @@ export const Settings: Component = () => {
                       }
                     });
                   }}
-                  class="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg"
+                  class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-gray-900 dark:focus:ring-white focus:border-transparent"
                 >
                   <option value="15">15 minutes</option>
                   <option value="30">30 minutes</option>
@@ -367,15 +365,22 @@ export const Settings: Component = () => {
                   <option value="240">4 hours</option>
                 </select>
               </div>
+            </div>
 
-              <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
-                <h3 class="font-medium mb-2 text-red-600 dark:text-red-400">Danger Zone</h3>
-                <div class="flex gap-2 flex-wrap">
+            {/* Danger Zone */}
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-900 shadow-sm overflow-hidden">
+              <div class="px-6 py-4 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-900">
+                <h2 class="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">
+                  Danger Zone
+                </h2>
+              </div>
+              <div class="p-6">
+                <div class="space-y-3">
                   <button
                     onClick={() => navigate(`/${params.app}/unlock?recovery=1`)}
-                    class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                    class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm font-medium text-left"
                   >
-                    Start Recovery
+                    Start Recovery Process
                   </button>
                   <button
                     onClick={async () => {
@@ -390,7 +395,7 @@ export const Settings: Component = () => {
                         navigate(`/${params.app}/unlock`);
                       } catch {}
                     }}
-                    class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                    class="w-full px-4 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm font-medium"
                   >
                     Lock Vault
                   </button>
@@ -401,7 +406,7 @@ export const Settings: Component = () => {
                         navigate(`/${params.app}`);
                       }
                     }}
-                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                    class="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
                   >
                     Log Out
                   </button>
@@ -410,7 +415,6 @@ export const Settings: Component = () => {
                       if (confirm('⚠️ DELETE ACCOUNT?\n\nThis will permanently delete your vault from this device.\n\nYour data on Nostr relays will remain (can be recovered with username).')) {
                         try {
                           await logout();
-                          // Wait for deletion to complete
                           await new Promise(resolve => setTimeout(resolve, 200));
                           navigate(`/${params.app}`);
                         } catch (error) {
@@ -419,7 +423,7 @@ export const Settings: Component = () => {
                         }
                       }
                     }}
-                    class="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors border-2 border-red-600"
+                    class="w-full px-4 py-3 bg-gray-900 dark:bg-red-900 text-white rounded-lg hover:bg-black dark:hover:bg-red-800 transition-colors border-2 border-red-600 text-sm font-medium"
                   >
                     Delete Local Vault
                   </button>
