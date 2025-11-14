@@ -524,13 +524,23 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         props.onShowPinUnlock();
         return;
       }
+
+      // Check if we have xpriv in session before attempting to derive
+      if (!props.cryptoWorker) {
+        throw new Error('Crypto worker not ready');
+      }
+
+      const status: any = await props.cryptoWorker.hasKeysInSession({ username: props.username });
+      if (!status?.hasXpriv) {
+        console.warn('No xpriv in session, requesting unlock');
+        props.onShowPinUnlock();
+        return;
+      }
+
       // Derive next identity index
       const current = props.vaultData;
       const nextIndex = (current?.identities?.length ?? 0);
       // Ask worker to derive publicKey for this index using xpriv in session
-      if (!props.cryptoWorker) {
-        throw new Error('Crypto worker not ready');
-      }
       const derived = await props.cryptoWorker.deriveIdentityFromSession({ username: props.username, index: nextIndex });
       // Build identity object
       const identity = {
