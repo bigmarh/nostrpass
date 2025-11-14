@@ -70,9 +70,11 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
             // Don't return anything - this is a notification, not a request/response
         },
         VAULT_DATA_UPDATED: (data: any) => {
-            console.log('📦 Vault data updated signal received from vault iframe', data);
+            console.log('📦 [Embassy] Vault data updated signal received from vault iframe', data);
             // Dispatch window event for NostrPassButton and other listeners
+            console.log('📦 [Embassy] Dispatching vault-data-refresh event to window');
             window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: data }));
+            console.log('📦 [Embassy] ✅ vault-data-refresh event dispatched');
         }
     }
 };

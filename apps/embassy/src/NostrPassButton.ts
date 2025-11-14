@@ -81,11 +81,103 @@ export class NostrPassButton {
   }
 
   private setupEventListeners() {
-    // Listen for vault-data-refresh events to update the dropdown
-    window.addEventListener('vault-data-refresh', () => {
-      if (this.currentUser && this.isDropdownOpen) {
-        // Re-render the button to refresh identities list
-        this.render();
+    // Listen for vault-data-refresh events to update the button and dropdown
+    window.addEventListener('vault-data-refresh', async (event) => {
+      console.log('[NostrPassButton] 🔄 Vault data refresh event received:', event);
+      if (this.currentUser) {
+        console.log('[NostrPassButton] Current user exists, fetching updated identities...');
+
+        // Small delay to ensure vault data has been persisted
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Re-fetch the current identity to check authorization status
+        try {
+          const response = await this.embassy.getAllIdentities();
+          console.log('[NostrPassButton] getAllIdentities response:', response);
+          const allIdentities = response?.identities || [];
+          const activeIdentityIndex = response?.activeIdentityIndex;
+
+          console.log('[NostrPassButton] Active identity index from vault:', activeIdentityIndex);
+          console.log('[NostrPassButton] Current session identity index:', this.currentUser.identityIndex);
+
+          // Check if the active identity has changed
+          if (activeIdentityIndex !== undefined && activeIdentityIndex !== this.currentUser.identityIndex) {
+            console.log('[NostrPassButton] 🔄 Active identity changed from', this.currentUser.identityIndex, 'to', activeIdentityIndex);
+
+            // Find the new active identity
+            const newActiveIdentity = allIdentities.find((id: any) => id.index === activeIdentityIndex);
+
+            if (newActiveIdentity) {
+              console.log('[NostrPassButton] Switching to new active identity:', newActiveIdentity.nickname);
+
+              // Update current user to the new active identity
+              this.currentUser = {
+                identityIndex: newActiveIdentity.index,
+                publicKey: newActiveIdentity.publicKey,
+                nickname: newActiveIdentity.nickname,
+                authorized: newActiveIdentity.isAuthorized,
+                npub: newActiveIdentity.npub
+              };
+
+              // Save updated session
+              this.saveSession(this.currentUser);
+
+              // Re-render to reflect changes
+              console.log('[NostrPassButton] Re-rendering button with new active identity...');
+              await this.render();
+              console.log('[NostrPassButton] ✅ Button updated to new active identity');
+              return;
+            }
+          }
+
+          // No active identity change - check authorization status of current identity
+          const currentIdentity = allIdentities.find((id: any) => id.index === this.currentUser!.identityIndex);
+
+          console.log('[NostrPassButton] Current identity:', currentIdentity);
+          console.log('[NostrPassButton] All identities count:', allIdentities.length);
+
+          if (currentIdentity) {
+            // Identity is still authorized - update status
+            const wasAuthorized = this.currentUser.authorized;
+            this.currentUser.authorized = currentIdentity.isAuthorized;
+
+            console.log('[NostrPassButton] Authorization status changed:', {
+              before: wasAuthorized,
+              after: currentIdentity.isAuthorized
+            });
+
+            // Save updated session
+            this.saveSession(this.currentUser);
+
+            // Re-render to reflect changes
+            console.log('[NostrPassButton] Re-rendering button...');
+            await this.render();
+            console.log('[NostrPassButton] ✅ Button updated after vault data refresh');
+          } else {
+            // Identity was disconnected - mark as unauthorized
+            console.warn('[NostrPassButton] Current identity not found in authorized list - marking as unauthorized');
+
+            const wasAuthorized = this.currentUser.authorized;
+            this.currentUser.authorized = false;
+
+            console.log('[NostrPassButton] Identity disconnected:', {
+              before: wasAuthorized,
+              after: false
+            });
+
+            // Save updated session
+            this.saveSession(this.currentUser);
+
+            // Re-render to show unauthorized state
+            console.log('[NostrPassButton] Re-rendering button for disconnected state...');
+            await this.render();
+            console.log('[NostrPassButton] ✅ Button updated - showing unauthorized state');
+          }
+        } catch (error) {
+          console.error('[NostrPassButton] ❌ Failed to refresh identity status:', error);
+        }
+      } else {
+        console.log('[NostrPassButton] No current user, skipping refresh');
       }
     });
   }
@@ -201,6 +293,25 @@ export class NostrPassButton {
 
       [data-theme="dark"] .nostrpass-user-btn.active {
         border-color: #6b7280;
+      }
+
+      /* Warning state for unauthorized */
+      .nostrpass-user-btn-warning {
+        border-color: #fbbf24 !important;
+        background: #fffbeb !important;
+      }
+
+      [data-theme="dark"] .nostrpass-user-btn-warning {
+        border-color: #f59e0b !important;
+        background: #451a03 !important;
+      }
+
+      .nostrpass-user-btn-warning .nostrpass-user-btn-text {
+        color: #d97706 !important;
+      }
+
+      [data-theme="dark"] .nostrpass-user-btn-warning .nostrpass-user-btn-text {
+        color: #fbbf24 !important;
       }
 
       .nostrpass-user-avatar {
@@ -559,9 +670,9 @@ export class NostrPassButton {
     document.head.appendChild(style);
   }
 
-  private render() {
+  private async render() {
     if (this.currentUser) {
-      this.renderUserButton();
+      await this.renderUserButton();
     } else {
       this.renderSignInButton();
     }
@@ -600,6 +711,9 @@ export class NostrPassButton {
       console.warn('Failed to fetch all identities:', error);
     }
 
+    // Check if current user is authorized
+    const hasAuthorizedIdentity = user.authorized || allIdentities.some((id: any) => id.isAuthorized);
+
     // Build identities list HTML
     let identitiesHTML = '';
     if (allIdentities.length > 1) {
@@ -634,17 +748,30 @@ export class NostrPassButton {
 
     this.container.innerHTML = `
       <div class="nostrpass-user-menu">
-        <button class="nostrpass-user-btn" data-action="toggle-menu">
+        <button class="nostrpass-user-btn ${!hasAuthorizedIdentity ? 'nostrpass-user-btn-warning' : ''}" data-action="toggle-menu">
           ${user.avatar
             ? `<img src="${user.avatar}" alt="${displayName}" class="nostrpass-user-avatar" />`
             : `<div class="nostrpass-user-initials">${initials}</div>`
           }
-          <span class="nostrpass-user-btn-text">${displayName}</span>
+          <span class="nostrpass-user-btn-text">${hasAuthorizedIdentity ? displayName : 'Not authorized'}</span>
           <svg class="nostrpass-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
         <div class="nostrpass-dropdown" data-dropdown>
+          ${!hasAuthorizedIdentity ? `
+          <div class="nostrpass-dropdown-section" style="padding: 16px; background: #fef3c7; border-bottom: 1px solid #fde68a;">
+            <div style="display: flex; gap: 12px; align-items: start;">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style="flex-shrink: 0; margin-top: 2px;">
+                <path d="M10 6v4m0 4h.01M19 10a9 9 0 11-18 0 9 9 0 0118 0z" stroke="#d97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <div>
+                <div style="font-weight: 600; color: #92400e; font-size: 13px; margin-bottom: 4px;">No authorized identity</div>
+                <div style="color: #78350f; font-size: 12px; line-height: 1.5;">Please choose an identity and approve access to this app from your account settings.</div>
+              </div>
+            </div>
+          </div>
+          ` : ''}
           <div class="nostrpass-dropdown-section nostrpass-dropdown-header">
             <div class="nostrpass-dropdown-user-info">
               ${user.avatar

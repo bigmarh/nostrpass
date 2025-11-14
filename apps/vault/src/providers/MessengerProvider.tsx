@@ -62,9 +62,11 @@ export const MessengerProvider: ParentComponent = (props) => {
   };
 
   onMount(() => {
+    console.log('🔧 [MessengerProvider] Initializing messenger in iframe');
+
     // Initialize messenger
     const messengerInstance = new IframeMessenger(window);
-    
+
     // Configure allowed origins based on environment
     const allowedOrigins: string[] = [];
     
@@ -106,6 +108,10 @@ export const MessengerProvider: ParentComponent = (props) => {
 
     // Mark as ready immediately after init
     setIsReady(true);
+    console.log('✅ [MessengerProvider] Messenger initialized and ready', {
+      allowedOrigins,
+      isInIframe: window.parent !== window
+    });
 
     // Handle show/hide vault commands
     messengerInstance.route('SHOW_VAULT_RESPONSE', {
