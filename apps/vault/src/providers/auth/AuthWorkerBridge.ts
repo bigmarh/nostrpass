@@ -18,7 +18,7 @@ import { sanitizeDomain } from '@nostrpass/nostrHelpers';
  * Interface for crypto worker methods used in worker bridge
  */
 interface CryptoWorker {
-  getVaultData(params: { username: string }): Promise<any>;
+  getVaultData(params: { username: string; includeEncryptedVault?: boolean }): Promise<any>;
   hasKeysInSession(params: { username: string }): Promise<{ hasPrivateKey: boolean; hasXpriv: boolean } | null>;
   signEventWithSession(params: { username: string; event: any; identityIndex: number }): Promise<{ event: any }>;
   signMessageWithSession(params: { username: string; message: string; identityIndex: number }): Promise<{ signature: string }>;

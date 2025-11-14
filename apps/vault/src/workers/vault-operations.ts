@@ -112,9 +112,13 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
 
     // Only include encrypted vault when explicitly requested
     if (params.includeEncryptedVault) {
+      console.log('🔐 [getVaultData] Including encrypted vault, length:', vaultData.encryptedVault?.length);
       result.xprivEncrypted = vaultData.encryptedVault;
+    } else {
+      console.log('🔒 [getVaultData] NOT including encrypted vault (not requested)');
     }
 
+    console.log('📤 [getVaultData] Returning result with xprivEncrypted:', !!result.xprivEncrypted);
     return result;
   } catch (error) {
     console.error('❌ [getVaultData] Error:', error);
