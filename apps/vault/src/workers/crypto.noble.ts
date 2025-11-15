@@ -417,7 +417,7 @@ export class NostrCrypto {
     privateKey: string;
     xpriv: string;
     derivationPath: string;
-    encryptedVault: string;
+    xprivEncrypted: string;
     salt: string;
   }> {
     // Generate xpriv
@@ -439,7 +439,7 @@ export class NostrCrypto {
       privateKey: keypair.privateKey,
       xpriv,
       derivationPath: keypair.path,
-      encryptedVault: encrypted,
+      xprivEncrypted: encrypted,
       salt
     };
   }
@@ -448,7 +448,7 @@ export class NostrCrypto {
    * Create vault from existing keys (for re-encryption)
    */
   async createVaultFromKeys(username: string, privateKey: string, pin: string): Promise<{
-    encryptedVault: string;
+    xprivEncrypted: string;
     salt: string;
   }> {
     // For now, we'll just encrypt the private key
@@ -460,7 +460,7 @@ export class NostrCrypto {
     const salt = bytesToHex(combined.slice(0, 32));
 
     return {
-      encryptedVault: encrypted,
+      xprivEncrypted: encrypted,
       salt
     };
   }

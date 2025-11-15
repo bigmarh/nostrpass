@@ -21,7 +21,7 @@ import { NostrCrypto } from './crypto.noble';
 import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tools/nip04';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
-import { PERMISSION_KINDS, type PermissionLevel } from '@nostrpass/types';
+import { PERMISSION_KINDS, type PermissionLevel, type VaultObj } from '@nostrpass/types';
 import { cryptoPrimitives } from './crypto-primitives';
 import { nostrSync } from './nostr-sync';
 
@@ -85,17 +85,14 @@ const pinAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
 /**
  * Log session state changes for debugging
- * Stores session state in global object for inspection
  */
 export function logSessionState(action: string, username: string) {
-  // Also log to a global for debugging
-  (globalThis as any).__DEBUG_SESSIONS = {
-    count: activeSessions.size,
-    usernames: Array.from(activeSessions.keys()),
-    lastAction: action,
-    lastUsername: username,
+  console.log('[Session State]', {
+    action,
+    username,
+    activeSessionCount: activeSessions.size,
     timestamp: new Date().toISOString()
-  };
+  });
 }
 
 /**
@@ -239,19 +236,18 @@ export const sessionManager = {
       allKeys: Object.keys(params.vaultData)
     });
 
-    // Normalize vault data - map xprivEncrypted to encryptedVault for database storage
+    // Normalize vault data
     const vaultToSave = {
       ...params.vaultData,
-      encryptedVault: params.vaultData.xprivEncrypted,  // Map to DB field name
       publicKey: params.publicKey,
       lastUnlocked: Date.now(),
       createdAt: params.vaultData.createdAt || Date.now()
     };
 
-    console.log('💾 [initSession] Saving vault with mapped fields:', {
+    console.log('💾 [initSession] Saving vault:', {
       username: vaultToSave.username,
-      hasEncryptedVault: !!vaultToSave.encryptedVault,
-      encryptedVaultLength: vaultToSave.encryptedVault?.length,
+      hasXprivEncrypted: !!vaultToSave.xprivEncrypted,
+      xprivEncryptedLength: vaultToSave.xprivEncrypted?.length,
       hasIdentities: !!vaultToSave.identities,
       allKeys: Object.keys(vaultToSave)
     });
@@ -355,21 +351,31 @@ export const sessionManager = {
 
         // Save to local IndexedDB for future use
         console.log('💾 [WORKER login] Saving vault to IndexedDB...');
+        const vaultObj = nostrVault as VaultObj;
+
         await vaultDB.saveVault({
           username: params.username,
           publicKey: loginObj.storagePublicKey,
-          xprivEncrypted: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
-          encryptedVault: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
-          salt: (nostrVault as any).salt,
-          identities: (nostrVault as any).identities || [],
-          activeIdentityByApp: (nostrVault as any).activeIdentityByApp || {},
-          passwordVerifier: (nostrVault as any).passwordVerifier,
-          passwordSalt: (nostrVault as any).passwordSalt,
-          recovery: (nostrVault as any).recovery,
+          xprivEncrypted: vaultObj.xprivEncrypted,
+          salt: vaultObj.salt,
+          identities: vaultObj.identities || [],
+          activeIdentityByApp: vaultObj.activeIdentityByApp || {},
+          passwordVerifier: vaultObj.passwordVerifier,
+          passwordSalt: vaultObj.passwordSalt,
+          recovery: vaultObj.recovery,
           lastSyncedAt: Date.now(),
-          updatedAt: (nostrVault as any).updatedAt || Date.now(),
-          createdAt: (nostrVault as any).createdAt || Date.now()
+          updatedAt: vaultObj.updatedAt || Date.now(),
+          createdAt: vaultObj.createdAt || Date.now()
         } as VaultData);
+
+        // Mirror to xprivs store for PIN unlock fallback
+        console.log('💾 [WORKER login] Mirroring to xprivs store...');
+        try {
+          await vaultDB.saveXpriv(params.username, vaultObj.xprivEncrypted, vaultObj.salt, vaultObj.passwordSalt);
+          console.log('✅ [WORKER login] Mirrored to xprivs store');
+        } catch (err) {
+          console.error('❌ [WORKER login] Failed to mirror to xprivs store:', err);
+        }
 
         vaultData = await vaultDB.getVault(params.username);
         console.log('✅ [WORKER login] Vault saved to IndexedDB');
@@ -807,11 +813,30 @@ export const sessionManager = {
    * Preflight check for crypto operations
    */
   hasKeysInSession: async (params: { username: string }): Promise<{ hasPrivateKey: boolean; hasXpriv: boolean; hasStorageKeypair: boolean }> => {
+    console.log('[hasKeysInSession] Checking for username:', params.username);
+    console.log('[hasKeysInSession] activeSessions size:', activeSessions.size);
+    console.log('[hasKeysInSession] activeSessions keys:', Array.from(activeSessions.keys()));
+
     const session = activeSessions.get(params.username);
+    console.log('[hasKeysInSession] Found session:', session ? 'yes' : 'no');
+
+    if (session) {
+      console.log('[hasKeysInSession] Session details:', {
+        hasPrivateKey: !!session.privateKey,
+        hasXpriv: !!session.xpriv,
+        hasStorageKeypair: !!(session.storagePrivateKey && session.storagePublicKey),
+        isUnlocked: session.isUnlocked,
+        unlockedAt: session.unlockedAt
+      });
+    }
+
     const hasPrivateKey = !!(session && session.privateKey);
     const hasXpriv = !!(session && session.xpriv);
     const hasStorageKeypair = !!(session && session.storagePrivateKey && session.storagePublicKey);
-    return { hasPrivateKey, hasXpriv, hasStorageKeypair };
+
+    const result = { hasPrivateKey, hasXpriv, hasStorageKeypair };
+    console.log('[hasKeysInSession] Returning:', result);
+    return result;
   },
 
   /**
@@ -879,7 +904,7 @@ export const sessionManager = {
     const vaultDataToSave = {
       username: vault.username,
       publicKey: vault.publicKey,
-      encryptedVault: vault.xprivEncrypted || vault.encryptedVault,
+      xprivEncrypted: vault.xprivEncrypted,
       salt: vault.salt,
       derivationPath: vault.derivationPath,
       identities: [defaultIdentity],
@@ -894,6 +919,10 @@ export const sessionManager = {
 
     console.log('💾 [createVault] Saving vault to IndexedDB:', {
       username: vaultDataToSave.username,
+      hasXprivEncrypted: !!vaultDataToSave.xprivEncrypted,
+      xprivEncryptedLength: vaultDataToSave.xprivEncrypted?.length,
+      hasSalt: !!vaultDataToSave.salt,
+      saltLength: vaultDataToSave.salt?.length,
       hasPasswordVerifier: !!vaultDataToSave.passwordVerifier,
       hasPasswordSalt: !!vaultDataToSave.passwordSalt,
       identitiesCount: vaultDataToSave.identities.length
@@ -902,11 +931,23 @@ export const sessionManager = {
     await vaultDB.saveVault(vaultDataToSave);
     console.log('✅ [createVault] Vault saved to IndexedDB successfully');
 
+    // Mirror to xprivs store for PIN unlock fallback
+    console.log('💾 [createVault] Mirroring to xprivs store...');
+    try {
+      await vaultDB.saveXpriv(vault.username, vaultDataToSave.xprivEncrypted, vault.salt, passwordSalt);
+      console.log('✅ [createVault] Mirrored to xprivs store');
+    } catch (err) {
+      console.error('❌ [createVault] Failed to mirror to xprivs store:', err);
+    }
+
     // Verify it was saved
     const savedVault = await vaultDB.getVault(vault.username);
     if (savedVault) {
       console.log('✅ [createVault] Vault verified in IndexedDB:', {
         username: savedVault.username,
+        hasXprivEncrypted: !!savedVault.xprivEncrypted,
+        xprivEncryptedLength: savedVault.xprivEncrypted?.length,
+        hasSalt: !!savedVault.salt,
         hasPasswordVerifier: !!savedVault.passwordVerifier,
         hasPasswordSalt: !!savedVault.passwordSalt
       });
@@ -1115,7 +1156,15 @@ export const sessionManager = {
       }
     }
 
+    console.log('[UnlockSession] Setting session in activeSessions for:', params.username);
+    console.log('[UnlockSession] Session has keys:', {
+      hasPrivateKey: !!session.privateKey,
+      hasXpriv: !!session.xpriv,
+      hasStorageKeypair: !!(session.storagePrivateKey && session.storagePublicKey)
+    });
     activeSessions.set(params.username, session);
+    console.log('[UnlockSession] activeSessions size after set:', activeSessions.size);
+    console.log('[UnlockSession] activeSessions keys:', Array.from(activeSessions.keys()));
     resetPinAttempts(params.username);
     logSessionState('UNLOCKED_ALIAS', params.username);
 
@@ -1272,7 +1321,7 @@ export const sessionManager = {
 
     // Update vault
     await vaultDB.updateVault(params.username, {
-      encryptedVault: vault.encryptedVault,
+      xprivEncrypted: vault.xprivEncrypted,
       salt: vault.salt
     });
 

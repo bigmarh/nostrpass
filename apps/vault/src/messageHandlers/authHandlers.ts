@@ -443,7 +443,12 @@ export const authHandlers: MessageHandler[] = [
       const cryptoWorker = deps.getCryptoWorker();
       const isLocked = deps.isVaultLocked();
 
+      console.log('[AUTH_STATUS] Query from:', context?.origin);
+      console.log('[AUTH_STATUS] Current user:', currentUser?.profile?.username || 'none');
+      console.log('[AUTH_STATUS] isLocked:', isLocked);
+
       if (!currentUser) {
+        console.log('[AUTH_STATUS] No user, returning not authenticated');
         return {
           isAuthenticated: false,
           isLocked: false,
@@ -472,7 +477,7 @@ export const authHandlers: MessageHandler[] = [
         // Check if this identity is authorized for the app
         const isAuthorized = !!(activeIdentity?.appPermissions && activeIdentity.appPermissions[appKey]);
 
-        return {
+        const response = {
           isAuthenticated: true,
           isLocked,
           username: currentUser.profile?.username,
@@ -484,9 +489,12 @@ export const authHandlers: MessageHandler[] = [
             authorized: isAuthorized
           }
         };
+        console.log('[AUTH_STATUS] Returning success response:', { isLocked, username: response.username, authorized: isAuthorized });
+        return response;
       } catch (error) {
+        console.error('[AUTH_STATUS] Error getting vault data:', error);
         // If we can't get vault data (e.g., vault locked), still return basic auth status
-        return {
+        const errorResponse = {
           isAuthenticated: true,
           isLocked: true, // If we can't get vault data, it's likely locked
           username: currentUser.profile?.username,
@@ -498,6 +506,8 @@ export const authHandlers: MessageHandler[] = [
             authorized: false
           }
         };
+        console.log('[AUTH_STATUS] Returning error response (locked):', errorResponse);
+        return errorResponse;
       }
     }
   },
@@ -657,6 +667,44 @@ export const authHandlers: MessageHandler[] = [
         };
       } catch (error) {
         console.error('Failed to switch identity:', error);
+        throw error;
+      }
+    }
+  },
+
+  {
+    route: Msg.LOGOUT,
+    handler: async (_data: any, _context: any, deps: MessageHandlerDependencies) => {
+      console.log('[LOGOUT] Handler called');
+
+      const currentUser = deps.getUser();
+      if (!currentUser) {
+        console.log('[LOGOUT] No user to log out');
+        return { success: true };
+      }
+
+      try {
+        const cryptoWorker = deps.getCryptoWorker();
+        if (cryptoWorker) {
+          console.log('[LOGOUT] Calling worker logout for user:', currentUser.profile.username);
+          await cryptoWorker.logout({
+            username: currentUser.profile.username,
+            deleteVault: false
+          });
+        }
+
+        // Import logout function dynamically to avoid circular dependencies
+        const { useAuth } = await import('../providers');
+        const auth = useAuth();
+        if (auth && auth.logout) {
+          console.log('[LOGOUT] Calling AuthProvider logout');
+          await auth.logout();
+        }
+
+        console.log('[LOGOUT] Logout completed successfully');
+        return { success: true };
+      } catch (error) {
+        console.error('[LOGOUT] Logout failed:', error);
         throw error;
       }
     }

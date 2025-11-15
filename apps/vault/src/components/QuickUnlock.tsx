@@ -9,7 +9,7 @@ import { useAuth, useMessenger } from '../providers';
 export const QuickUnlock: Component = () => {
     console.log('[QuickUnlock] Component mounted');
 
-    const { user, unlockVault, isVaultLocked } = useAuth();
+    const { user, unlockVault, isVaultLocked, logout } = useAuth();
     const { send } = useMessenger();
     const [error, setError] = createSignal('');
     const [isUnlocking, setIsUnlocking] = createSignal(false);
@@ -80,6 +80,23 @@ export const QuickUnlock: Component = () => {
         send('HIDE_VAULT');
     };
 
+    const handleLogout = async () => {
+        console.log('[QuickUnlock] Logout clicked');
+        try {
+            await logout();
+
+            // Send logout message to parent window (crosses iframe boundary)
+            send('nostrpass:logout', {
+                timestamp: Date.now()
+            });
+
+            send('HIDE_VAULT');
+        } catch (error) {
+            console.error('[QuickUnlock] Logout failed:', error);
+            setError('Logout failed. Please try again.');
+        }
+    };
+
     return (
         <div class="flex flex-col items-center justify-center w-full h-full p-2 rounded-2xl overflow-hidden">
             {error() && (
@@ -103,6 +120,17 @@ export const QuickUnlock: Component = () => {
                 onFailed={handlePinFailed}
                 expectedPinHash={user()?.vaultPinHash}
             />
+
+            {/* Logout button */}
+            <button
+                onClick={handleLogout}
+                class="mt-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex items-center gap-1"
+            >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                <span>Sign out</span>
+            </button>
         </div>
     );
 };

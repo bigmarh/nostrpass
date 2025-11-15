@@ -49,11 +49,11 @@ export const Settings: Component = () => {
           foundIndex = 0;
           foundIdentity = vaultData.identities[foundIndex];
         } else {
-          // Try to find by matching against stored identities
-          // This will need to be enhanced when we have multiple identities with different keys
+          // Try to find by matching public keys
+          // Currently only handles the default identity (index 0)
           vaultData.identities.forEach((identity: any, index: number) => {
-            // TODO: Derive public key for each identity and compare
-            if (index === 0 && identityPubkey === currentUser.publicKey) {
+            // Match by public key - worker handles key derivation
+            if (identity.publicKey === identityPubkey) {
               foundIndex = index;
               foundIdentity = identity;
             }

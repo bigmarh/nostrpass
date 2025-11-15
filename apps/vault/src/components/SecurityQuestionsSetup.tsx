@@ -81,15 +81,23 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
 
   return (
     <div class="w-full max-w-2xl mx-auto p-4 md:p-6">
-      <div class="mb-6">
-        <h2 class="text-2xl font-bold mb-2">Set Up PIN Recovery</h2>
-        <p class="text-gray-600">
-          Select 3 security questions. Your answers will be used to recover your PIN if you forget it.
-        </p>
-        <p class="text-sm text-gray-500 mt-2">
-          Note: Answers are case-insensitive and spaces will be removed.
-        </p>
-      </div>
+      <Show when={!showAnswers()}>
+        <div class="mb-6">
+          <h2 class="text-2xl font-bold mb-2">Set Up PIN Recovery</h2>
+          <p class="text-gray-600">
+            Select 3 security questions. Your answers will be used to recover your PIN if you forget it.
+          </p>
+          <p class="text-sm text-gray-500 mt-2">
+            Note: Answers are case-insensitive and spaces will be removed.
+          </p>
+        </div>
+      </Show>
+
+      <Show when={showAnswers()}>
+        <div class="mb-4">
+          <h2 class="text-xl font-bold mb-1">Answer your selected questions:</h2>
+        </div>
+      </Show>
 
       <Show when={error()}>
         <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-md text-sm mb-4">
@@ -102,7 +110,7 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
           <p class="text-sm font-medium text-gray-700 mb-3">
             Select 3 questions ({selectedQuestions().length}/3):
           </p>
-          <div class="max-h-[60vh] md:max-h-96 overflow-y-auto border rounded-lg p-2 space-y-2">
+          <div class="max-h-[240px] overflow-y-auto border rounded-lg p-2 space-y-2">
             <For each={SECURITY_QUESTIONS}>
               {(question, index) => (
                 <label class="flex items-start p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
@@ -139,10 +147,7 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
       </Show>
 
       <Show when={showAnswers()}>
-        <div class="space-y-4 mb-6">
-          <p class="text-sm font-medium text-gray-700 mb-3">
-            Answer your selected questions:
-          </p>
+        <div class="space-y-3 mb-4">
           <For each={selectedQuestions()}>
             {(questionIndex) => (
               <div>
@@ -162,12 +167,11 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
           </For>
         </div>
 
-        <div class="bg-yellow-50 border border-yellow-200 p-4 rounded-md mb-6">
-          <p class="text-sm text-yellow-800 font-medium mb-1">Important:</p>
-          <ul class="text-sm text-yellow-700 list-disc list-inside">
+        <div class="bg-yellow-50 border border-yellow-200 p-3 rounded-md mb-4">
+          <p class="text-xs text-yellow-800 font-medium mb-1">Important:</p>
+          <ul class="text-xs text-yellow-700 list-disc list-inside space-y-0.5">
             <li>Write down your answers exactly as entered</li>
             <li>Answers are case-insensitive when recovering</li>
-            <li>Spaces and special characters matter</li>
             <li>You cannot recover your PIN without these answers</li>
           </ul>
         </div>

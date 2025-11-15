@@ -69,6 +69,12 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
 
             // Don't return anything - this is a notification, not a request/response
         },
+        'nostrpass:logout': (data: any) => {
+            console.log('🚪 Logout signal received from vault iframe', data);
+            // Dispatch window event for NostrPassButton and other listeners
+            window.dispatchEvent(new CustomEvent('nostrpass:logout', { detail: data }));
+            console.log('🚪 ✅ nostrpass:logout event dispatched to window');
+        },
         VAULT_DATA_UPDATED: (data: any) => {
             console.log('📦 [Embassy] Vault data updated signal received from vault iframe', data);
             // Dispatch window event for NostrPassButton and other listeners

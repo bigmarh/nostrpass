@@ -34,21 +34,8 @@ export const AuthProvider: ParentComponent = (props) => {
   const { getRelays, environmentName } = useEnvironment();
   const cryptoWorker = getCryptoWorker();
 
-  // Update isVaultLocked based on conditions
-  createEffect(() => {
-    const currentUser = user();
-    
-    if (!currentUser || !cryptoWorker) {
-      setIsVaultLocked(true);
-      return;
-    }
-
-    // Vault is locked if it has PIN protection and hasn't been unlocked
-    // hasPinVault indicates PIN is required but not yet entered
-    if (hasPinVault()) {
-      setIsVaultLocked(true);
-    }
-  });
+  // Vault lock state is managed explicitly by unlock/lock/logout functions
+  // Don't auto-compute it based on hasPinVault, as that causes re-locking after unlock
 
   // Handle session expired notifications from worker
   createEffect(() => {
@@ -87,23 +74,38 @@ export const AuthProvider: ParentComponent = (props) => {
 
   // Session management on mount
   onMount(async () => {
-    if (!cryptoWorker) return;
-    
+    console.log('[AuthProvider] onMount - Starting session restoration');
+    if (!cryptoWorker) {
+      console.log('[AuthProvider] onMount - No cryptoWorker, exiting');
+      return;
+    }
+
     // Get session status from worker
     const { VaultDataService } = await import('../services/vaultDataService');
     const vaultDataService = VaultDataService.getInstance();
     const sessionStatus = await vaultDataService.getSessionStatus();
-    
+    console.log('[AuthProvider] onMount - Session status:', sessionStatus);
+
     if (sessionStatus.sessionId && sessionStatus.username) {
+      console.log('[AuthProvider] onMount - Found valid session, restoring...');
       localStorage.setItem('vaultsession', sessionStatus.sessionId);
       localStorage.setItem('last-username', sessionStatus.username);
-      
+
       try {
-        const vaultData = await cryptoWorker.getVaultData({ username: sessionStatus.username });
+        const vaultData = await cryptoWorker.getVaultData({
+          username: sessionStatus.username,
+          includeEncryptedVault: true
+        });
+        console.log('[AuthProvider] onMount - Vault data:', vaultData ? 'loaded' : 'null');
+
         if (vaultData) {
+          console.log('[AuthProvider] onMount - Checking key status in worker session...');
           const keyStatus = await cryptoWorker.hasKeysInSession({ username: sessionStatus.username });
+          console.log('[AuthProvider] onMount - Key status:', keyStatus);
+
           const isUnlocked = !!(keyStatus?.hasPrivateKey || keyStatus?.hasXpriv);
-          
+          console.log('[AuthProvider] onMount - Computed isUnlocked:', isUnlocked, '(hasPrivateKey:', keyStatus?.hasPrivateKey, ', hasXpriv:', keyStatus?.hasXpriv, ')');
+
           const restoredUser: User = {
             publicKey: vaultData.publicKey,
             privateKey: '',
@@ -123,16 +125,19 @@ export const AuthProvider: ParentComponent = (props) => {
               lastActivityAt: Date.now()
             }
           };
-          
+
           setUser(restoredUser);
           setHasPinVault(true);
           setIsVaultLocked(!isUnlocked);
+          console.log('[AuthProvider] onMount - Session restored. isVaultLocked set to:', !isUnlocked);
         }
       } catch (error) {
+        console.error('[AuthProvider] onMount - Error restoring session:', error);
         localStorage.removeItem('vaultsession');
         localStorage.removeItem('last-username');
       }
     } else {
+      console.log('[AuthProvider] onMount - No valid session found, clearing localStorage');
       localStorage.removeItem('vaultsession');
       localStorage.removeItem('last-username');
     }
@@ -191,7 +196,10 @@ export const AuthProvider: ParentComponent = (props) => {
         localStorage.setItem('vaultsession', sessionStatus.sessionId);
         localStorage.setItem('last-username', sessionStatus.username);
         try {
-          const vaultData = await cryptoWorker.getVaultData({ username: sessionStatus.username });
+          const vaultData = await cryptoWorker.getVaultData({
+            username: sessionStatus.username,
+            includeEncryptedVault: true
+          });
           if (vaultData) {
             const keyStatus = await cryptoWorker.hasKeysInSession({ username: sessionStatus.username });
             const isUnlocked = !!(keyStatus?.hasPrivateKey || keyStatus?.hasXpriv);
@@ -238,6 +246,31 @@ export const AuthProvider: ParentComponent = (props) => {
       });
     },
     { defer: true } // Only run when the tracked value changes from falsy to truthy
+  ));
+
+  // Centralized auth change listener - notifies embassy when authentication state changes
+  createEffect(on(
+    user,
+    (currentUser, prevUser) => {
+      // Only notify on actual auth state changes (login/logout), not on every render
+      const prevUsername = prevUser?.profile.username;
+      const currentUsername = currentUser?.profile.username;
+
+      if (prevUsername !== currentUsername) {
+        if (messenger.isReady()) {
+          console.log('[AuthProvider] Auth state changed, notifying embassy:', {
+            from: prevUsername || 'logged out',
+            to: currentUsername || 'logged out'
+          });
+
+          messenger.send('VAULT_DATA_UPDATED', {
+            username: currentUsername || null,
+            timestamp: Date.now()
+          });
+        }
+      }
+    },
+    { defer: true }
   ));
 
   const createAccount = async (
@@ -572,8 +605,18 @@ export const AuthProvider: ParentComponent = (props) => {
 
       console.log('✅ [AuthProvider] Login successful');
 
-      // Get vault data to populate UI state
-      const vaultData = await cryptoWorker.getVaultData({ username });
+      // Get vault data to populate UI state (include encrypted vault for PIN unlock)
+      const vaultData = await cryptoWorker.getVaultData({
+        username,
+        includeEncryptedVault: true
+      });
+
+      console.log('📦 [LOGIN] Vault data after login:', {
+        hasVaultData: !!vaultData,
+        keys: vaultData ? Object.keys(vaultData) : [],
+        hasXprivEncrypted: !!(vaultData as any)?.xprivEncrypted,
+        xprivEncryptedType: typeof (vaultData as any)?.xprivEncrypted
+      });
 
       if (!vaultData) {
         throw new Error('Vault data not found after login');
@@ -625,16 +668,10 @@ export const AuthProvider: ParentComponent = (props) => {
   const logout = async (deleteVault = false) => {
     const currentUser = user();
 
-    // Clear UI state first
-    setUser(null);
-    setHasPinVault(false);
-    setIsVaultLocked(true);
-    localStorage.removeItem('last-username');
-    localStorage.removeItem('vaultsession');
-
+    // Clear worker session FIRST before clearing UI state
+    // This prevents onMount from restoring a stale session on reload
     if (currentUser && cryptoWorker) {
       try {
-        // Call the new worker logout method that orchestrates everything
         console.log('🚪 [AuthProvider] Calling worker logout...');
         await cryptoWorker.logout({
           username: currentUser.profile.username,
@@ -645,6 +682,15 @@ export const AuthProvider: ParentComponent = (props) => {
         console.error('❌ [AuthProvider] Worker logout failed:', error);
       }
     }
+
+    // Clear localStorage
+    localStorage.removeItem('last-username');
+    localStorage.removeItem('vaultsession');
+
+    // Then clear UI state
+    setUser(null);
+    setHasPinVault(false);
+    setIsVaultLocked(true);
 
     // Send auth status after all cleanup
     if (messenger.isReady()) {
@@ -719,10 +765,50 @@ export const AuthProvider: ParentComponent = (props) => {
         allKeys: Object.keys(freshVaultData)
       });
       
-      const xprivEncryptedBlob = (freshVaultData as any).xprivEncrypted;
+      let xprivEncryptedBlob = (freshVaultData as any).xprivEncrypted;
+
+      // Fallback: If xprivEncrypted is missing, try to get it from xprivs IndexedDB store directly
       if (!xprivEncryptedBlob) {
-        console.error('❌ [UNLOCK] Vault data is incomplete - no xprivEncrypted');
-        throw new Error('Vault data is incomplete');
+        console.warn('⚠️ [UNLOCK] xprivEncrypted missing from vault data, checking xprivs store directly...');
+        try {
+          const currentUser = user();
+          if (!currentUser) {
+            throw new Error('No user logged in');
+          }
+
+          // Open IndexedDB directly to access xprivs store
+          // This is a fallback when the worker's getVaultData didn't return it
+          const dbRequest = indexedDB.open('NostrPassVault', 1);
+          const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            dbRequest.onsuccess = () => resolve(dbRequest.result);
+            dbRequest.onerror = () => reject(dbRequest.error);
+          });
+
+          const transaction = db.transaction(['xprivs'], 'readonly');
+          const store = transaction.objectStore('xprivs');
+          const getRequest = store.get(currentUser.profile.username);
+
+          const xprivsData = await new Promise<any>((resolve, reject) => {
+            getRequest.onsuccess = () => resolve(getRequest.result);
+            getRequest.onerror = () => reject(getRequest.error);
+          });
+
+          db.close();
+
+          if (xprivsData?.xprivEncrypted) {
+            console.log('✅ [UNLOCK] Found xprivEncrypted in xprivs store');
+            xprivEncryptedBlob = xprivsData.xprivEncrypted;
+          } else {
+            console.error('❌ [UNLOCK] xprivEncrypted not found in xprivs store either', {
+              hasXprivsData: !!xprivsData,
+              keys: xprivsData ? Object.keys(xprivsData) : []
+            });
+            throw new Error('Vault data is incomplete - no xprivEncrypted found');
+          }
+        } catch (error) {
+          console.error('❌ [UNLOCK] Failed to get xprivEncrypted from xprivs store:', error);
+          throw new Error('Vault data is incomplete - no xprivEncrypted');
+        }
       }
       
       console.log('🔍 [UNLOCK] xprivEncrypted blob preview:', xprivEncryptedBlob.substring(0, 50) + '...');
@@ -787,12 +873,12 @@ export const AuthProvider: ParentComponent = (props) => {
         privateKey: '',
         isAuthenticated: true
       };
-      
+
       setUser(updatedUser);
       setHasPinVault(false);
       setIsVaultLocked(false);
-      
-      console.log('✅ [UNLOCK] UI state updated');
+
+      console.log('✅ [UNLOCK] UI state updated - isVaultLocked now:', false);
       
       showSuccessToast('Vault Unlocked', 'Your vault has been successfully unlocked.');
       

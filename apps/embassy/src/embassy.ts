@@ -84,7 +84,7 @@ interface VaultPageConfig {
 const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
   login: {
     route: '',  // Root route for login/signup
-    defaultSize: 'compact',  // Compact modal for login/signup
+    defaultSize: 'minimal',  // Centered floating modal (500x600px) for login/signup
   },
   unlock: {
     route: '/unlock-modal',
@@ -92,7 +92,7 @@ const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
     autoCloseOnSuccess: true,
   },
   dashboard: {
-    route: '/dashboard',
+    route: '/dashboard',  // Full-featured dashboard with identity, pin, and settings management
     defaultSize: 'full',
   },
   account: {
@@ -457,19 +457,32 @@ class NostrPassEmbassy {
     const size = options?.size || pageConfig.defaultSize;
     const buttonElement = options?.buttonElement;
 
-    // Navigate to the requested page
+    // Navigate to the requested page using message-based routing (avoids iframe reload)
     const appDomain = sanitizeDomain(this.config.appDomain!);
     const targetPath = pageConfig.route ? `/${appDomain}${pageConfig.route}` : `/${appDomain}`;
 
     const currentUrl = new URL(this.iframe.src);
     if (currentUrl.pathname !== targetPath) {
-      const newUrl = new URL(this.config.vaultUrl!);
-      newUrl.pathname = targetPath;
-      newUrl.searchParams.set('appName', this.config.appName!);
-      newUrl.searchParams.set('appDomain', this.config.appDomain!);
-      newUrl.searchParams.set('theme', this.config.theme!);
-      this.iframe.src = newUrl.toString();
-      console.log('🔄 Opening vault page:', page, 'at', newUrl.toString());
+      // Use message-based navigation to avoid iframe reload and preserve Shared Worker session
+      if (this.messenger) {
+        this.messenger.request(Msg.NAVIGATE, { path: targetPath })
+          .then(() => {
+            console.log('🔄 Navigated vault to:', page, 'at path', targetPath);
+          })
+          .catch((error: any) => {
+            console.error('Navigation failed, falling back to iframe reload:', error);
+            // Fallback to iframe reload if message-based navigation fails
+            const newUrl = new URL(this.config.vaultUrl!);
+            newUrl.pathname = targetPath;
+            newUrl.searchParams.set('appName', this.config.appName!);
+            newUrl.searchParams.set('appDomain', this.config.appDomain!);
+            newUrl.searchParams.set('theme', this.config.theme!);
+            if (this.iframe) {
+              this.iframe.src = newUrl.toString();
+              console.log('🔄 Opening vault page (fallback):', page, 'at', newUrl.toString());
+            }
+          });
+      }
     }
 
     // Apply size styling and positioning
@@ -1401,6 +1414,22 @@ class NostrPassEmbassy {
     }
   }
 
+  async logout(): Promise<void> {
+    if (!this.iframe || !this.messenger) {
+      console.log('[Embassy] No iframe/messenger to logout from');
+      return;
+    }
+
+    try {
+      console.log('[Embassy] Sending LOGOUT message to vault');
+      await this.messenger!.request(Msg.LOGOUT, {});
+      console.log('[Embassy] Logout successful');
+    } catch (error) {
+      console.error('[Embassy] Logout failed:', error);
+      throw error;
+    }
+  }
+
   async manageAccount(options: AccountManagerOptions = {}): Promise<AccountManagerResult> {
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -1409,8 +1438,8 @@ class NostrPassEmbassy {
 
     const forcePrompt = options.forcePrompt ?? true;
 
-    // Use compact mode for initial auth/unlock, full mode for management
-    const mode = options.size || 'compact';
+    // Use minimal mode for initial auth (login/signup), compact for quick operations
+    const mode = options.size || 'minimal';
     this.show('vault', mode, options.buttonElement);
 
     try {

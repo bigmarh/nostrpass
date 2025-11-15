@@ -135,10 +135,10 @@ function createIdentities(vault: Accessor<VaultCore | null>, username: Accessor<
   const list = () => vaultData.data()?.identities || [];
 
   const create = async (username: string, options: { name: string; purpose?: string }) => {
-    // For now, return a placeholder since createIdentity doesn't exist in worker yet
-    // TODO: Add createIdentity to worker session-manager
-    console.warn('[VaultCoreProvider] createIdentity not yet implemented in worker');
-    return null;
+    // Identity creation requires worker implementation
+    // This would need to derive a new key from the master xpriv and save to vault
+    console.warn('[VaultCoreProvider] createIdentity requires worker session-manager implementation');
+    throw new Error('Identity creation not yet supported');
   };
 
   return {

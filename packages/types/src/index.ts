@@ -23,16 +23,20 @@ export interface LoginObj {
 export interface VaultObj {
   username: string;
   identities: any[];
-  xprivEncrypted: string; // PIN-encrypted only
-  xprivRecovery: string;  // Recovery-encrypted
+  xprivEncrypted: string; // PIN-encrypted xpriv
+  salt: string; // Salt for PIN encryption
+  activeIdentityByApp?: Record<string, number | null>;
+  passwordVerifier?: string; // Encrypted password verifier
+  passwordSalt?: string; // Salt for password derivation
   recovery?: {
     questions: string[];
+    xprivRecovery: string; // xpriv encrypted with recovery key
     salt: string;
     version: number;
   };
-  salt: string;
   version: number;
   updatedAt: number;
+  createdAt?: number;
 }
 
 export interface RecoveryData {

@@ -2,7 +2,7 @@ import type { Component } from 'solid-js';
 import { AppProviders } from './providers';
 import './index.css';
 import { Router, Route } from '@solidjs/router';
-import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation } from './components';
+import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, AccountManager, ManageDashboard } from './components';
 import PermissionPromptController from './components/PermissionPromptController';
 import AccountPickerController from './components/AccountPickerController';
 import SimpleAuthPromptController from './components/SimpleAuthPromptController';
@@ -19,6 +19,7 @@ const AppContent: Component = () => {
       <Route path="/:app/unlock" component={() => <AuthGuard><PinUnlock /></AuthGuard>} />
       <Route path="/:app/unlock-quick" component={() => <AuthGuard><UnlockVaultOperation /></AuthGuard>} />
       <Route path="/:app/dashboard" component={() => <AuthGuard><Dashboard /></AuthGuard>} />
+      <Route path="/:app/manage" component={ManageDashboard} />
       <Route path="/:app/keys" component={() => <AuthGuard><div>Key Management</div></AuthGuard>} />
       <Route path="/:app/vault-core-demo" component={() => (
         <VaultCoreProvider>

@@ -53,15 +53,16 @@ export const permissionHandlers: MessageHandler[] = [
         throw new Error('Missing identity index');
       }
       
-      // TODO: Return all permissions for this origin
+      // Return permissions for this origin from vault data
+      // This is a stub - real implementation would query worker for actual permissions
       return {
         origin,
         permissions: {
           getPublicKey: 'ALLOW',
           signEvent: { kinds: {} },
-          nip04: 'DENY',
-          getRelays: 'DENY',
-          signData: 'DENY'
+          nip04: 'ASK_EVERYTIME',
+          getRelays: 'ALLOW',
+          signData: 'ASK_EVERYTIME'
         }
       };
     }

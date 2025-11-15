@@ -1,6 +1,7 @@
 import { Component, createSignal, onMount, onCleanup, Show } from 'solid-js';
 import { SimpleAuthPrompt } from './SimpleAuthPrompt';
 import { useAuth } from '../providers/AuthProvider';
+import { useMessenger } from '../providers/MessengerProvider';
 import { vaultDataService } from '../services/vaultDataService';
 import { permissionService } from '../services/permissionService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
@@ -14,6 +15,7 @@ interface SimpleAuthPromptEventDetail {
 
 export const SimpleAuthPromptController: Component = () => {
   const auth = useAuth();
+  const { send } = useMessenger();
   const [visible, setVisible] = createSignal(false);
   const [detail, setDetail] = createSignal<SimpleAuthPromptEventDetail | null>(null);
   const [identity, setIdentity] = createSignal<any>(null);
@@ -107,12 +109,28 @@ export const SimpleAuthPromptController: Component = () => {
         d.identityIndex
       );
 
+      // Set this identity as the active identity for this app
+      await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
+        activeIdentityByApp: {
+          ...(current.activeIdentityByApp || {}),
+          [appKey]: d.identityIndex
+        }
+      }), { syncToNostr: false });
+
+      // Trigger vault data refresh event to notify embassy
+      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+        detail: { username: currentUser.profile.username }
+      }));
+
       // Dispatch success event
       if (d.requestId) {
         window.dispatchEvent(new CustomEvent('simple-auth-approved', {
           detail: { requestId: d.requestId, identityIndex: d.identityIndex }
         }));
       }
+
+      // Close the vault modal and return to the app
+      send('HIDE_VAULT');
     } catch (error) {
       console.error('Failed to authorize app:', error);
       if (d.requestId) {

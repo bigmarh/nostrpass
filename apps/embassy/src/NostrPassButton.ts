@@ -41,6 +41,7 @@ export class NostrPassButton {
   private theme: 'light' | 'dark' = 'light';
   private isDropdownOpen: boolean = false;
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+  private isCheckingAuth: boolean = true; // Track if we're still checking auth status
 
   constructor(embassy: any, config: NostrPassButtonConfig = {}) {
     this.embassy = embassy;
@@ -81,6 +82,14 @@ export class NostrPassButton {
   }
 
   private setupEventListeners() {
+    // Listen for logout events to clear the button
+    window.addEventListener('nostrpass:logout', () => {
+      console.log('[NostrPassButton] 🚪 Logout event received');
+      this.currentUser = null;
+      this.clearSession();
+      this.render();
+    });
+
     // Listen for vault-data-refresh events to update the button and dropdown
     window.addEventListener('vault-data-refresh', async (event) => {
       console.log('[NostrPassButton] 🔄 Vault data refresh event received:', event);
@@ -96,6 +105,14 @@ export class NostrPassButton {
           console.log('[NostrPassButton] getAllIdentities response:', response);
           const allIdentities = response?.identities || [];
           const activeIdentityIndex = response?.activeIdentityIndex;
+
+          // If no identities returned, user might have logged out - clear session
+          if (allIdentities.length === 0) {
+            console.log('[NostrPassButton] No identities returned - user logged out');
+            this.currentUser = null;
+            this.clearSession();
+            return;
+          }
 
           console.log('[NostrPassButton] Active identity index from vault:', activeIdentityIndex);
           console.log('[NostrPassButton] Current session identity index:', this.currentUser.identityIndex);
@@ -177,7 +194,16 @@ export class NostrPassButton {
           console.error('[NostrPassButton] ❌ Failed to refresh identity status:', error);
         }
       } else {
-        console.log('[NostrPassButton] No current user, skipping refresh');
+        console.log('[NostrPassButton] No current user - checking if user just logged in...');
+        // User might have just logged in - try to restore session
+        try {
+          const restored = await this.restoreSession();
+          if (restored) {
+            console.log('[NostrPassButton] ✅ Session restored after login');
+          }
+        } catch (error) {
+          console.error('[NostrPassButton] ❌ Failed to restore session:', error);
+        }
       }
     });
   }
@@ -211,34 +237,28 @@ export class NostrPassButton {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       }
 
-      /* Sign In Button - Clean black/white design */
+      /* Sign In Button - Matches user button style */
       .nostrpass-signin-btn {
         display: inline-flex;
         align-items: center;
-        justify-content: center;
         gap: 8px;
-        padding: 12px 24px;
-        border: 1.5px solid #000;
-        border-radius: 6px;
-        font-size: 15px;
-        font-weight: 600;
+        padding: 6px 12px 6px 6px;
+        border: 1.5px solid #e5e7eb;
+        border-radius: 24px;
         cursor: pointer;
         transition: all 0.15s ease;
-        background: #000;
-        color: #fff;
-        box-shadow: none;
+        background: #fff;
+        font-size: 14px;
+        font-weight: 500;
       }
 
       .nostrpass-signin-btn:hover {
-        background: #1a1a1a;
-        border-color: #1a1a1a;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        border-color: #d1d5db;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       }
 
       .nostrpass-signin-btn:active {
-        transform: translateY(0);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transform: scale(0.98);
       }
 
       .nostrpass-signin-btn:disabled {
@@ -248,14 +268,46 @@ export class NostrPassButton {
       }
 
       [data-theme="dark"] .nostrpass-signin-btn {
-        background: #fff;
-        color: #000;
-        border-color: #fff;
+        background: #1f2937;
+        border-color: #374151;
+        color: #f9fafb;
       }
 
       [data-theme="dark"] .nostrpass-signin-btn:hover {
-        background: #f0f0f0;
-        border-color: #f0f0f0;
+        border-color: #4b5563;
+      }
+
+      .nostrpass-signin-logo {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+        background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+        border: 1px solid #d1d5db;
+      }
+
+      [data-theme="dark"] .nostrpass-signin-logo {
+        background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+        border-color: #6b7280;
+      }
+
+      /* Loading/Skeleton state - just a faint outline */
+      .nostrpass-loading-skeleton {
+        display: inline-block;
+        width: 120px;
+        height: 44px;
+        border: 1.5px solid #e5e7eb;
+        border-radius: 24px;
+        background: transparent;
+        opacity: 0.3;
+      }
+
+      [data-theme="dark"] .nostrpass-loading-skeleton {
+        border-color: #374151;
       }
 
       /* User Avatar Button - Compact with username */
@@ -671,17 +723,26 @@ export class NostrPassButton {
   }
 
   private async render() {
-    if (this.currentUser) {
+    if (this.isCheckingAuth) {
+      this.renderLoadingButton();
+    } else if (this.currentUser) {
       await this.renderUserButton();
     } else {
       this.renderSignInButton();
     }
   }
 
+  private renderLoadingButton() {
+    this.container.innerHTML = `
+      <div class="nostrpass-loading-skeleton"></div>
+    `;
+  }
+
   private renderSignInButton() {
     this.container.innerHTML = `
       <button class="nostrpass-signin-btn" data-action="signin">
-        <span>${this.config.signInText}</span>
+        <div class="nostrpass-signin-logo">🥚</div>
+        <span>NostrPass</span>
       </button>
     `;
 
@@ -1080,7 +1141,17 @@ export class NostrPassButton {
     }
   }
 
-  private handleSignOut() {
+  private async handleSignOut() {
+    try {
+      // Call embassy logout to clear vault session
+      console.log('[NostrPassButton] Calling embassy.logout()');
+      await this.embassy.logout();
+      console.log('[NostrPassButton] Embassy logout successful');
+    } catch (error) {
+      console.error('[NostrPassButton] Embassy logout failed:', error);
+    }
+
+    // Clear local session
     this.currentUser = null;
     this.clearSession();
     this.render();
@@ -1099,6 +1170,7 @@ export class NostrPassButton {
     try {
       sessionStorage.removeItem('nostrpass_session');
       this.currentUser = null;
+      this.isCheckingAuth = false; // Reset checking auth state
       this.render();
     } catch (e) {
       console.warn('Failed to clear NostrPass session:', e);
@@ -1107,6 +1179,9 @@ export class NostrPassButton {
 
   public async restoreSession(): Promise<boolean> {
     console.log('[NostrPassButton] restoreSession called');
+    this.isCheckingAuth = true;
+    this.render(); // Show loading state
+
     try {
       // Wait for vault to be ready before checking auth
       console.log('[NostrPassButton] Waiting for vault ready...');
@@ -1128,44 +1203,28 @@ export class NostrPassButton {
             nickname: authStatus.user.nickname,
             authorized: authStatus.user.authorized || false
           };
+          this.isCheckingAuth = false;
           this.saveSession(this.currentUser);
           this.render();
           return true;
         } else {
-          console.log('[NostrPassButton] Not authenticated or no user');
+          // User is not authenticated - clear any stale session
+          console.log('[NostrPassButton] Not authenticated - clearing stale session');
+          this.isCheckingAuth = false;
+          this.clearSession();
+          return false;
         }
       } catch (authError) {
         console.log('[NostrPassButton] Could not get auth status:', authError);
-      }
-
-      // Fall back to session storage
-      console.log('[NostrPassButton] Checking session storage...');
-      const sessionData = sessionStorage.getItem('nostrpass_session');
-      if (!sessionData) {
-        console.log('[NostrPassButton] No session data found');
+        // If we can't get auth status, clear session to be safe
+        this.isCheckingAuth = false;
+        this.clearSession();
         return false;
-      }
-
-      console.log('[NostrPassButton] Found session data, parsing...');
-      const user = JSON.parse(sessionData) as UserInfo;
-      console.log('[NostrPassButton] Session user:', user);
-
-      // Verify session is still valid by checking with embassy
-      try {
-        await this.embassy.getPublicKey({ identityIndex: user.identityIndex });
-        console.log('[NostrPassButton] Session valid, showing user button');
-        this.currentUser = user;
-        this.render();
-        return true;
-      } catch {
-        // Session invalid (or vault locked), but keep showing user button
-        console.log('[NostrPassButton] Vault locked or session invalid, but showing user button anyway');
-        this.currentUser = user;
-        this.render();
-        return true;
       }
     } catch (e) {
       console.warn('[NostrPassButton] Failed to restore NostrPass session:', e);
+      this.isCheckingAuth = false;
+      this.render();
       return false;
     }
   }

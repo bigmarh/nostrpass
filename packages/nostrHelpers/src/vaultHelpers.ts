@@ -10,16 +10,16 @@ export interface VaultData {
   // Core fields
   username: string;
   publicKey: string; // Storage public key for vault identification
-  xprivEncrypted: string; // PIN-encrypted only (single encryption)
-  salt: string; // For PIN encryption (embedded in xprivEncrypted)
-  
+  xprivEncrypted: string; // PIN-encrypted xpriv (encrypted with PIN, not password)
+  salt: string; // Salt for PIN encryption
+
   // Identity management
   identities: any[];
   storagePublicKey?: string; // Explicit storage public key (same as publicKey)
   currentIdentityIndex?: number; // Currently selected identity index
   // Active identity per app (persistent selection separate from authorization)
   activeIdentityByApp?: Record<string, number | null>;
-  
+
   // Recovery system
   recovery?: {
     questions: string[]; // The security questions
@@ -27,16 +27,19 @@ export interface VaultData {
     salt: string; // Salt for answer derivation
     version: number; // Recovery system version
   };
-  
+
   // User preferences
   customRelays?: string[]; // User's preferred relays (overrides default if set)
-  
+
   // Metadata
   updatedAt: number;
   version: number; // Increments on every save for sync conflict resolution
   createdAt?: number; // Account creation timestamp
   lastSyncedAt?: number; // Last sync with Nostr
-  
+  lastUnlocked?: number; // Last time vault was unlocked
+  derivationPath?: string; // BIP32 derivation path used for the vault
+  sessionExpiry?: number; // Session expiry timestamp
+
   // Security
   passwordSalt?: string; // Salt for password key derivation
   passwordVerifier?: string; // Encrypted known string to verify password
