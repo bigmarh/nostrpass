@@ -14,7 +14,12 @@ export interface NostrPassButtonConfig {
   showNpub?: boolean;
   /** Show "Manage Account" option */
   showManageAccount?: boolean;
-  /** Custom theme override */
+  /**
+   * Theme for the button and dropdown
+   * - 'light': Always light theme (white background, dark text)
+   * - 'dark': Always dark theme (dark background, light text)
+   * - 'auto': Follow system preference (default)
+   */
   theme?: 'light' | 'dark' | 'auto';
   /** Callback when user signs in */
   onSignIn?: (user: UserInfo) => void;
