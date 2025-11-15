@@ -325,9 +325,21 @@ class NostrPassEmbassy {
     }
 
   constructor(config: EmbassyConfig = {}) {
+    // Normalize appDomain to just origin (host:port), strip any paths
+    let appDomain = config.appDomain || window.location.host;
+    if (appDomain.includes('://')) {
+      try {
+        appDomain = new URL(appDomain).host;
+      } catch {
+        // If URL parsing fails, use as-is
+      }
+    }
+    // Remove any trailing slashes or paths
+    appDomain = appDomain.split('/')[0];
+
     this.config = {
       appName: config.appName || document.title || 'Unknown App',
-      appDomain: config.appDomain || window.location.host,
+      appDomain,
       permissions: config.permissions || ['getPublicKey', 'signEvent'],
       vaultUrl: config.vaultUrl || 'http://localhost:3001',
       trustedOrigins: config.trustedOrigins, // Keep as-is, will handle defaults in initializeMessenger
@@ -365,14 +377,18 @@ class NostrPassEmbassy {
       this.iframe = document.createElement('iframe');
       this.iframe.id = 'nostrpass-vault-iframe';
 
-      // Build URL with config
+      // Build URL with config (appDomain is already normalized in constructor)
       const url = new URL(this.config.vaultUrl!+'/'+sanitizeDomain(this.config.appDomain!));
       url.searchParams.set('appName', this.config.appName!);
       url.searchParams.set('appDomain', this.config.appDomain!);
       url.searchParams.set('theme', this.config.theme!);
 
       this.iframe.src = url.toString();
-      console.log('iframe.src', url.toString());
+      console.log('[Embassy] Creating iframe with:', {
+        appDomain: this.config.appDomain,
+        sanitized: sanitizeDomain(this.config.appDomain!),
+        iframeSrc: url.toString()
+      });
 
     
 
