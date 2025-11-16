@@ -141,9 +141,10 @@ class NostrPassEmbassy {
   // Reserved for future cooldown logic; intentionally unused for now
   // private lastUnlockAt = 0;
   private unlockResolvers: Array<() => void> = [];
+  private permissionResolvers: Array<() => void> = [];
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
-  
+
   private waitForUnlock(): Promise<void> {
     return new Promise((resolve) => {
       this.unlockResolvers.push(resolve);
@@ -157,11 +158,33 @@ class NostrPassEmbassy {
       }, 60000);
     });
   }
-  
+
+  private waitForPermission(): Promise<void> {
+    return new Promise((resolve) => {
+      this.permissionResolvers.push(resolve);
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        const index = this.permissionResolvers.indexOf(resolve);
+        if (index > -1) {
+          this.permissionResolvers.splice(index, 1);
+          resolve();
+        }
+      }, 60000);
+    });
+  }
+
   public notifyUnlocked(): void {
     console.log('🔓 Notifying unlock resolvers:', this.unlockResolvers.length);
     while (this.unlockResolvers.length > 0) {
       const resolve = this.unlockResolvers.shift();
+      if (resolve) resolve();
+    }
+  }
+
+  public notifyPermissionGranted(): void {
+    console.log('✅ Notifying permission resolvers:', this.permissionResolvers.length);
+    while (this.permissionResolvers.length > 0) {
+      const resolve = this.permissionResolvers.shift();
       if (resolve) resolve();
     }
   }
@@ -367,6 +390,12 @@ class NostrPassEmbassy {
 
     // Inject styles on initialization
     this.injectStyles();
+
+    // Listen for permission-granted events from the vault
+    window.addEventListener('permission-granted', () => {
+      console.log('✅ [Embassy] Permission granted event received, notifying resolvers');
+      this.notifyPermissionGranted();
+    });
 
     // Create iframe immediately (hidden) when DOM is ready
     if (document.readyState === 'loading') {
@@ -1006,6 +1035,7 @@ class NostrPassEmbassy {
 
       // Preflight: check if a prompt is needed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const preflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'getPublicKey',
@@ -1022,6 +1052,9 @@ class NostrPassEmbassy {
           unlockPromise = this.waitForUnlock();
           this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
           this.show('vault', 'full');
         }
       } catch (error: any) {
@@ -1038,6 +1071,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -1081,6 +1121,7 @@ class NostrPassEmbassy {
 
       // Preflight: prompt for PIN first if needed, so the op can proceed without error
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signEvent',
@@ -1098,6 +1139,9 @@ class NostrPassEmbassy {
           unlockPromise = this.waitForUnlock();
           this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
           this.show('vault', 'full');
         }
       } catch (error: any) {
@@ -1114,6 +1158,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -1176,6 +1227,7 @@ class NostrPassEmbassy {
 
       // Preflight: prompt for PIN first if needed so the op can proceed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signData',
@@ -1192,6 +1244,9 @@ class NostrPassEmbassy {
           unlockPromise = this.waitForUnlock();
           this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
           this.show('vault', 'full');
         }
       } catch (error: any) {
@@ -1208,6 +1263,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       const doSign = async () => this.messenger!.request(Msg.SIGN_DATA, {
@@ -1271,6 +1333,7 @@ class NostrPassEmbassy {
 
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
@@ -1287,6 +1350,9 @@ class NostrPassEmbassy {
           unlockPromise = this.waitForUnlock();
           this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
           this.show('vault', 'full');
         }
       } catch (error: any) {
@@ -1303,6 +1369,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -1367,6 +1440,7 @@ class NostrPassEmbassy {
 
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
@@ -1383,6 +1457,9 @@ class NostrPassEmbassy {
           unlockPromise = this.waitForUnlock();
           this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
           this.show('vault', 'full');
         }
       } catch (error: any) {
@@ -1399,6 +1476,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
