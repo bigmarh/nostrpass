@@ -193,8 +193,10 @@ export const Login: Component = () => {
             const appPath = params.app || 'vault';
 
             console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-            // Use window.location.href to bypass LoginGuard redirect
-            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
+            // Use setTimeout to ensure all async operations complete before navigation
+            setTimeout(() => {
+                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
+            }, 100);
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
@@ -242,8 +244,10 @@ export const Login: Component = () => {
             const appPath = params.app || 'vault';
 
             console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-            // Use window.location.href to bypass LoginGuard redirect
-            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
+            // Use setTimeout to ensure all async operations complete before navigation
+            setTimeout(() => {
+                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
+            }, 100);
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
