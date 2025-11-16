@@ -189,14 +189,11 @@ export const Login: Component = () => {
             if (appId) {
                 setLoadingStatus('');
                 setIsLoading(false);
-                // Dispatch event to show simple auth prompt
-                window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
-                    detail: {
-                        appOrigin: desanitizeDomain(appId),
-                        appName: desanitizeDomain(appId),
-                        identityIndex: 0 // First identity created
-                    }
-                }));
+
+                // Navigate to simple auth page to ensure user authorizes the app before returning
+                const appOrigin = desanitizeDomain(appId);
+                console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+                navigate(`/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
             } else {
                 // No app to authorize, just close
                 send('HIDE_VAULT');
@@ -244,14 +241,11 @@ export const Login: Component = () => {
             if (appId) {
                 setLoadingStatus('');
                 setIsLoading(false);
-                // Dispatch event to show simple auth prompt
-                window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
-                    detail: {
-                        appOrigin: desanitizeDomain(appId),
-                        appName: desanitizeDomain(appId),
-                        identityIndex: 0 // First identity created
-                    }
-                }));
+
+                // Navigate to simple auth page to ensure user authorizes the app before returning
+                const appOrigin = desanitizeDomain(appId);
+                console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+                navigate(`/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
             } else {
                 // No app to authorize, just close
                 send('HIDE_VAULT');
