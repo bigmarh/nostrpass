@@ -2,7 +2,7 @@ import type { Component } from 'solid-js';
 import { AppProviders } from './providers';
 import './index.css';
 import { Router, Route } from '@solidjs/router';
-import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, AccountManager, ManageDashboard, AccountPickerPage, PermissionRequestPage } from './components';
+import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, AccountManager, ManageDashboard, AccountPickerPage, PermissionRequestPage, SimpleAuthPage } from './components';
 import AccountPickerController from './components/AccountPickerController';
 import SimpleAuthPromptController from './components/SimpleAuthPromptController';
 import { ToastProvider } from './components/Toast';
@@ -19,6 +19,7 @@ const AppContent: Component = () => {
       <Route path="/:app/unlock-quick" component={() => <AuthGuard><UnlockVaultOperation /></AuthGuard>} />
       <Route path="/:app/account-picker" component={AccountPickerPage} />
       <Route path="/:app/permission-request" component={PermissionRequestPage} />
+      <Route path="/:app/simple-auth" component={() => <AuthGuard><SimpleAuthPage /></AuthGuard>} />
       <Route path="/:app/dashboard" component={() => <AuthGuard><Dashboard /></AuthGuard>} />
       <Route path="/:app/manage" component={ManageDashboard} />
       <Route path="/:app/keys" component={() => <AuthGuard><div>Key Management</div></AuthGuard>} />
