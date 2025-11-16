@@ -123,7 +123,7 @@ export const SimpleAuthPromptController: Component = () => {
           ...(current.activeIdentityByApp || {}),
           [appKey]: d.identityIndex
         }
-      }), { syncToNostr: false });
+      }), { syncToNostr: true });
 
       // Trigger vault data refresh event to notify embassy
       window.dispatchEvent(new CustomEvent('vault-data-refresh', {
