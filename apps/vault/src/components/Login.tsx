@@ -184,23 +184,17 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // Show authorization prompt for the app
-            const appId = params.app;
-            if (appId) {
-                setLoadingStatus('');
-                setIsLoading(false);
+            // After signup, always show simple auth to let user authorize the current application
+            setLoadingStatus('');
+            setIsLoading(false);
 
-                // Navigate to simple auth page to ensure user authorizes the app before returning
-                const appOrigin = desanitizeDomain(appId);
-                const appPath = params.app || 'vault';
-                console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-                // Use window.location.href to bypass LoginGuard redirect
-                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
-            } else {
-                // No app to authorize, navigate to dashboard
-                const appPath = params.app || 'vault';
-                window.location.href = `/${appPath}/dashboard`;
-            }
+            const appId = params.app;
+            const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
+            const appPath = params.app || 'vault';
+
+            console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+            // Use window.location.href to bypass LoginGuard redirect
+            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
@@ -239,23 +233,17 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // Show authorization prompt for the app
-            const appId = params.app;
-            if (appId) {
-                setLoadingStatus('');
-                setIsLoading(false);
+            // After signup, always show simple auth to let user authorize the current application
+            setLoadingStatus('');
+            setIsLoading(false);
 
-                // Navigate to simple auth page to ensure user authorizes the app before returning
-                const appOrigin = desanitizeDomain(appId);
-                const appPath = params.app || 'vault';
-                console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-                // Use window.location.href to bypass LoginGuard redirect
-                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
-            } else {
-                // No app to authorize, navigate to dashboard
-                const appPath = params.app || 'vault';
-                window.location.href = `/${appPath}/dashboard`;
-            }
+            const appId = params.app;
+            const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
+            const appPath = params.app || 'vault';
+
+            console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+            // Use window.location.href to bypass LoginGuard redirect
+            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
