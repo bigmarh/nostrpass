@@ -1,8 +1,8 @@
-import { Component, createSignal, onMount, Show } from 'solid-js';
+import { Component, createSignal, createMemo, Show } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
 import { SimpleAuthPrompt } from './SimpleAuthPrompt';
 import { useAuth, useMessenger } from '../providers';
-import { vaultDataService } from '../services/vaultDataService';
+import { useVaultData } from '../hooks/useVaultData';
 import { permissionService } from '../services/permissionService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 
@@ -20,53 +20,29 @@ export const SimpleAuthPage: Component = () => {
   const auth = useAuth();
   const { send } = useMessenger();
   const [searchParams] = useSearchParams();
-  const [loading, setLoading] = createSignal(true);
-  const [error, setError] = createSignal('');
-  const [identity, setIdentity] = createSignal<any>(null);
+  const { vaultData, isLoading } = useVaultData();
 
   const appOrigin: string = (Array.isArray(searchParams.appOrigin) ? searchParams.appOrigin[0] : searchParams.appOrigin) || window.location.origin;
   const appName: string = (Array.isArray(searchParams.appName) ? searchParams.appName[0] : searchParams.appName) || appOrigin;
   const identityIndexStr = Array.isArray(searchParams.identityIndex) ? searchParams.identityIndex[0] : searchParams.identityIndex;
   const identityIndex = identityIndexStr ? parseInt(identityIndexStr, 10) : 0;
 
-  onMount(async () => {
-    const currentUser = auth.user();
-    if (!currentUser) {
-      setError('Not authenticated');
-      setLoading(false);
-      return;
-    }
+  // Derive identity and error state from vault data
+  const identity = createMemo(() => {
+    const data = vaultData();
+    return data?.identities?.[identityIndex] || null;
+  });
 
-    if (auth.isVaultLocked()) {
-      setError('Vault is locked');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      // Load the identity
-      const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
-      const identityData = vaultData?.identities?.[identityIndex];
-
-      if (identityData) {
-        setIdentity(identityData);
-      } else {
-        setError('Identity not found');
-      }
-    } catch (err) {
-      console.error('Failed to load identity:', err);
-      setError('Failed to load identity');
-    } finally {
-      setLoading(false);
-    }
+  const error = createMemo(() => {
+    if (!auth.user()) return 'Not authenticated';
+    if (auth.isVaultLocked()) return 'Vault is locked';
+    if (!isLoading() && !identity()) return 'Identity not found';
+    return '';
   });
 
   const handleAuthorize = async () => {
     const currentUser = auth.user();
-    if (!currentUser) {
-      setError('Not authenticated');
-      return;
-    }
+    if (!currentUser) return;
 
     let appKey = appOrigin;
     try {
@@ -94,14 +70,6 @@ export const SimpleAuthPage: Component = () => {
         identityIndex
       );
 
-      // Set this identity as the active identity for this app
-      await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
-        activeIdentityByApp: {
-          ...(current.activeIdentityByApp || {}),
-          [appKey]: identityIndex
-        }
-      }), { syncToNostr: false });
-
       // Trigger vault data refresh event to notify embassy
       window.dispatchEvent(new CustomEvent('vault-data-refresh', {
         detail: { username: currentUser.profile.username }
@@ -111,7 +79,6 @@ export const SimpleAuthPage: Component = () => {
       send('HIDE_VAULT');
     } catch (err) {
       console.error('Failed to authorize app:', err);
-      setError('Failed to authorize app');
     }
   };
 
@@ -132,7 +99,7 @@ export const SimpleAuthPage: Component = () => {
 
   return (
     <div class="flex items-center justify-center w-full h-full p-4">
-      <Show when={loading()}>
+      <Show when={isLoading()}>
         <div class="text-center">
           <div class="text-2xl mb-2">⏳</div>
           <div class="text-gray-600 dark:text-gray-400">Loading...</div>
@@ -147,7 +114,7 @@ export const SimpleAuthPage: Component = () => {
         </div>
       </Show>
 
-      <Show when={!loading() && !error() && identity()}>
+      <Show when={!isLoading() && !error() && identity()}>
         <SimpleAuthPrompt
           appOrigin={appOrigin}
           appName={appName}
