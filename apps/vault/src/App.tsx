@@ -13,7 +13,7 @@ import { VaultCoreProvider } from './providers/VaultCoreProvider';
 const AppContent: Component = () => {
   return (
     <Router>
-      <Route path="/:app" component={() => <LoginGuard><Login /></LoginGuard>} />
+      <Route path="/:app" component={Login} />
       <Route path="/:app/unlock-modal" component={QuickUnlock} />
       <Route path="/:app/unlock" component={() => <AuthGuard><PinUnlock /></AuthGuard>} />
       <Route path="/:app/unlock-quick" component={() => <AuthGuard><UnlockVaultOperation /></AuthGuard>} />
