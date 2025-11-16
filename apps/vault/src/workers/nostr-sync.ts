@@ -820,19 +820,20 @@ export const nostrSync = {
       xprivEncryptedLength: payload.xprivEncrypted?.length,
     });
 
-    // CRITICAL: Encrypt the payload with STORAGE PRIVATE KEY (NIP-04) for sync operations
-    // This allows cross-tab sync without requiring the password
+    // CRITICAL: Encrypt the payload with STORAGE PRIVATE KEY (NIP-04)
+    // Architecture: LoginObj (password-encrypted) contains PIN-encrypted storage keypair
+    // This allows vault access with PIN only (no password needed after login)
     const payloadJson = JSON.stringify(payload);
     let encryptedContent: string;
 
-    console.log('🔐 [WORKER saveVaultToNostr] Starting NIP-04 encryption with storage key...');
+    console.log('🔐 [WORKER saveVaultToNostr] Starting NIP-04 encryption with STORAGE key...');
     console.log('🔐 [WORKER saveVaultToNostr] Using storage private key from session');
 
     try {
-      // Use NIP-04 encryption with storage key for sync operations
+      // Use NIP-04 encryption with STORAGE key
       const { encrypt } = await import('nostr-tools/nip04');
       encryptedContent = await encrypt(priv, String(pub), payloadJson);
-      console.log('✅ [WORKER saveVaultToNostr] Payload encrypted with storage key!', {
+      console.log('✅ [WORKER saveVaultToNostr] Payload encrypted with STORAGE key!', {
         encryptedSize: encryptedContent.length,
         identities: payload.identities.length,
       });
@@ -855,6 +856,10 @@ export const nostrSync = {
       keysMatch: pub === vault.publicKey,
       env,
     });
+
+    console.log('📤 [saveVaultToNostr] Publishing with d-tag:', dTag);
+    console.log('📤 [saveVaultToNostr] Author pubkey:', pub);
+    console.log('📤 [saveVaultToNostr] Environment:', env);
 
     const event = {
       kind: 30078 as number, // NIP-78 arbitrary custom app data (replaceable) - MUST match getVaultFromNostr

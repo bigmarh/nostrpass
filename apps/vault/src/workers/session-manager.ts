@@ -316,69 +316,64 @@ export const sessionManager = {
       let vaultData = await vaultDB.getVault(params.username);
       console.log('📦 [WORKER login] IndexedDB result:', vaultData ? 'found' : 'not found');
 
-      // 2. If not found locally, fetch from Nostr
+      // 2. If not found locally, fetch LoginObj from Nostr (password-decrypted)
       if (!vaultData) {
         console.log('📡 [WORKER login] Fetching from Nostr relays...');
 
         // Dynamic import to avoid circular dependencies
-        const { getLoginObj, getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+        const { getLoginObj } = await import('@nostrpass/nostrHelpers');
         const relays = params.relays || [];
         const env = params.environment || 'production';
 
-        const loginObj = await getLoginObj(params.username, env, relays);
-        if (!loginObj) {
-          return { success: false, error: 'No vault found for this username' };
+        // Get LoginObj - it will be password-decrypted using salt from event tags
+        const loginResult = await getLoginObj(params.username, env, relays, params.password);
+        if (!loginResult) {
+          return { success: false, error: 'No account found for this username or wrong password' };
         }
 
-        console.log('✅ [WORKER login] Found LoginObj on Nostr');
-
-        // Derive password key using salt from LoginObj
-        console.log('🔑 [WORKER login] Deriving password key...');
-        const passwordDeriveResult = await cryptoPrimitives.deriveKey({
-          password: params.password,
-          salt: loginObj.passwordSalt
+        const { loginObj, passwordSalt } = loginResult;
+        console.log('✅ [WORKER login] Found and decrypted LoginObj from Nostr');
+        console.log('📋 [WORKER login] LoginObj contains:', {
+          storagePublicKey: loginObj.storagePublicKey.substring(0, 16) + '...',
+          hasStorageKeypairEncrypted: !!loginObj.storageKeypairEncrypted,
+          pinSalt: loginObj.pinSalt.substring(0, 16) + '...'
         });
-        const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
 
-        // Decrypt VaultObj with password key
-        const nostrVault = await getVaultFromNostr(loginObj.storagePublicKey, relays, passwordKey);
+        // Cache the decrypted LoginObj in IndexedDB for future PIN unlocks
+        // This allows PIN-only unlock without password
+        console.log('💾 [WORKER login] Caching LoginObj to IndexedDB...');
 
-        if (!nostrVault) {
-          return { success: false, error: 'Vault data not found on Nostr' };
-        }
-
-        console.log('✅ [WORKER login] Found VaultObj on Nostr');
-
-        // Save to local IndexedDB for future use
-        console.log('💾 [WORKER login] Saving vault to IndexedDB...');
-        const vaultObj = nostrVault as VaultObj;
-
+        // Store LoginObj data in a way that PIN unlock can access it
+        // We'll save the encrypted storage keypair along with basic vault metadata
         await vaultDB.saveVault({
           username: params.username,
           publicKey: loginObj.storagePublicKey,
-          xprivEncrypted: vaultObj.xprivEncrypted,
-          salt: vaultObj.salt,
-          identities: vaultObj.identities || [],
-          activeIdentityByApp: vaultObj.activeIdentityByApp || {},
-          passwordVerifier: vaultObj.passwordVerifier,
-          passwordSalt: vaultObj.passwordSalt,
-          recovery: vaultObj.recovery,
+          // Store the PIN-encrypted storage keypair for PIN unlock
+          storageKeypairEncrypted: loginObj.storageKeypairEncrypted,
+          // xprivEncrypted will be loaded from VaultObj during PIN unlock
+          xprivEncrypted: '', // Placeholder - will be populated during PIN unlock
+          salt: loginObj.pinSalt,
+          identities: [], // Will be loaded during PIN unlock
+          activeIdentityByApp: {},
+          passwordSalt: passwordSalt,
           lastSyncedAt: Date.now(),
-          updatedAt: vaultObj.updatedAt || Date.now(),
-          createdAt: vaultObj.createdAt || Date.now()
+          updatedAt: Date.now(),
+          createdAt: Date.now()
         } as VaultData);
 
-        // Mirror to xprivs store for PIN unlock fallback
-        console.log('💾 [WORKER login] Mirroring to xprivs store...');
-        try {
-          await vaultDB.saveXpriv(params.username, vaultObj.xprivEncrypted, vaultObj.salt, vaultObj.passwordSalt);
-          console.log('✅ [WORKER login] Mirrored to xprivs store');
-        } catch (err) {
-          console.error('❌ [WORKER login] Failed to mirror to xprivs store:', err);
-        }
+        console.log('✅ [WORKER login] LoginObj cached - vault needs PIN unlock to access');
 
-        vaultData = await vaultDB.getVault(params.username);
-        console.log('✅ [WORKER login] Vault saved to IndexedDB');
+        // Return success - user will be prompted for PIN to unlock vault
+        return {
+          success: true,
+          user: {
+            publicKey: loginObj.storagePublicKey,
+            profile: {
+              username: params.username,
+              storagePublicKey: loginObj.storagePublicKey
+            }
+          }
+        };
       }
 
       if (!vaultData) {
@@ -1086,6 +1081,8 @@ export const sessionManager = {
       // Cache storage keypair for Nostr operations (signing/encryption)
       storagePrivateKey,
       storagePublicKey
+      // NOTE: passwordKey is NOT available after PIN unlock - only after password login
+      // If Nostr sync fails due to missing passwordKey, user will need to re-login with password
     };
     console.log('[Unlock] Session seeds:', {
       hasPrivateKey: !!session.privateKey,
