@@ -677,7 +677,7 @@ export const sessionManager = {
     recipientPubkey: string;
     identityIndex: number;
     origin?: string
-  }, handlers: any): Promise<string> => {
+  }): Promise<string> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.isUnlocked || isSessionExpired(session)) {
       throw new Error('Session expired or locked');
@@ -709,7 +709,7 @@ export const sessionManager = {
     if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
-      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
       privateKey = derived.privateKey;
     }
     if (!privateKey) throw new Error('No session key available for encryption');
@@ -728,7 +728,7 @@ export const sessionManager = {
     senderPubkey: string;
     identityIndex: number;
     origin?: string
-  }, handlers: any): Promise<string> => {
+  }): Promise<string> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.isUnlocked || isSessionExpired(session)) {
       throw new Error('Session expired or locked');
@@ -760,7 +760,7 @@ export const sessionManager = {
     if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
-      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
       privateKey = derived.privateKey;
     }
     if (!privateKey) throw new Error('No session key available for decryption');
@@ -1032,7 +1032,7 @@ export const sessionManager = {
 
       // Test derivation to ensure xpriv is valid
       try {
-        const testDerive = await handlers.deriveKeypairFromXpriv({
+        const testDerive = await cryptoPrimitives.deriveKeypairFromXpriv({
           xpriv: sanitized,
           index: 0
         });
@@ -1060,7 +1060,7 @@ export const sessionManager = {
       try {
         // IMPORTANT: Use STORAGE_INDEX (8907) to match account creation
         const { STORAGE_INDEX } = await import('@nostrpass/types');
-        const storageKeypair = await handlers.deriveKeypairFromXpriv({ xpriv: decrypted.xpriv, index: STORAGE_INDEX });
+        const storageKeypair = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: decrypted.xpriv, index: STORAGE_INDEX });
         if (storageKeypair instanceof Map) {
           storagePrivateKey = storageKeypair.get('privateKey');
           storagePublicKey = storageKeypair.get('publicKey');
@@ -1142,7 +1142,7 @@ export const sessionManager = {
     if (session.xpriv && !session.storagePrivateKey) {
       try {
         const { STORAGE_INDEX } = await import('@nostrpass/types');
-        const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
+        const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
         if (derived instanceof Map) {
           session.storagePrivateKey = derived.get('privateKey');
           session.storagePublicKey = derived.get('publicKey');
