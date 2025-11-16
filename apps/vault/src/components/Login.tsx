@@ -184,13 +184,14 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // After signup, close vault and trigger simple-auth via event
+            // After signup, trigger simple-auth prompt overlay
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
 
             console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
 
-            // Dispatch event to trigger simple-auth prompt after vault closes
+            // Dispatch event to trigger simple-auth prompt overlay
+            // The prompt will show on top of current page and handle vault closing after user action
             window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
                 detail: {
                     appOrigin: appOrigin,
@@ -200,10 +201,9 @@ export const Login: Component = () => {
                 }
             }));
 
-            // Close vault - it will reopen with simple-auth
-            setTimeout(() => {
-                send('HIDE_VAULT');
-            }, 500);
+            // Clear loading state to show the prompt
+            setIsLoading(false);
+            setLoadingStatus('');
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
@@ -241,13 +241,14 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // After signup, close vault and trigger simple-auth via event
+            // After signup, trigger simple-auth prompt overlay
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
 
             console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
 
-            // Dispatch event to trigger simple-auth prompt after vault closes
+            // Dispatch event to trigger simple-auth prompt overlay
+            // The prompt will show on top of current page and handle vault closing after user action
             window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
                 detail: {
                     appOrigin: appOrigin,
@@ -257,10 +258,9 @@ export const Login: Component = () => {
                 }
             }));
 
-            // Close vault - it will reopen with simple-auth
-            setTimeout(() => {
-                send('HIDE_VAULT');
-            }, 500);
+            // Clear loading state to show the prompt
+            setIsLoading(false);
+            setLoadingStatus('');
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
