@@ -185,15 +185,15 @@ export const Login: Component = () => {
             setLoadingStatus('Finalizing registration...');
 
             // After signup, always show simple auth to let user authorize the current application
-            setLoadingStatus('');
-            setIsLoading(false);
-
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
             const appPath = params.app || 'vault';
 
             console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+            setLoadingStatus('Redirecting to authorization...');
+
             // Use setTimeout to ensure all async operations complete before navigation
+            // Keep loading state active to prevent LoginGuard from redirecting
             setTimeout(() => {
                 window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
             }, 100);
@@ -236,15 +236,15 @@ export const Login: Component = () => {
             setLoadingStatus('Finalizing registration...');
 
             // After signup, always show simple auth to let user authorize the current application
-            setLoadingStatus('');
-            setIsLoading(false);
-
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
             const appPath = params.app || 'vault';
 
             console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+            setLoadingStatus('Redirecting to authorization...');
+
             // Use setTimeout to ensure all async operations complete before navigation
+            // Keep loading state active to prevent LoginGuard from redirecting
             setTimeout(() => {
                 window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
             }, 100);
