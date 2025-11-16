@@ -181,7 +181,8 @@ export const authHandlers: MessageHandler[] = [
             appName: data?.appName,
             action: 'signEvent',
             eventKind,
-            identityIndex
+            identityIndex,
+            event: data.event  // Pass the actual event being signed
           });
 
           if (!promptResult.granted) {
@@ -263,7 +264,8 @@ export const authHandlers: MessageHandler[] = [
             appOrigin: origin,
             appName: (data as any)?.appName,
             action: 'signData',
-            identityIndex
+            identityIndex,
+            data: data.data  // Pass the actual data being signed
           });
 
           if (!promptResult.granted) {
@@ -346,7 +348,9 @@ export const authHandlers: MessageHandler[] = [
             appOrigin: origin,
             appName: (data as any)?.appName,
             action: 'nip04',
-            identityIndex
+            identityIndex,
+            plaintext: data.plaintext,  // Pass the message being encrypted
+            pubkey: data.recipientPubkey  // Pass recipient
           });
 
           if (!promptResult.granted) {
@@ -411,7 +415,9 @@ export const authHandlers: MessageHandler[] = [
             appOrigin: origin,
             appName: (data as any)?.appName,
             action: 'nip04',
-            identityIndex
+            identityIndex,
+            ciphertext: data.ciphertext,  // Pass the encrypted message
+            pubkey: data.senderPubkey  // Pass sender
           });
 
           if (!promptResult.granted) {
