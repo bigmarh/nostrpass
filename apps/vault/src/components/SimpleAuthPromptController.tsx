@@ -126,6 +126,13 @@ export const SimpleAuthPromptController: Component = () => {
       }), { syncToNostr: true });
 
       // Trigger vault data refresh event to notify embassy
+      console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');
+      send('VAULT_DATA_UPDATED', {
+        username: currentUser.profile.username,
+        timestamp: Date.now()
+      });
+
+      // Also dispatch window event for components within the vault iframe
       window.dispatchEvent(new CustomEvent('vault-data-refresh', {
         detail: { username: currentUser.profile.username }
       }));
