@@ -84,7 +84,7 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
   const actionInfo = getActionDescription();
 
   return (
-    <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="flex items-center justify-center w-full h-full p-4">
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
         <div class="text-center mb-6">
           <div class="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">

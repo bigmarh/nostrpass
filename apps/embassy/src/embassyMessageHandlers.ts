@@ -103,6 +103,16 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
             // Dispatch window event for NostrPassButton and other listeners
             window.dispatchEvent(new CustomEvent('account-picker-selected', { detail: data }));
             console.log('✅ [Embassy] account-picker-selected event dispatched to window');
+        },
+        PERMISSION_GRANTED: (data: any) => {
+            console.log('✅ [Embassy] Permission granted signal received from vault iframe', data);
+            // Dispatch window event so permission manager can resolve the promise
+            window.dispatchEvent(new CustomEvent('permission-granted', { detail: data }));
+        },
+        PERMISSION_DENIED: (data: any) => {
+            console.log('❌ [Embassy] Permission denied signal received from vault iframe', data);
+            // Dispatch window event so permission manager can reject the promise
+            window.dispatchEvent(new CustomEvent('permission-denied', { detail: data }));
         }
     }
 };

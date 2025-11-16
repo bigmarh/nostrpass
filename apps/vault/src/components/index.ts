@@ -10,3 +10,4 @@ export { default as RelaySettings } from './RelaySettings';
 export { AccountManager } from './AccountManager';
 export { ManageDashboard } from './ManageDashboard';
 export { AccountPickerPage } from './AccountPickerPage';
+export { PermissionRequestPage } from './PermissionRequestPage';
