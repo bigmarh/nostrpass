@@ -184,15 +184,26 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // After signup, navigate directly to simple auth - skip dashboard entirely
+            // After signup, close vault and trigger simple-auth via event
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
-            const appPath = params.app || 'vault';
 
-            console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+            console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
 
-            // Navigate immediately - don't clear loading state to prevent LoginGuard redirect
-            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
+            // Dispatch event to trigger simple-auth prompt after vault closes
+            window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
+                detail: {
+                    appOrigin: appOrigin,
+                    appName: appOrigin,
+                    identityIndex: 0,
+                    afterSignup: true
+                }
+            }));
+
+            // Close vault - it will reopen with simple-auth
+            setTimeout(() => {
+                send('HIDE_VAULT');
+            }, 500);
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
@@ -230,15 +241,26 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // After signup, navigate directly to simple auth - skip dashboard entirely
+            // After signup, close vault and trigger simple-auth via event
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
-            const appPath = params.app || 'vault';
 
-            console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
+            console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
 
-            // Navigate immediately - don't clear loading state to prevent LoginGuard redirect
-            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
+            // Dispatch event to trigger simple-auth prompt after vault closes
+            window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
+                detail: {
+                    appOrigin: appOrigin,
+                    appName: appOrigin,
+                    identityIndex: 0,
+                    afterSignup: true
+                }
+            }));
+
+            // Close vault - it will reopen with simple-auth
+            setTimeout(() => {
+                send('HIDE_VAULT');
+            }, 500);
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
