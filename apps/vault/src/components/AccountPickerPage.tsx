@@ -170,28 +170,61 @@ export const AccountPickerPage: Component = () => {
         // Close the modal
         send('HIDE_VAULT');
       } else {
-        // Identity not authorized - navigate to permission prompt page
-        const currentPath = window.location.pathname;
-        const appMatch = currentPath.match(/^\/([^\/]+)/);
-        const app = appMatch ? appMatch[1] : 'vault';
+        // Identity not authorized - show simple auth prompt overlay
+        const authRequestId = `simple-auth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-        // Build query params for permission prompt
-        const queryParams = new URLSearchParams({
-          appOrigin,
-          appName,
-          identityIndex: identityIndex.toString(),
-          requestId: requestId || ''
-        });
+        // Set up listeners for the auth prompt response
+        const handleApproved = (e: Event) => {
+          const ce = e as CustomEvent;
+          if (ce.detail.requestId === authRequestId) {
+            cleanup();
+            // After approval, dispatch success from original request
+            if (requestId) {
+              // Dispatch event for internal vault listeners
+              window.dispatchEvent(new CustomEvent('account-picker-selected', {
+                detail: { requestId, identityIndex }
+              }));
+              // Send message to parent window (embassy/NostrPassButton)
+              send('ACCOUNT_PICKER_SELECTED', { requestId, identityIndex });
+            }
+            // Close the modal
+            send('HIDE_VAULT');
+          }
+        };
 
-        // Add permissions if provided
-        if (appPermissions) {
-          queryParams.set('permissions', JSON.stringify(appPermissions));
-        }
+        const handleRejected = (e: Event) => {
+          const ce = e as CustomEvent;
+          if (ce.detail.requestId === authRequestId) {
+            cleanup();
+            // Propagate rejection to original request
+            if (requestId) {
+              window.dispatchEvent(new CustomEvent('account-picker-rejected', {
+                detail: { requestId, error: ce.detail.error }
+              }));
+            }
+            // Close the modal
+            send('HIDE_VAULT');
+          }
+        };
 
-        // Navigate to permission prompt page using messenger
-        send('NAVIGATE', {
-          path: `/${app}/permission-prompt?${queryParams.toString()}`
-        });
+        const cleanup = () => {
+          window.removeEventListener('simple-auth-approved', handleApproved as EventListener);
+          window.removeEventListener('simple-auth-rejected', handleRejected as EventListener);
+        };
+
+        window.addEventListener('simple-auth-approved', handleApproved as EventListener);
+        window.addEventListener('simple-auth-rejected', handleRejected as EventListener);
+
+        // Trigger simple auth prompt with app-requested permissions
+        window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
+          detail: {
+            appOrigin,
+            appName,
+            identityIndex,
+            requestId: authRequestId,
+            permissions: appPermissions // Pass app-requested permissions
+          }
+        }));
       }
     } catch (err) {
       console.error('Failed to set active identity:', err);

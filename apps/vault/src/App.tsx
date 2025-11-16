@@ -2,9 +2,10 @@ import type { Component } from 'solid-js';
 import { AppProviders } from './providers';
 import './index.css';
 import { Router, Route } from '@solidjs/router';
-import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, AccountManager, ManageDashboard, AccountPickerPage, PermissionPromptPage } from './components';
+import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, AccountManager, ManageDashboard, AccountPickerPage } from './components';
 import PermissionPromptController from './components/PermissionPromptController';
 import AccountPickerController from './components/AccountPickerController';
+import SimpleAuthPromptController from './components/SimpleAuthPromptController';
 import { ToastProvider } from './components/Toast';
 import { I18nProvider } from './i18n';
 import { VaultCoreDemo } from './components/VaultCoreDemo';
@@ -18,7 +19,6 @@ const AppContent: Component = () => {
       <Route path="/:app/unlock" component={() => <AuthGuard><PinUnlock /></AuthGuard>} />
       <Route path="/:app/unlock-quick" component={() => <AuthGuard><UnlockVaultOperation /></AuthGuard>} />
       <Route path="/:app/account-picker" component={AccountPickerPage} />
-      <Route path="/:app/permission-prompt" component={PermissionPromptPage} />
       <Route path="/:app/dashboard" component={() => <AuthGuard><Dashboard /></AuthGuard>} />
       <Route path="/:app/manage" component={ManageDashboard} />
       <Route path="/:app/keys" component={() => <AuthGuard><div>Key Management</div></AuthGuard>} />
@@ -39,6 +39,7 @@ const App: Component = () => {
           <AppContent />
           <PermissionPromptController />
           <AccountPickerController />
+          <SimpleAuthPromptController />
         </AppProviders>
       </ToastProvider>
     </I18nProvider>
