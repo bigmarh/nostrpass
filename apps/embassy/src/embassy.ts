@@ -1247,6 +1247,22 @@ class NostrPassEmbassy {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
           permissionPromise = this.waitForPermission();
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-signData-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'signData',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            data: message
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
           this.show('vault', 'full');
         }
       } catch (error: any) {
