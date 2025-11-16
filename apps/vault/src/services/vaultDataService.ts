@@ -182,7 +182,7 @@ export class VaultDataService {
     await this.updateVaultData(username, (current) => {
       const updatedIdentities = [...(current.identities || []), identity];
       return { identities: updatedIdentities };
-    });
+    }, { syncToNostr: true }); // Auto-sync when adding identity
   }
 
   /**
