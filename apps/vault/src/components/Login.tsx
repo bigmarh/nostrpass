@@ -194,10 +194,12 @@ export const Login: Component = () => {
                 const appOrigin = desanitizeDomain(appId);
                 const appPath = params.app || 'vault';
                 console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-                navigate(`/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
+                // Use window.location.href to bypass LoginGuard redirect
+                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
             } else {
-                // No app to authorize, just close
-                send('HIDE_VAULT');
+                // No app to authorize, navigate to dashboard
+                const appPath = params.app || 'vault';
+                window.location.href = `/${appPath}/dashboard`;
             }
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
@@ -247,10 +249,12 @@ export const Login: Component = () => {
                 const appOrigin = desanitizeDomain(appId);
                 const appPath = params.app || 'vault';
                 console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-                navigate(`/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
+                // Use window.location.href to bypass LoginGuard redirect
+                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
             } else {
-                // No app to authorize, just close
-                send('HIDE_VAULT');
+                // No app to authorize, navigate to dashboard
+                const appPath = params.app || 'vault';
+                window.location.href = `/${appPath}/dashboard`;
             }
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
