@@ -30,26 +30,29 @@ export const PermissionRequestPage: Component = () => {
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal('');
 
-  const appOrigin = searchParams.appOrigin || window.location.origin;
-  const appName = searchParams.appName || 'Unknown App';
-  const action = searchParams.action as any;
-  const eventKind = searchParams.eventKind ? parseInt(searchParams.eventKind as string, 10) : undefined;
-  const identityIndex = searchParams.identityIndex ? parseInt(searchParams.identityIndex as string, 10) : 0;
-  const requestId = searchParams.requestId;
+  const appOrigin: string = (Array.isArray(searchParams.appOrigin) ? searchParams.appOrigin[0] : searchParams.appOrigin) || window.location.origin;
+  const appName: string = (Array.isArray(searchParams.appName) ? searchParams.appName[0] : searchParams.appName) || 'Unknown App';
+  const action = (Array.isArray(searchParams.action) ? searchParams.action[0] : searchParams.action) as any;
+  const eventKindStr = Array.isArray(searchParams.eventKind) ? searchParams.eventKind[0] : searchParams.eventKind;
+  const eventKind = eventKindStr ? parseInt(eventKindStr, 10) : undefined;
+  const identityIndexStr = Array.isArray(searchParams.identityIndex) ? searchParams.identityIndex[0] : searchParams.identityIndex;
+  const identityIndex = identityIndexStr ? parseInt(identityIndexStr, 10) : 0;
+  const requestId: string | undefined = Array.isArray(searchParams.requestId) ? searchParams.requestId[0] : searchParams.requestId;
 
   // Parse JSON-encoded data
   const event = searchParams.event ? (() => {
     try {
-      return JSON.parse(searchParams.event as string);
+      const eventStr = Array.isArray(searchParams.event) ? searchParams.event[0] : searchParams.event;
+      return JSON.parse(eventStr);
     } catch {
       return undefined;
     }
   })() : undefined;
 
-  const data = searchParams.data as string | undefined;
-  const pubkey = searchParams.pubkey as string | undefined;
-  const plaintext = searchParams.plaintext as string | undefined;
-  const ciphertext = searchParams.ciphertext as string | undefined;
+  const data: string | undefined = Array.isArray(searchParams.data) ? searchParams.data[0] : searchParams.data;
+  const pubkey: string | undefined = Array.isArray(searchParams.pubkey) ? searchParams.pubkey[0] : searchParams.pubkey;
+  const plaintext: string | undefined = Array.isArray(searchParams.plaintext) ? searchParams.plaintext[0] : searchParams.plaintext;
+  const ciphertext: string | undefined = Array.isArray(searchParams.ciphertext) ? searchParams.ciphertext[0] : searchParams.ciphertext;
 
   onMount(async () => {
     const currentUser = auth.user();

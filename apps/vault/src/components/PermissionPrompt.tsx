@@ -145,7 +145,7 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
               </div>
               <Show when={props.request.pubkey}>
                 <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">
-                  {props.request.plaintext ? 'To: ' : 'From: '}{props.request.pubkey.substring(0, 16)}...
+                  {props.request.plaintext ? 'To: ' : 'From: '}{props.request.pubkey!.substring(0, 16)}...
                 </div>
               </Show>
               <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono break-all max-h-32 overflow-y-auto text-gray-900 dark:text-gray-100">

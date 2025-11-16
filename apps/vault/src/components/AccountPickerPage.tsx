@@ -23,14 +23,15 @@ export const AccountPickerPage: Component = () => {
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal('');
 
-  const appOrigin = searchParams.appOrigin || window.location.origin;
-  const appName = searchParams.appName || 'Unknown App';
-  const requestId = searchParams.requestId;
+  const appOrigin: string = (Array.isArray(searchParams.appOrigin) ? searchParams.appOrigin[0] : searchParams.appOrigin) || window.location.origin;
+  const appName: string = (Array.isArray(searchParams.appName) ? searchParams.appName[0] : searchParams.appName) || 'Unknown App';
+  const requestId: string | undefined = Array.isArray(searchParams.requestId) ? searchParams.requestId[0] : searchParams.requestId;
 
   // Parse app-requested permissions from query params
   const appPermissions = searchParams.permissions ? (() => {
     try {
-      return JSON.parse(searchParams.permissions as string);
+      const permStr = Array.isArray(searchParams.permissions) ? searchParams.permissions[0] : searchParams.permissions;
+      return JSON.parse(permStr);
     } catch {
       return undefined;
     }
