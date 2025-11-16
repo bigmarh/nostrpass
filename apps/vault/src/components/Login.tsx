@@ -192,8 +192,9 @@ export const Login: Component = () => {
 
                 // Navigate to simple auth page to ensure user authorizes the app before returning
                 const appOrigin = desanitizeDomain(appId);
+                const appPath = params.app || 'vault';
                 console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-                navigate(`/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
+                navigate(`/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
             } else {
                 // No app to authorize, just close
                 send('HIDE_VAULT');
@@ -244,8 +245,9 @@ export const Login: Component = () => {
 
                 // Navigate to simple auth page to ensure user authorizes the app before returning
                 const appOrigin = desanitizeDomain(appId);
+                const appPath = params.app || 'vault';
                 console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-                navigate(`/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
+                navigate(`/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`);
             } else {
                 // No app to authorize, just close
                 send('HIDE_VAULT');
