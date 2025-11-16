@@ -981,120 +981,111 @@ export const sessionManager = {
   },
 
   /**
-   * Unlock vault with PIN
-   * Decrypts xpriv, validates it, derives storage keypair, and creates active session
+   * Unlock vault with PIN (NEW ARCHITECTURE)
+   * 1. Decrypt storage keypair from cached LoginObj with PIN
+   * 2. Fetch VaultObj from Nostr using storage private key
+   * 3. Decrypt xpriv from VaultObj with PIN
+   * 4. Create session with all keys
    */
   unlockVault: async (params: UnlockVaultParams, crypto: NostrCrypto, handlers: any): Promise<UnlockVaultResult> => {
-    // Get vault data from IndexedDB
-    const vaultData = await vaultDB.getVault(params.username);
-    if (!vaultData) {
-      throw new Error('Vault not found');
+    // Get cached vault data from IndexedDB (contains storageKeypairEncrypted from login)
+    const cachedData = await vaultDB.getVault(params.username);
+    if (!cachedData) {
+      throw new Error('Vault not found - please login first');
     }
 
-    console.log('[Unlock] Starting unlock', { username: params.username });
-    console.log('[Unlock] Vault fields presence:', {
-      hasXprivEncrypted: !!(vaultData as any).encryptedVault,
-      hasSalt: !!(vaultData as any).salt
+    console.log('[Unlock] Starting unlock with new architecture', { username: params.username });
+    console.log('[Unlock] Cached data fields:', {
+      hasStorageKeypairEncrypted: !!cachedData.storageKeypairEncrypted,
+      hasSalt: !!cachedData.salt,
+      storagePublicKey: cachedData.publicKey.substring(0, 16) + '...'
     });
 
-    // Decrypt the vault
     ensureNotLocked(params.username);
-    const decryptedResult = crypto.decryptVault(
-      vaultData.encryptedVault,
-      params.pin
-    );
 
-    // Handle result Map
-    let decrypted: any;
-    if (decryptedResult instanceof Map) {
-      decrypted = {
-        privateKey: decryptedResult.get('privateKey'),
-        xpriv: decryptedResult.get('xpriv'),
-        publicKey: decryptedResult.get('publicKey')
-      };
-    } else {
-      decrypted = decryptedResult;
+    // STEP 1: Decrypt storage keypair from LoginObj cache using PIN
+    if (!cachedData.storageKeypairEncrypted) {
+      throw new Error('No storage keypair found - vault may need re-login with new architecture');
     }
 
-    // Validate xpriv if present
-    if (decrypted.xpriv) {
-      const sanitized = decrypted.xpriv.trim().replace(/\s+/g, '');
+    console.log('🔐 [Unlock] Decrypting storage keypair with PIN...');
+    const storageKeypairJson = await cryptoPrimitives.decryptDataWithSalt({
+      encryptedData: cachedData.storageKeypairEncrypted,
+      password: params.pin,
+      salt: cachedData.salt
+    });
 
-      // Basic format check
-      if (!/^(xprv|tprv)/.test(sanitized)) {
-        throw new Error('Invalid xpriv after PIN decrypt - must start with xprv or tprv');
-      }
+    const storageKeypair = JSON.parse(storageKeypairJson);
+    const storagePrivateKey = storageKeypair.privateKey;
+    const storagePublicKey = storageKeypair.publicKey;
 
-      // Test derivation to ensure xpriv is valid
-      try {
-        const testDerive = await cryptoPrimitives.deriveKeypairFromXpriv({
-          xpriv: sanitized,
-          index: 0
-        });
+    console.log('✅ [Unlock] Storage keypair decrypted successfully');
 
-        if (!testDerive || !testDerive.publicKey) {
-          throw new Error('Invalid xpriv - derivation test failed');
-        }
+    // STEP 2: Fetch VaultObj from Nostr using storage private key
+    console.log('📡 [Unlock] Fetching VaultObj from Nostr...');
+    const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+    const relays = cachedData.customRelays || [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net'
+    ];
 
-        console.log('[Worker] xpriv validated successfully via test derivation');
-      } catch (error: any) {
-        console.error('[Worker] xpriv validation failed:', error);
-        throw new Error(`Invalid xpriv - validation failed: ${error.message}`);
-      }
-
-      decrypted.xpriv = sanitized;
-    } else {
-      console.warn('[Unlock] No xpriv in decrypted payload');
+    const vaultData = await getVaultFromNostr(storagePublicKey, relays, storagePrivateKey);
+    if (!vaultData) {
+      throw new Error('Vault data not found on Nostr - may need to sync');
     }
 
-    // Derive storage keypair from xpriv for Nostr operations
-    let storagePrivateKey: string | undefined;
-    let storagePublicKey: string | undefined;
+    console.log('✅ [Unlock] VaultObj fetched and decrypted from Nostr');
+    console.log('📋 [Unlock] VaultObj contains:', {
+      identitiesCount: vaultData.identities?.length || 0,
+      hasXprivEncrypted: !!vaultData.xprivEncrypted
+    });
 
-    if (decrypted.xpriv) {
-      try {
-        // IMPORTANT: Use STORAGE_INDEX (8907) to match account creation
-        const { STORAGE_INDEX } = await import('@nostrpass/types');
-        const storageKeypair = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: decrypted.xpriv, index: STORAGE_INDEX });
-        if (storageKeypair instanceof Map) {
-          storagePrivateKey = storageKeypair.get('privateKey');
-          storagePublicKey = storageKeypair.get('publicKey');
-        } else {
-          storagePrivateKey = storageKeypair.privateKey;
-          storagePublicKey = storageKeypair.publicKey;
-        }
-        console.log('[Unlock] Storage keypair derived for Nostr operations with STORAGE_INDEX');
-      } catch (error) {
-        console.error('[Unlock] Failed to derive storage keypair:', error);
-        // Continue without storage keypair - will affect Nostr sync but not local operations
-      }
+    // STEP 3: Decrypt xpriv from VaultObj using PIN
+    console.log('🔐 [Unlock] Decrypting xpriv with PIN...');
+    const xpriv = await cryptoPrimitives.decryptDataWithSalt({
+      encryptedData: vaultData.xprivEncrypted,
+      password: params.pin,
+      salt: vaultData.salt
+    });
+
+    // Validate xpriv
+    const sanitized = xpriv.trim().replace(/\s+/g, '');
+    if (!/^(xprv|tprv)/.test(sanitized)) {
+      throw new Error('Invalid xpriv after PIN decrypt - must start with xprv or tprv');
     }
 
-    // Update session
+    console.log('✅ [Unlock] xpriv decrypted and validated successfully');
+
+    // Update cached vault with fresh data from Nostr
+    await vaultDB.saveVault({
+      ...cachedData,
+      xprivEncrypted: vaultData.xprivEncrypted,
+      identities: vaultData.identities || [],
+      activeIdentityByApp: vaultData.activeIdentityByApp || {},
+      updatedAt: vaultData.updatedAt || Date.now(),
+      lastSyncedAt: Date.now()
+    } as VaultData);
+
+    console.log('💾 [Unlock] Vault data updated in IndexedDB cache');
+
+    // STEP 4: Create session with all keys
     const session: ExtendedSession = {
       username: params.username,
-      publicKey: vaultData.publicKey,
-      privateKey: decrypted.privateKey,
-      xpriv: decrypted.xpriv,
+      publicKey: storagePublicKey,
+      privateKey: undefined, // Not used in new architecture
+      xpriv: sanitized,
       isUnlocked: true,
       unlockedAt: Date.now(),
       // Cache storage keypair for Nostr operations (signing/encryption)
       storagePrivateKey,
       storagePublicKey
-      // NOTE: passwordKey is NOT available after PIN unlock - only after password login
-      // If Nostr sync fails due to missing passwordKey, user will need to re-login with password
     };
-    console.log('[Unlock] Session seeds:', {
-      hasPrivateKey: !!session.privateKey,
+
+    console.log('[Unlock] Session created:', {
       hasXpriv: !!session.xpriv,
       hasStorageKeypair: !!(storagePrivateKey && storagePublicKey)
     });
-
-    // Store recovery data if available
-    if (vaultData.recoveryQuestions && vaultData.recoveryAnswers) {
-      session.recoveryQuestions = vaultData.recoveryQuestions;
-      session.answers = vaultData.recoveryAnswers;
-    }
 
     activeSessions.set(params.username, session);
     resetPinAttempts(params.username);
@@ -1103,15 +1094,16 @@ export const sessionManager = {
     // Update last unlocked time
     await vaultDB.updateLastUnlocked(params.username);
 
-    // Broadcast unlock as SESSION_UNLOCKED for consistency with UI handlers
+    // Broadcast unlock
     broadcastVaultUpdate(params.username, 'SESSION_UNLOCKED', {
-      publicKey: vaultData.publicKey
+      publicKey: storagePublicKey
     });
-    console.log('[Unlock] Unlock flow completed');
+
+    console.log('✅ [Unlock] Unlock flow completed successfully');
 
     return {
       username: params.username,
-      publicKey: vaultData.publicKey,
+      publicKey: storagePublicKey,
       isUnlocked: true
     };
   },

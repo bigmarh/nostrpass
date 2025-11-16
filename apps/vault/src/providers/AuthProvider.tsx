@@ -312,9 +312,12 @@ export const AuthProvider: ParentComponent = (props) => {
       // Step 2: Derive keypairs
       console.log('🔑 [CREATE ACCOUNT] Step 2: Deriving storage and personal keypairs...');
       const { getStorageKeypair } = await import('../services/userService');
-      const { publicKey: storagePublicKey } = await getStorageKeypair(userMasterKey.xpriv);
+      const storageKeypair = await getStorageKeypair(userMasterKey.xpriv);
+      const storagePublicKey = storageKeypair.publicKey;
+      const storagePrivateKey = storageKeypair.privateKey;
       console.log('✅ [CREATE ACCOUNT] Storage public key:', storagePublicKey);
-      
+      console.log('✅ [CREATE ACCOUNT] Storage private key (first 16 chars):', storagePrivateKey.substring(0, 16) + '...');
+
       const { publicKey: personalPublicKey } = await getIdentityKeypair(userMasterKey.xpriv, personalIdentity);
       console.log('✅ [CREATE ACCOUNT] Personal public key:', personalPublicKey);
       
@@ -344,10 +347,23 @@ export const AuthProvider: ParentComponent = (props) => {
         data: userMasterKey.xpriv,
         password: pin  // Use PIN directly, encryptData will derive key and embed salt
       });
-      
-      console.log('✅ [CREATE ACCOUNT] Encryption successful!');
+
+      console.log('✅ [CREATE ACCOUNT] xpriv encryption successful!');
       console.log('✅ [CREATE ACCOUNT] Encrypted xpriv length:', xprivEncrypted.length);
       console.log('✅ [CREATE ACCOUNT] Encrypted xpriv preview:', xprivEncrypted.substring(0, 50) + '...');
+
+      // Encrypt storage keypair with PIN for LoginObj
+      console.log('🔐 [CREATE ACCOUNT] Encrypting storage keypair with PIN...');
+      const storageKeypairJson = JSON.stringify({
+        privateKey: storagePrivateKey,
+        publicKey: storagePublicKey
+      });
+      const storageKeypairEncrypted = await cryptoWorker.encryptData({
+        data: storageKeypairJson,
+        password: pin  // Same PIN, will generate its own salt
+      });
+      console.log('✅ [CREATE ACCOUNT] Storage keypair encrypted');
+      console.log('✅ [CREATE ACCOUNT] Encrypted keypair length:', storageKeypairEncrypted.length);
 
       // Step 4: Create user object
       console.log('👤 [CREATE ACCOUNT] Step 4: Creating user object...');
@@ -437,12 +453,27 @@ export const AuthProvider: ParentComponent = (props) => {
         updatedAt: Date.now()
       };
 
+      // Extract the PIN salt from encrypted data (it's embedded in xprivEncrypted)
+      // We need to extract it to put in LoginObj for consistency
+      // Actually, for the new architecture, we need a common PIN salt
+      // Let's derive it separately
+      const pinDeriveResult = await cryptoWorker.deriveKey({ password: pin });
+      let pinSalt: string;
+      if (pinDeriveResult instanceof Map) {
+        pinSalt = pinDeriveResult.get('salt');
+      } else {
+        pinSalt = (pinDeriveResult as any).salt;
+      }
+      console.log('✅ [CREATE ACCOUNT] PIN salt derived:', pinSalt.substring(0, 20) + '...');
+
       const loginObj: LoginObj = {
         storagePublicKey,
+        storageKeypairEncrypted,  // NEW: PIN-encrypted storage keypair
         username,
         createdAt: Date.now(),
         version: 1,
-        passwordSalt  // Store password salt in LoginObj for decryption
+        passwordSalt,  // Store password salt in LoginObj for decryption
+        pinSalt  // NEW: PIN salt for decrypting storage keypair
       };
 
       const vaultData: VaultData = {
@@ -534,8 +565,8 @@ export const AuthProvider: ParentComponent = (props) => {
         const relays = getRelays();
         const env = environmentName ? environmentName() : 'development';
 
-        await saveLoginObj(username, loginObj, randomPublicKey, randomPrivateKey, relays, env);
-        console.log(`✅ [CREATE ACCOUNT] LoginObj saved to Nostr with environment: ${env}`);
+        await saveLoginObj(username, loginObj, randomPublicKey, randomPrivateKey, relays, env, passwordKey);
+        console.log(`✅ [CREATE ACCOUNT] LoginObj saved to Nostr (password-encrypted) with environment: ${env}`);
         
         // Create initial vault event using password encryption
         const vaultEvent = await cryptoWorker.createInitialVaultForNostr({ username, passwordKey });
