@@ -893,6 +893,21 @@ export const nostrSync = {
         pubkey: signedEvent.get('pubkey') || event.pubkey,
         sig: signedEvent.get('sig') || '',
       };
+
+      // Publish to relays
+      console.log('📡 [saveVaultToNostr] Publishing vault event to relays...');
+      const relays = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://relay.primal.net',
+        'wss://relay.nostr.band',
+        'ws://localhost:8080',
+      ];
+      const pool = new SimplePool();
+      await Promise.all(pool.publish(relays, eventObj));
+      pool.close(relays);
+      console.log('✅ [saveVaultToNostr] Vault event published to relays successfully');
+
       return { event: eventObj };
     }
 
@@ -906,6 +921,21 @@ export const nostrSync = {
       content: (signedEvent as any).content || event.content,
       sig: (signedEvent as any).sig,
     };
+
+    // Publish to relays
+    console.log('📡 [saveVaultToNostr] Publishing vault event to relays...');
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080',
+    ];
+    const pool = new SimplePool();
+    await Promise.all(pool.publish(relays, normalized));
+    pool.close(relays);
+    console.log('✅ [saveVaultToNostr] Vault event published to relays successfully');
+
     return { event: normalized };
   },
 
