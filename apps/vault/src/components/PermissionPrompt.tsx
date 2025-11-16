@@ -115,13 +115,13 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
               <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase mb-2">
                 Event to Sign:
               </div>
-              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono max-h-32 overflow-y-auto">
-                <div><span class="text-gray-500">Kind:</span> {props.request.event.kind}</div>
+              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono max-h-32 overflow-y-auto text-gray-900 dark:text-gray-100">
+                <div><span class="text-gray-500 dark:text-gray-400">Kind:</span> {props.request.event.kind}</div>
                 <Show when={props.request.event.content}>
-                  <div class="mt-1"><span class="text-gray-500">Content:</span> {props.request.event.content}</div>
+                  <div class="mt-1"><span class="text-gray-500 dark:text-gray-400">Content:</span> {props.request.event.content}</div>
                 </Show>
                 <Show when={props.request.event.tags && props.request.event.tags.length > 0}>
-                  <div class="mt-1"><span class="text-gray-500">Tags:</span> {JSON.stringify(props.request.event.tags)}</div>
+                  <div class="mt-1"><span class="text-gray-500 dark:text-gray-400">Tags:</span> {JSON.stringify(props.request.event.tags)}</div>
                 </Show>
               </div>
             </div>
@@ -132,7 +132,7 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
               <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase mb-2">
                 Data to Sign:
               </div>
-              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono break-all max-h-32 overflow-y-auto">
+              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono break-all max-h-32 overflow-y-auto text-gray-900 dark:text-gray-100">
                 {props.request.data}
               </div>
             </div>
@@ -148,7 +148,7 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
                   {props.request.plaintext ? 'To: ' : 'From: '}{props.request.pubkey.substring(0, 16)}...
                 </div>
               </Show>
-              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono break-all max-h-32 overflow-y-auto">
+              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono break-all max-h-32 overflow-y-auto text-gray-900 dark:text-gray-100">
                 {props.request.plaintext || props.request.ciphertext}
               </div>
             </div>

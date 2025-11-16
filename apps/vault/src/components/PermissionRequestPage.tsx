@@ -129,50 +129,10 @@ export const PermissionRequestPage: Component = () => {
   };
 
   const handleDeny = async () => {
-    const currentUser = auth.user();
-    if (!currentUser) {
-      send('HIDE_VAULT');
-      return;
+    // Cancel button - just deny this one request without saving any permission
+    if (requestId) {
+      send('PERMISSION_DENIED', { requestId });
     }
-
-    let appKey = appOrigin;
-    try {
-      appKey = sanitizeDomain(new URL(appOrigin).host || appOrigin);
-    } catch {
-      appKey = sanitizeDomain(appOrigin);
-    }
-
-    try {
-      // Persist DENY for the requested action
-      const perms: any = {};
-      switch (action) {
-        case 'getPublicKey':
-          perms.getPublicKey = 'DENY';
-          break;
-        case 'signData':
-          perms.signData = 'DENY';
-          break;
-        case 'nip04':
-          perms.nip04 = 'DENY';
-          break;
-        case 'getRelays':
-          perms.getRelays = 'DENY';
-          break;
-        case 'signEvent':
-          perms.kinds = { [eventKind || 0]: 'DENY' };
-          break;
-      }
-      await permissionService.saveAppPermissions(currentUser.profile.username, appKey, perms, appName, identityIndex);
-
-      // Notify embassy/parent that permission was denied
-      if (requestId) {
-        send('PERMISSION_DENIED', { requestId });
-      }
-    } catch (err) {
-      console.error('Failed to save denial:', err);
-    }
-
-    // Close the vault
     send('HIDE_VAULT');
   };
 
