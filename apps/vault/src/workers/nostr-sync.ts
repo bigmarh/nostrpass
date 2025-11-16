@@ -585,11 +585,16 @@ export const nostrSync = {
       xprivEncrypted: (vaultRaw as any).encryptedVault || (vaultRaw as any).xprivEncrypted,
     };
 
-    console.log('📤 [createInitialVaultForNostr] Creating initial password-encrypted vault:', {
+    console.log('📤 [createInitialVaultForNostr] Vault from IndexedDB:', {
       username: vault.username,
       identitiesCount: vault.identities?.length || 0,
       hasXprivEncrypted: !!vault.xprivEncrypted,
+      xprivEncryptedLength: vault.xprivEncrypted?.length,
+      xprivEncryptedPreview: vault.xprivEncrypted?.substring(0, 50),
+      salt: vault.salt,
+      saltLength: vault.salt?.length,
       updatedAt: new Date(vault.updatedAt || Date.now()).toISOString(),
+      allVaultKeys: Object.keys(vault)
     });
 
     const session = (activeSessions as any).get(params.username);
@@ -636,8 +641,14 @@ export const nostrSync = {
 
     console.log('✅ [createInitialVaultForNostr] Payload created:', {
       identitiesCount: payload.identities.length,
+      identities: payload.identities,
       hasXprivEncrypted: !!payload.xprivEncrypted,
       xprivEncryptedLength: payload.xprivEncrypted?.length,
+      xprivEncryptedPreview: payload.xprivEncrypted?.substring(0, 50),
+      salt: payload.salt,
+      saltLength: payload.salt?.length,
+      passwordSalt: payload.passwordSalt,
+      allPayloadKeys: Object.keys(payload)
     });
 
     // CRITICAL: Encrypt the payload with PASSWORD KEY for initial vault creation

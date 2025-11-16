@@ -326,7 +326,7 @@ export const AuthProvider: ParentComponent = (props) => {
       const passwordDeriveResult = await cryptoWorker.deriveKey({
         password,
       });
-      
+
       let passwordKey: string;
       let passwordSalt: string;
       if (passwordDeriveResult instanceof Map) {
@@ -337,30 +337,43 @@ export const AuthProvider: ParentComponent = (props) => {
         passwordSalt = (passwordDeriveResult as any).salt;
       }
       console.log('✅ [CREATE ACCOUNT] Password key derived. Salt:', passwordSalt.substring(0, 20) + '...');
-      
-      // 2. Encrypt xpriv with PIN (encryptData will derive key and embed salt)
+
+      // Step 3.5: Derive PIN salt for consistent encryption
+      console.log('🔑 [CREATE ACCOUNT] Step 3.5: Deriving PIN salt...');
+      const pinDeriveResult = await cryptoWorker.deriveKey({ password: pin });
+      let pinSalt: string;
+      if (pinDeriveResult instanceof Map) {
+        pinSalt = pinDeriveResult.get('salt');
+      } else {
+        pinSalt = (pinDeriveResult as any).salt;
+      }
+      console.log('✅ [CREATE ACCOUNT] PIN salt derived:', pinSalt.substring(0, 20) + '...');
+
+      // Step 4: Encrypt xpriv with PIN using the consistent salt
       console.log('🔐 [CREATE] Encrypting xpriv with PIN...');
       console.log('🔐 [CREATE] PIN details:', { length: pin.length, preview: pin.substring(0, 2) + '***' });
       console.log('🔐 [CREATE] xpriv to encrypt:', { length: userMasterKey.xpriv.length, preview: userMasterKey.xpriv.substring(0, 10) + '...' });
-      
-      const xprivEncrypted = await cryptoWorker.encryptData({
+
+      const xprivEncrypted = await cryptoWorker.encryptDataWithSalt({
         data: userMasterKey.xpriv,
-        password: pin  // Use PIN directly, encryptData will derive key and embed salt
+        password: pin,
+        salt: pinSalt
       });
 
       console.log('✅ [CREATE ACCOUNT] xpriv encryption successful!');
       console.log('✅ [CREATE ACCOUNT] Encrypted xpriv length:', xprivEncrypted.length);
       console.log('✅ [CREATE ACCOUNT] Encrypted xpriv preview:', xprivEncrypted.substring(0, 50) + '...');
 
-      // Encrypt storage keypair with PIN for LoginObj
+      // Encrypt storage keypair with PIN for LoginObj using the same salt
       console.log('🔐 [CREATE ACCOUNT] Encrypting storage keypair with PIN...');
       const storageKeypairJson = JSON.stringify({
         privateKey: storagePrivateKey,
         publicKey: storagePublicKey
       });
-      const storageKeypairEncrypted = await cryptoWorker.encryptData({
+      const storageKeypairEncrypted = await cryptoWorker.encryptDataWithSalt({
         data: storageKeypairJson,
-        password: pin  // Same PIN, will generate its own salt
+        password: pin,
+        salt: pinSalt
       });
       console.log('✅ [CREATE ACCOUNT] Storage keypair encrypted');
       console.log('✅ [CREATE ACCOUNT] Encrypted keypair length:', storageKeypairEncrypted.length);
@@ -448,23 +461,10 @@ export const AuthProvider: ParentComponent = (props) => {
           salt: recoveryData.salt,
           version: recoveryData.version
         } : undefined,
-        salt: '', // Salt is now embedded in xprivEncrypted, not stored separately
+        salt: pinSalt, // PIN salt for decrypting xprivEncrypted
         version: 1,
         updatedAt: Date.now()
       };
-
-      // Extract the PIN salt from encrypted data (it's embedded in xprivEncrypted)
-      // We need to extract it to put in LoginObj for consistency
-      // Actually, for the new architecture, we need a common PIN salt
-      // Let's derive it separately
-      const pinDeriveResult = await cryptoWorker.deriveKey({ password: pin });
-      let pinSalt: string;
-      if (pinDeriveResult instanceof Map) {
-        pinSalt = pinDeriveResult.get('salt');
-      } else {
-        pinSalt = (pinDeriveResult as any).salt;
-      }
-      console.log('✅ [CREATE ACCOUNT] PIN salt derived:', pinSalt.substring(0, 20) + '...');
 
       const loginObj: LoginObj = {
         storagePublicKey,
@@ -478,7 +478,7 @@ export const AuthProvider: ParentComponent = (props) => {
 
       const vaultData: VaultData = {
         xprivEncrypted,
-        salt: '', // Salt is now embedded in xprivEncrypted, not stored separately
+        salt: pinSalt, // PIN salt for decrypting xprivEncrypted
         passwordSalt, // Salt for password verification
         publicKey: storagePublicKey,
         storagePublicKey,
@@ -502,14 +502,29 @@ export const AuthProvider: ParentComponent = (props) => {
         username: vaultData.username,
         hasXprivEncrypted: !!vaultData.xprivEncrypted,
         xprivEncryptedLength: vaultData.xprivEncrypted.length,
+        xprivEncryptedPreview: vaultData.xprivEncrypted.substring(0, 50) + '...',
         salt: vaultData.salt,
+        saltLength: vaultData.salt?.length,
         passwordSalt: vaultData.passwordSalt,
         hasPasswordVerifier: !!vaultData.passwordVerifier,
-        passwordVerifierLength: vaultData.passwordVerifier?.length
+        passwordVerifierLength: vaultData.passwordVerifier?.length,
+        identitiesCount: vaultData.identities?.length,
+        identities: vaultData.identities,
+        allKeys: Object.keys(vaultData)
       });
       
       // Step 8: Initialize session in worker
       console.log('🔓 [CREATE ACCOUNT] Step 8: Initializing session in worker...');
+      console.log('🔓 [CREATE ACCOUNT] Passing vaultData to initSession:', {
+        username,
+        publicKey: storagePublicKey,
+        vaultDataKeys: Object.keys(vaultData),
+        hasXprivEncrypted: !!vaultData.xprivEncrypted,
+        xprivEncryptedLength: vaultData.xprivEncrypted?.length,
+        identitiesCount: vaultData.identities?.length,
+        hasSalt: !!vaultData.salt,
+        hasPasswordKey: !!passwordKey
+      });
       await cryptoWorker.initSession({
         username,
         publicKey: storagePublicKey,
@@ -517,6 +532,19 @@ export const AuthProvider: ParentComponent = (props) => {
         passwordKey  // Cache password key for vault operations
       });
       console.log('✅ [CREATE ACCOUNT] Session initialized');
+
+      // Step 8.5: Verify what was saved to IndexedDB
+      console.log('🔍 [CREATE ACCOUNT] Step 8.5: Verifying IndexedDB save...');
+      const verifyVault = await cryptoWorker.getVaultData({ username, includeEncryptedVault: true });
+      console.log('🔍 [CREATE ACCOUNT] Vault data from IndexedDB after initSession:', {
+        hasVaultData: !!verifyVault,
+        keys: verifyVault ? Object.keys(verifyVault) : [],
+        hasXprivEncrypted: !!(verifyVault as any)?.xprivEncrypted,
+        xprivEncryptedLength: (verifyVault as any)?.xprivEncrypted?.length,
+        identitiesCount: (verifyVault as any)?.identities?.length,
+        identities: (verifyVault as any)?.identities,
+        salt: (verifyVault as any)?.salt
+      });
       
       // Step 9: Unlock session with keys
       console.log('🔓 [CREATE ACCOUNT] Step 9: Unlocking session...');
@@ -646,7 +674,13 @@ export const AuthProvider: ParentComponent = (props) => {
         hasVaultData: !!vaultData,
         keys: vaultData ? Object.keys(vaultData) : [],
         hasXprivEncrypted: !!(vaultData as any)?.xprivEncrypted,
-        xprivEncryptedType: typeof (vaultData as any)?.xprivEncrypted
+        xprivEncryptedType: typeof (vaultData as any)?.xprivEncrypted,
+        xprivEncryptedLength: (vaultData as any)?.xprivEncrypted?.length,
+        identitiesCount: (vaultData as any)?.identities?.length,
+        identities: (vaultData as any)?.identities,
+        salt: (vaultData as any)?.salt,
+        passwordSalt: (vaultData as any)?.passwordSalt,
+        storagePublicKey: (vaultData as any)?.storagePublicKey
       });
 
       if (!vaultData) {
@@ -855,16 +889,24 @@ export const AuthProvider: ParentComponent = (props) => {
         // This shouldn't happen with properly formatted vaults
       }
        
-      // Step 2: Decrypt xpriv with PIN
+      // Step 2: Decrypt xpriv with PIN using the stored salt
       console.log('🔐 [UNLOCK] Step 2: Decrypting xpriv with PIN...');
       console.log('🔐 [UNLOCK] PIN provided:', { length: pin.length, preview: pin.substring(0, 2) + '***' });
-      
+      console.log('🔐 [UNLOCK] Using PIN salt:', (freshVaultData as any).salt?.substring(0, 20) + '...');
+
       let xpriv: string;
-      
+
       try {
-        xpriv = await cryptoWorker.decryptData({
+        const pinSalt = (freshVaultData as any).salt;
+        if (!pinSalt) {
+          console.error('❌ [UNLOCK] No PIN salt found in vault data!');
+          throw new Error('Vault data is missing PIN salt');
+        }
+
+        xpriv = await cryptoWorker.decryptDataWithSalt({
           encryptedData: payloadToDecrypt,
-          password: pin
+          password: pin,
+          salt: pinSalt
         });
         console.log('✅ [UNLOCK] Decryption successful! xpriv length:', xpriv?.length);
         console.log('✅ [UNLOCK] xpriv preview:', xpriv?.substring(0, 10) + '...');
