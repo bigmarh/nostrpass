@@ -184,23 +184,18 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // After signup, always show simple auth to let user authorize the current application
+            // After signup, navigate directly to simple auth - skip dashboard entirely
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
             const appPath = params.app || 'vault';
 
             console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-            setLoadingStatus('Redirecting to authorization...');
 
-            // Use setTimeout to ensure all async operations complete before navigation
-            // Keep loading state active to prevent LoginGuard from redirecting
-            setTimeout(() => {
-                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
-            }, 100);
+            // Navigate immediately - don't clear loading state to prevent LoginGuard redirect
+            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
-        } finally {
             setIsLoading(false);
             setLoadingStatus('');
         }
@@ -235,23 +230,18 @@ export const Login: Component = () => {
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
 
-            // After signup, always show simple auth to let user authorize the current application
+            // After signup, navigate directly to simple auth - skip dashboard entirely
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
             const appPath = params.app || 'vault';
 
             console.log('📱 [SIGNUP] Navigating to simple auth for app:', appOrigin);
-            setLoadingStatus('Redirecting to authorization...');
 
-            // Use setTimeout to ensure all async operations complete before navigation
-            // Keep loading state active to prevent LoginGuard from redirecting
-            setTimeout(() => {
-                window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
-            }, 100);
+            // Navigate immediately - don't clear loading state to prevent LoginGuard redirect
+            window.location.href = `/${appPath}/simple-auth?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&identityIndex=0&afterSignup=true`;
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
-        } finally {
             setIsLoading(false);
             setLoadingStatus('');
         }
