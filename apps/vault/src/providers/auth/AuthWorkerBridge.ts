@@ -591,6 +591,9 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
       } catch {}
 
       // Use session-based signing in worker
+      // The worker will check permissions and throw if not granted
+      // If permission is denied, the error will propagate and the embassy's CHECK_PERMISSION
+      // preflight should have already shown the permission UI
       try {
         const result = await cryptoWorker.signEventWithSession({
           username: currentUser.profile.username,
@@ -601,6 +604,13 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
         return result.event;
       } catch (err: any) {
         const msg = err instanceof Error ? err.message : String(err ?? 'SIGN_EVENT failed');
+
+        // If permission not granted, this is expected - the permission UI should be showing
+        // Don't log as error, just throw to let embassy know to wait for permission
+        if (msg.includes('Permission not granted') || msg.includes('Permission') && msg.includes('denied')) {
+          console.log('[AuthWorkerBridge] Permission not yet granted for signEvent, waiting for user approval');
+        }
+
         throw new Error(msg);
       }
     }

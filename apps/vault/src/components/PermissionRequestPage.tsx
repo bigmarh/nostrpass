@@ -92,6 +92,7 @@ export const PermissionRequestPage: Component = () => {
     }
 
     try {
+      // Save the permission for future requests
       if (level === 'ASK_PER_SESSION') {
         if (action === 'signEvent' || action === 'signData') {
           await permissionService.grantSessionPermission(currentUser.profile.username, appKey, action, eventKind, 60);
@@ -118,12 +119,16 @@ export const PermissionRequestPage: Component = () => {
         await permissionService.saveAppPermissions(currentUser.profile.username, appKey, perms, appName, identityIndex);
       }
 
+      console.log('[PermissionRequestPage] ✅ Permission saved, level:', level);
+
       // Notify embassy/parent that permission was granted
+      // The app will need to retry the operation since the first attempt failed due to missing permission
       if (requestId) {
         send('PERMISSION_GRANTED', { requestId, level });
       }
 
-      // Close the vault
+      // Close the vault - the operation has already completed (with error)
+      // The calling app should retry the operation now that permission is granted
       send('HIDE_VAULT');
     } catch (err) {
       console.error('Failed to save permission:', err);
