@@ -14,7 +14,14 @@ import { NostrPassButton, NostrPassButtonConfig, UserInfo } from './NostrPassBut
 interface EmbassyConfig {
   appName?: string;
   appDomain?: string;
-  permissions?: string[];
+  permissions?: {
+    getPublicKey?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    getRelays?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signEvent?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip04?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip44?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signData?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+  };
   vaultUrl?: string;
   trustedOrigins?: string[]; // Custom trusted vault origins
   theme?: 'light' | 'dark' | 'auto';
@@ -77,7 +84,7 @@ type VaultPage =
 
 interface VaultPageConfig {
   route: string;
-  defaultSize: 'full' | 'compact' | 'minimal';
+  defaultSize: 'full' | 'compact' | 'tall' | 'minimal';
   autoCloseOnSuccess?: boolean; // Auto-hide after successful action
 }
 
@@ -96,8 +103,8 @@ const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
     defaultSize: 'full',
   },
   account: {
-    route: '/account-switcher',
-    defaultSize: 'compact',
+    route: '/account-picker',  // Dedicated account/identity picker page
+    defaultSize: 'tall',  // Taller popup for account selection with permissions
     autoCloseOnSuccess: true,
   },
 };
@@ -340,7 +347,7 @@ class NostrPassEmbassy {
     this.config = {
       appName: config.appName || document.title || 'Unknown App',
       appDomain,
-      permissions: config.permissions || ['getPublicKey', 'signEvent'],
+      permissions: config.permissions,
       vaultUrl: config.vaultUrl || 'http://localhost:3001',
       trustedOrigins: config.trustedOrigins, // Keep as-is, will handle defaults in initializeMessenger
       theme: config.theme || 'auto',
@@ -457,11 +464,15 @@ class NostrPassEmbassy {
   /**
    * Open a specific vault page
    * @param page - The vault page to open
-   * @param options - Optional size override and button element for positioning
+   * @param options - Optional size override, button element, and query params
    */
   public openPage(
     page: VaultPage,
-    options?: { size?: 'full' | 'compact' | 'minimal'; buttonElement?: HTMLElement }
+    options?: {
+      size?: 'full' | 'compact' | 'tall' | 'minimal';
+      buttonElement?: HTMLElement;
+      queryParams?: Record<string, string>;
+    }
   ): void {
     if (!this.iframe) {
       console.warn('Cannot show iframe - not created yet');
@@ -472,18 +483,27 @@ class NostrPassEmbassy {
     const pageConfig = VAULT_PAGES[page];
     const size = options?.size || pageConfig.defaultSize;
     const buttonElement = options?.buttonElement;
+    const queryParams = options?.queryParams || {};
 
     // Navigate to the requested page using message-based routing (avoids iframe reload)
     const appDomain = sanitizeDomain(this.config.appDomain!);
     const targetPath = pageConfig.route ? `/${appDomain}${pageConfig.route}` : `/${appDomain}`;
 
+    // Build query string from params
+    const queryString = Object.keys(queryParams).length > 0
+      ? '?' + new URLSearchParams(queryParams).toString()
+      : '';
+    const targetPathWithQuery = targetPath + queryString;
+
     const currentUrl = new URL(this.iframe.src);
-    if (currentUrl.pathname !== targetPath) {
+    const currentPathWithQuery = currentUrl.pathname + currentUrl.search;
+
+    if (currentPathWithQuery !== targetPathWithQuery) {
       // Use message-based navigation to avoid iframe reload and preserve Shared Worker session
       if (this.messenger) {
-        this.messenger.request(Msg.NAVIGATE, { path: targetPath })
+        this.messenger.request(Msg.NAVIGATE, { path: targetPathWithQuery })
           .then(() => {
-            console.log('🔄 Navigated vault to:', page, 'at path', targetPath);
+            console.log('🔄 Navigated vault to:', page, 'at path', targetPathWithQuery);
           })
           .catch((error: any) => {
             console.error('Navigation failed, falling back to iframe reload:', error);
@@ -493,6 +513,10 @@ class NostrPassEmbassy {
             newUrl.searchParams.set('appName', this.config.appName!);
             newUrl.searchParams.set('appDomain', this.config.appDomain!);
             newUrl.searchParams.set('theme', this.config.theme!);
+            // Add custom query params
+            Object.keys(queryParams).forEach(key => {
+              newUrl.searchParams.set(key, queryParams[key]);
+            });
             if (this.iframe) {
               this.iframe.src = newUrl.toString();
               console.log('🔄 Opening vault page (fallback):', page, 'at', newUrl.toString());
@@ -505,6 +529,7 @@ class NostrPassEmbassy {
     this.iframe.classList.remove('nostrpass-iframe-hidden');
     this.iframe.classList.remove('nostrpass-iframe-visible');
     this.iframe.classList.remove('nostrpass-iframe-compact');
+    this.iframe.classList.remove('nostrpass-iframe-tall');
     this.iframe.classList.remove('nostrpass-iframe-minimal');
 
     // Clear any inline styles that might have been set for compact mode
@@ -514,16 +539,16 @@ class NostrPassEmbassy {
 
     if (size === 'minimal') {
       this.iframe.classList.add('nostrpass-iframe-minimal');
-    } else if (size === 'compact') {
-      this.iframe.classList.add('nostrpass-iframe-compact');
+    } else if (size === 'compact' || size === 'tall') {
+      this.iframe.classList.add(size === 'tall' ? 'nostrpass-iframe-tall' : 'nostrpass-iframe-compact');
 
-      // Position compact mode relative to button if provided, otherwise center
+      // Position compact/tall mode relative to button if provided, otherwise center
       if (buttonElement) {
         const rect = buttonElement.getBoundingClientRect();
         const spaceBelow = window.innerHeight - rect.bottom;
         const spaceAbove = rect.top;
         const iframeWidth = 395;
-        const iframeHeight = 395;
+        const iframeHeight = size === 'tall' ? 600 : 395; // Taller for account picker
         const gap = 8;
 
         let top: number;
@@ -572,8 +597,8 @@ class NostrPassEmbassy {
       this.backdropEl.style.backdropFilter = 'none';
     }
 
-    // Add click-outside handler for compact mode
-    if (size === 'compact') {
+    // Add click-outside handler for compact and tall modes
+    if (size === 'compact' || size === 'tall') {
       if (this.outsideClickHandler) {
         document.removeEventListener('click', this.outsideClickHandler);
       }
@@ -627,6 +652,7 @@ class NostrPassEmbassy {
     // Add hidden class to move off-screen
     this.iframe.classList.remove('nostrpass-iframe-visible');
     this.iframe.classList.remove('nostrpass-iframe-compact');
+    this.iframe.classList.remove('nostrpass-iframe-tall');
     this.iframe.classList.remove('nostrpass-iframe-minimal');
     this.iframe.classList.add('nostrpass-iframe-hidden');
 
@@ -723,6 +749,31 @@ class NostrPassEmbassy {
           height: 90vw !important;
           max-width: 395px !important;
           max-height: 395px !important;
+        }
+      }
+
+      /* Tall state - Taller modal for account picker with more content */
+      .nostrpass-iframe-tall {
+        position: fixed !important;
+        width: 395px !important;
+        height: 600px !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        background: transparent !important;
+        border-radius: 12px !important;
+        transition: opacity 0.2s ease, visibility 0.2s ease !important;
+        z-index: 2147483646 !important;
+        overflow: hidden !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+      }
+
+      @media (max-width: 500px) {
+        .nostrpass-iframe-tall {
+          width: 90vw !important;
+          height: min(600px, 80vh) !important;
+          max-width: 395px !important;
         }
       }
 

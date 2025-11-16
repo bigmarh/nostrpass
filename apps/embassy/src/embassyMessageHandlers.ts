@@ -64,6 +64,22 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
                 (embassyInstance as any).notifyUnlocked();
             }
 
+            // Handle next action after unlock
+            if (data?.nextAction === 'account-picker') {
+                console.log('🔄 Unlock requested account-picker continuation, switching to account-picker page');
+                // Navigate to account-picker page with query params (uses default 'tall' size)
+                const queryParams: Record<string, string> = {};
+                if (data.appOrigin) queryParams.appOrigin = data.appOrigin;
+                if (data.appName) queryParams.appName = data.appName;
+                if (data.requestId) queryParams.requestId = data.requestId;
+                if (data.permissions) queryParams.permissions = data.permissions;
+
+                (embassyInstance as any).openPage('account', {
+                    // Use default 'tall' size from VAULT_PAGES config
+                    queryParams
+                });
+            }
+
             // Dispatch window event for NostrPassButton and other listeners
             window.dispatchEvent(new CustomEvent('nostrpass:unlocked', { detail: data }));
 
@@ -81,6 +97,12 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
             console.log('📦 [Embassy] Dispatching vault-data-refresh event to window');
             window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: data }));
             console.log('📦 [Embassy] ✅ vault-data-refresh event dispatched');
+        },
+        ACCOUNT_PICKER_SELECTED: (data: any) => {
+            console.log('✅ [Embassy] Account picker selected signal received from vault iframe', data);
+            // Dispatch window event for NostrPassButton and other listeners
+            window.dispatchEvent(new CustomEvent('account-picker-selected', { detail: data }));
+            console.log('✅ [Embassy] account-picker-selected event dispatched to window');
         }
     }
 };

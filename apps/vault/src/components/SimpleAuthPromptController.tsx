@@ -11,6 +11,14 @@ interface SimpleAuthPromptEventDetail {
   appName?: string;
   identityIndex: number;
   requestId?: string;
+  permissions?: {
+    getPublicKey?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    getRelays?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signEvent?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip04?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip44?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signData?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+  };
 }
 
 export const SimpleAuthPromptController: Component = () => {
@@ -91,20 +99,20 @@ export const SimpleAuthPromptController: Component = () => {
     }
 
     try {
-      // Grant default permissions:
-      // - getPublicKey: ALLOW (always allowed to read public key)
-      // - signEvent: ASK_EVERYTIME (ask before signing)
-      // - nip04: ASK_EVERYTIME (ask before encrypt/decrypt)
-      // - getRelays: ALLOW (allowed to read relay list)
+      // Use app-requested permissions or fall back to safe defaults
+      const permissionsToGrant = {
+        getPublicKey: d.permissions?.getPublicKey || 'ALLOW',
+        getRelays: d.permissions?.getRelays || 'ALLOW',
+        signEvent: d.permissions?.signEvent || 'ASK_EVERYTIME',
+        nip04: d.permissions?.nip04 || 'ASK_EVERYTIME',
+        nip44: d.permissions?.nip44 || 'ASK_EVERYTIME',
+        signData: d.permissions?.signData || 'ASK_EVERYTIME'
+      };
+
       await permissionService.saveAppPermissions(
         currentUser.profile.username,
         appKey,
-        {
-          getPublicKey: 'ALLOW',
-          getRelays: 'ALLOW',
-          signEvent: 'ASK_EVERYTIME',
-          nip04: 'ASK_EVERYTIME'
-        },
+        permissionsToGrant,
         d.appName,
         d.identityIndex
       );
@@ -179,6 +187,7 @@ export const SimpleAuthPromptController: Component = () => {
         appName={detail()!.appName}
         identity={identity()!}
         identityIndex={detail()!.identityIndex}
+        permissions={detail()!.permissions}
         onAuthorize={handleAuthorize}
         onDeny={handleDeny}
         onCustomize={handleCustomize}

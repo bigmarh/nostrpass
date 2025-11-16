@@ -879,7 +879,12 @@ export class NostrPassButton {
     const userBtn = this.container.querySelector('[data-action="toggle-menu"]') as HTMLButtonElement;
     userBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.toggleDropdown();
+      // If not authorized, open account picker/permission flow instead of dropdown
+      if (!hasAuthorizedIdentity) {
+        this.handleNotAuthorizedClick();
+      } else {
+        this.toggleDropdown();
+      }
     });
 
     // Switch identity buttons
@@ -1133,6 +1138,106 @@ export class NostrPassButton {
     if (this.outsideClickHandler) {
       document.removeEventListener('click', this.outsideClickHandler);
       this.outsideClickHandler = null;
+    }
+  }
+
+  private async handleNotAuthorizedClick() {
+    try {
+      const btn = this.container.querySelector('[data-action="toggle-menu"]') as HTMLButtonElement;
+
+      // Get app info for account picker
+      const appOrigin = window.location.origin;
+      const appName = document.title;
+      const requestId = `account-picker-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      // Set up listeners for account picker response
+      const handleSelected = async (e: Event) => {
+        const ce = e as CustomEvent;
+        if (ce.detail.requestId === requestId) {
+          cleanup();
+          this.embassy.hide();
+
+          // Refresh button state after selection
+          try {
+            const response = await this.embassy.getAllIdentities();
+            const allIdentities = response?.identities || [];
+            const selectedIdentity = allIdentities.find((id: any) => id.index === ce.detail.identityIndex);
+
+            if (selectedIdentity) {
+              this.currentUser = {
+                identityIndex: selectedIdentity.index,
+                publicKey: selectedIdentity.publicKey,
+                npub: selectedIdentity.npub,
+                nickname: selectedIdentity.nickname,
+                authorized: selectedIdentity.isAuthorized || false
+              };
+              this.saveSession(this.currentUser);
+              await this.render();
+            }
+          } catch (error) {
+            console.error('Failed to update button after account selection:', error);
+          }
+        }
+      };
+
+      const handleRejected = (e: Event) => {
+        const ce = e as CustomEvent;
+        if (ce.detail.requestId === requestId) {
+          cleanup();
+          this.embassy.hide();
+        }
+      };
+
+      const cleanup = () => {
+        window.removeEventListener('account-picker-selected', handleSelected as EventListener);
+        window.removeEventListener('account-picker-rejected', handleRejected as EventListener);
+      };
+
+      window.addEventListener('account-picker-selected', handleSelected as EventListener);
+      window.addEventListener('account-picker-rejected', handleRejected as EventListener);
+
+      // Check if vault is locked
+      const authStatus = await this.embassy.getAuthStatus();
+
+      // Prepare permissions to pass to vault
+      const permissions = this.embassy.config.permissions ? JSON.stringify(this.embassy.config.permissions) : undefined;
+
+      if (authStatus?.isLocked) {
+        console.log('[NostrPassButton] Vault locked, using smart unlock with account-picker continuation...');
+
+        // Use smart QuickUnlock with continuation to account picker
+        const queryParams: Record<string, string> = {
+          next: 'account-picker',
+          appOrigin,
+          appName,
+          requestId
+        };
+        if (permissions) queryParams.permissions = permissions;
+
+        this.embassy.openPage('unlock', {
+          size: 'compact',
+          buttonElement: btn,
+          queryParams
+        });
+      } else {
+        // Vault is unlocked, show account picker directly
+        console.log('[NostrPassButton] Vault unlocked, showing account picker...');
+        const queryParams: Record<string, string> = {
+          appOrigin,
+          appName,
+          requestId
+        };
+        if (permissions) queryParams.permissions = permissions;
+
+        this.embassy.openPage('account', {
+          // Use default 'tall' size from VAULT_PAGES config
+          buttonElement: btn,
+          queryParams
+        });
+      }
+    } catch (error) {
+      console.error('Failed to authorize identity:', error);
+      this.config.onError?.(error);
     }
   }
 

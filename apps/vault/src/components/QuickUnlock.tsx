@@ -1,16 +1,21 @@
 import { Component, createSignal, onMount, onCleanup, createEffect } from 'solid-js';
+import { useSearchParams } from '@solidjs/router';
 import PinVerification from './PinVerification';
 import { useAuth, useMessenger } from '../providers';
 
 /**
- * QuickUnlock - Just unlocks the vault and closes, no navigation
- * Used for embedded unlock flows like account switcher
+ * QuickUnlock - Smart unlock component with continuation support
+ * After unlocking, can:
+ * - Trigger account picker (?next=account-picker)
+ * - Trigger permission prompt (?next=permission-prompt)
+ * - Just notify parent (default)
  */
 export const QuickUnlock: Component = () => {
     console.log('[QuickUnlock] Component mounted');
 
     const { user, unlockVault, isVaultLocked, logout } = useAuth();
     const { send } = useMessenger();
+    const [searchParams] = useSearchParams();
     const [error, setError] = createSignal('');
     const [isUnlocking, setIsUnlocking] = createSignal(false);
 
@@ -21,7 +26,7 @@ export const QuickUnlock: Component = () => {
 
         if (!locked) {
             // Vault was unlocked!
-            console.log('[QuickUnlock] Vault unlocked detected, sending messages...');
+            console.log('[QuickUnlock] Vault unlocked detected, executing next action...');
             handleUnlockSuccess();
         }
     });
@@ -33,20 +38,53 @@ export const QuickUnlock: Component = () => {
         // Wait a moment to ensure session is fully saved
         await new Promise(resolve => setTimeout(resolve, 150));
 
+        // Execute next action based on query params
+        const nextAction = searchParams.next;
+        console.log('[QuickUnlock] Next action:', nextAction);
+
         // Send unlock message to parent window via messenger
         try {
-            send('nostrpass:unlocked', {
+            const unlockData: any = {
                 unlocked: true,
                 timestamp: Date.now(),
-                forOperation: true
-            });
-            console.log('[QuickUnlock] Unlock event sent to parent');
+                forOperation: true,
+                nextAction: nextAction || 'close' // Tell parent what happens next
+            };
+
+            // Pass along query params for continuation flows
+            if (nextAction === 'account-picker') {
+                unlockData.appOrigin = searchParams.appOrigin;
+                unlockData.appName = searchParams.appName;
+                unlockData.requestId = searchParams.requestId;
+                unlockData.permissions = searchParams.permissions; // Pass permissions through
+            } else if (nextAction === 'permission-prompt') {
+                unlockData.requestId = searchParams.requestId;
+            }
+
+            send('nostrpass:unlocked', unlockData);
+            console.log('[QuickUnlock] Unlock event sent to parent with nextAction:', nextAction);
         } catch (e) {
             console.error('[QuickUnlock] Failed to send unlock event:', e);
         }
 
-        // Don't send HIDE_VAULT - let the parent handle closing after operation completes
-        console.log('[QuickUnlock] Unlock complete, waiting for parent to close modal');
+        // Embassy will handle navigation to account-picker page
+        // No need to dispatch events here anymore
+
+        if (nextAction === 'permission-prompt') {
+            // Trigger permission prompt
+            const requestId = searchParams.requestId;
+            console.log('[QuickUnlock] Triggering permission prompt for request:', requestId);
+
+            if (requestId) {
+                // Dispatch permission ready event
+                window.dispatchEvent(new CustomEvent('vault-unlocked-for-permission', {
+                    detail: { requestId }
+                }));
+            }
+        }
+
+        // Default: Just notify parent, let them handle next steps
+        console.log('[QuickUnlock] Unlock complete, waiting for parent to handle next action');
 
         setIsUnlocking(false);
     };
