@@ -51,7 +51,7 @@ export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
   };
 
   return (
-    <div class="fixed inset-0 flex items-center justify-center z-50 p-4">
+    <div class="flex items-center justify-center w-full h-full p-4">
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
         <div class="p-6">
           {/* Header */}

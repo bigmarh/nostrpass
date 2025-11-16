@@ -79,7 +79,8 @@ type VaultPage =
   | 'login'        // Login/signup flow - full size modal
   | 'unlock'       // Quick unlock (PIN only) - compact dropdown
   | 'dashboard'    // Full vault dashboard - full size modal
-  | 'account'      // Account switcher/manager - compact dropdown
+  | 'account'      // Account switcher/manager - tall popup
+  | 'permission'   // Permission authorization prompt - tall popup
   ;
 
 interface VaultPageConfig {
@@ -105,6 +106,11 @@ const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
   account: {
     route: '/account-picker',  // Dedicated account/identity picker page
     defaultSize: 'tall',  // Taller popup for account selection with permissions
+    autoCloseOnSuccess: true,
+  },
+  permission: {
+    route: '/permission-prompt',  // Permission authorization prompt
+    defaultSize: 'tall',  // Taller popup for permission display
     autoCloseOnSuccess: true,
   },
 };
