@@ -562,9 +562,9 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         index: nextIndex,
         createdAt: Date.now()
       } as any;
-      // Save locally first (fast)
-      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: false });
-      console.log('✅ [Add Identity] Saved locally');
+      // Save and sync to Nostr
+      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: true });
+      console.log('✅ [Add Identity] Saved locally and synced to Nostr');
 
       // Publish identity meta as PRE (non-blocking)
       try {
@@ -575,17 +575,6 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
       setShowAddIdentityModal(false);
       setNewIdentityNickname('');
-
-      // Sync to Nostr in background (non-blocking)
-      (async () => {
-        try {
-          console.log('📡 [Add Identity] Starting background Nostr sync...');
-          await props.onSyncToNostr();
-          console.log('✅ [Add Identity] Synced to Nostr successfully');
-        } catch (error) {
-          console.error('❌ [Add Identity] Nostr sync failed:', error);
-        }
-      })();
     } catch (e) {
       console.error('Failed to add identity:', e);
     }
