@@ -9,6 +9,7 @@ import { ToastProvider } from './components/Toast';
 import { I18nProvider } from './i18n';
 import { VaultCoreDemo } from './components/VaultCoreDemo';
 import { VaultCoreProvider } from './providers/VaultCoreProvider';
+import { NostrSyncIndicator } from './components/NostrSyncIndicator';
 
 const AppContent: Component = () => {
   return (
@@ -40,6 +41,7 @@ const App: Component = () => {
           <AppContent />
           <AccountPickerController />
           <SimpleAuthPromptController />
+          <NostrSyncIndicator />
         </AppProviders>
       </ToastProvider>
     </I18nProvider>

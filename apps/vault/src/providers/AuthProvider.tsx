@@ -571,9 +571,9 @@ export const AuthProvider: ParentComponent = (props) => {
         isUnlocked: (sessionVerify as any)?.isUnlocked
       });
       
-      // Step 11: Save to Nostr
-      console.log('🌐 [CREATE ACCOUNT] Step 11: Saving LoginObj and VaultObj to Nostr...');
-      
+      // Step 11: Queue Nostr sync (non-blocking)
+      console.log('🌐 [CREATE ACCOUNT] Step 11: Queueing Nostr sync...');
+
       try {
         const randomKey = await cryptoWorker.generateKeypair();
         let randomPrivateKey: string;
@@ -588,25 +588,26 @@ export const AuthProvider: ParentComponent = (props) => {
         if (!randomPrivateKey || !randomPublicKey) {
           throw new Error('Failed to generate random keypair for LoginObj');
         }
-        
-        const { saveLoginObj } = await import('@nostrpass/nostrHelpers');
+
         const relays = getRelays();
         const env = environmentName ? environmentName() : 'development';
 
-        await saveLoginObj(username, loginObj, randomPublicKey, randomPrivateKey, relays, env, passwordKey);
-        console.log(`✅ [CREATE ACCOUNT] LoginObj saved to Nostr (password-encrypted) with environment: ${env}`);
-        
-        // Create initial vault event using password encryption
-        const vaultEvent = await cryptoWorker.createInitialVaultForNostr({ username, passwordKey });
-        console.log('✅ [CREATE ACCOUNT] Initial vault event created');
-        
-        // Publish the vault event to relays
-        const { publishEvent } = await import('@nostrpass/nostrHelpers');
-        const publishedRelays = await publishEvent(vaultEvent.event, relays);
-        console.log('✅ [CREATE ACCOUNT] VaultObj saved to Nostr (password-encrypted):', publishedRelays);
-        
+        // Queue for background sync (non-blocking)
+        const NostrSyncService = (await import('../services/nostrSyncService')).default;
+        const syncService = NostrSyncService.getInstance();
+        await syncService.queueSync({
+          username,
+          loginObj,
+          randomPublicKey,
+          randomPrivateKey,
+          passwordKey,
+          environment: env,
+          relays
+        });
+        console.log('✅ [CREATE ACCOUNT] Nostr sync queued (will complete in background)');
+
       } catch (error) {
-        console.error('❌ [CREATE ACCOUNT] Failed to save to Nostr:', error);
+        console.error('❌ [CREATE ACCOUNT] Failed to queue Nostr sync:', error);
       }
 
       // Step 12: Realtime will start after unlock via worker
@@ -718,7 +719,16 @@ export const AuthProvider: ParentComponent = (props) => {
       
       setUser(partialUser);
       setIsLoading(false);
-      
+
+      // Check if vault needs Nostr sync and retry if necessary
+      try {
+        const NostrSyncService = (await import('../services/nostrSyncService')).default;
+        const syncService = NostrSyncService.getInstance();
+        await syncService.retrySync(username, relays, env);
+      } catch (syncError) {
+        console.warn('⚠️ [AuthProvider] Failed to check Nostr sync status:', syncError);
+      }
+
       return;
 
     } catch (error) {
