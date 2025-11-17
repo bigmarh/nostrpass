@@ -64,9 +64,14 @@ export function setLogSessionState(logger: (action: string, username: string) =>
  * @param params - Object containing username
  * @returns The vault data or null if not found
  */
-async function getVaultData(params: { username: string }): Promise<VaultData | null> {
+async function getVaultData(params: { username: string; includeEncryptedVault?: boolean }): Promise<VaultData | null> {
   try {
-    console.log('📥 [getVaultData] Request received for username:', params.username);
+    console.log('📥 [getVaultData] ===== REQUEST START =====');
+    console.log('📥 [getVaultData] Full params object:', JSON.stringify(params));
+    console.log('📥 [getVaultData] username:', params.username);
+    console.log('📥 [getVaultData] includeEncryptedVault value:', params.includeEncryptedVault);
+    console.log('📥 [getVaultData] includeEncryptedVault type:', typeof params.includeEncryptedVault);
+    console.log('📥 [getVaultData] Has property "includeEncryptedVault":', 'includeEncryptedVault' in params);
 
     console.log('🔄 [getVaultData] Ensuring crypto ready...');
     await ensureCryptoReady();
@@ -86,29 +91,53 @@ async function getVaultData(params: { username: string }): Promise<VaultData | n
       username: vaultData.username,
       hasPasswordVerifier: !!(vaultData as any).passwordVerifier,
       hasPasswordSalt: !!(vaultData as any).passwordSalt,
-      hasXprivEncrypted: !!vaultData.encryptedVault,
+      hasXprivEncrypted: !!vaultData.xprivEncrypted,
       hasRecovery: !!(vaultData as any).recovery,
       identitiesCount: vaultData.identities?.length || 0,
       identities: vaultData.identities
     });
 
-    // Return the vault data in the expected format (including password verification fields!)
-    return {
+    // Security: Only include sensitive fields when explicitly requested
+    const result: any = {
       username: vaultData.username,
       publicKey: vaultData.publicKey,
-      xprivEncrypted: vaultData.encryptedVault,
       salt: vaultData.salt,
-      passwordSalt: (vaultData as any).passwordSalt, // CRITICAL: Include for password verification
-      passwordVerifier: (vaultData as any).passwordVerifier, // CRITICAL: Include for password verification
+      passwordSalt: (vaultData as any).passwordSalt,
+      passwordVerifier: (vaultData as any).passwordVerifier,
       identities: vaultData.identities || [],
       storagePublicKey: vaultData.publicKey,
       activeIdentityByApp: vaultData.activeIdentityByApp || {},
-      recovery: (vaultData as any).recovery, // Include recovery data
+      recovery: (vaultData as any).recovery,
       lastSyncedAt: vaultData.lastSyncedAt,
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
       createdAt: vaultData.createdAt,
       version: (vaultData as any).version || 1
-    } as any;
+    };
+
+    // Only include xprivEncrypted when explicitly requested (for unlock operations)
+    if (params.includeEncryptedVault) {
+      if (vaultData.xprivEncrypted) {
+        result.xprivEncrypted = vaultData.xprivEncrypted;
+      } else {
+        // Fallback to xprivs store
+        console.warn('⚠️ [getVaultData] No xprivEncrypted in main vault, checking xprivs store...');
+        try {
+          const xprivData = await vaultDB.getXpriv(params.username);
+          if (xprivData?.xprivEncrypted) {
+            result.xprivEncrypted = xprivData.xprivEncrypted;
+            result.salt = xprivData.salt;
+            console.log('✅ [getVaultData] Recovered xprivEncrypted from xprivs store');
+          } else {
+            console.error('❌ [getVaultData] No xprivEncrypted found in either store!');
+          }
+        } catch (err) {
+          console.error('❌ [getVaultData] Error checking xprivs store:', err);
+        }
+      }
+    }
+
+    console.log('📤 [getVaultData] Returning result with xprivEncrypted:', !!result.xprivEncrypted);
+    return result;
   } catch (error) {
     console.error('❌ [getVaultData] Error:', error);
     throw error;
@@ -182,15 +211,38 @@ async function updateVaultData(params: {
   await ensureCryptoReady();
   const toSave = { ...params.vaultData };
 
+  // CRITICAL: Preserve xprivEncrypted if missing in incoming data
+  // This prevents data loss when worker operations update vault without including xprivEncrypted
+  if (!toSave.xprivEncrypted) {
+    console.warn('⚠️ [updateVaultData] xprivEncrypted missing in incoming data, attempting to preserve from database...');
+    const existing = await vaultDB.getVault(params.username);
+    if (existing?.xprivEncrypted) {
+      toSave.xprivEncrypted = existing.xprivEncrypted;
+      toSave.salt = existing.salt; // Preserve salt too
+      console.log('✅ [updateVaultData] Preserved xprivEncrypted and salt from database');
+    } else {
+      // Try xprivs store as fallback
+      console.warn('⚠️ [updateVaultData] No xprivEncrypted in main vault, checking xprivs store...');
+      const xprivData = await vaultDB.getXpriv(params.username);
+      if (xprivData?.xprivEncrypted) {
+        toSave.xprivEncrypted = xprivData.xprivEncrypted;
+        toSave.salt = xprivData.salt;
+        console.log('✅ [updateVaultData] Recovered xprivEncrypted and salt from xprivs store');
+      } else {
+        console.error('❌ [updateVaultData] CRITICAL: Cannot preserve xprivEncrypted - not found in either store!');
+      }
+    }
+  }
+
   // Increment version for sync conflict resolution (unless explicitly skipped for Nostr downloads)
   if (!params.skipVersionIncrement) {
     toSave.version = (toSave.version || 0) + 1;
     toSave.updatedAt = Date.now();
   }
 
-  // Ensure redundant fields are in sync (write primary -> encryptedVault for storage only)
-  if (toSave.xprivEncrypted) {
-    toSave.encryptedVault = toSave.xprivEncrypted;
+  // MIGRATION: Handle legacy encryptedVault field (will be cleaned up by db.saveVault)
+  if (!toSave.xprivEncrypted && toSave.encryptedVault) {
+    toSave.xprivEncrypted = toSave.encryptedVault;
   }
 
   console.log('💾 [updateVaultData] Saving vault with:', {
@@ -198,7 +250,7 @@ async function updateVaultData(params: {
     version: toSave.version,
     identitiesCount: toSave.identities?.length || 0,
     hasXprivEncrypted: !!toSave.xprivEncrypted,
-    hasEncryptedVault: !!toSave.encryptedVault,
+    xprivEncryptedLength: toSave.xprivEncrypted?.length,
     updatedAt: toSave.updatedAt ? new Date(toSave.updatedAt).toISOString() : 'N/A'
   });
 

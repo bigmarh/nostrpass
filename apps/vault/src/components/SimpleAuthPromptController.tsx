@@ -1,6 +1,7 @@
 import { Component, createSignal, onMount, onCleanup, Show } from 'solid-js';
 import { SimpleAuthPrompt } from './SimpleAuthPrompt';
 import { useAuth } from '../providers/AuthProvider';
+import { useMessenger } from '../providers/MessengerProvider';
 import { vaultDataService } from '../services/vaultDataService';
 import { permissionService } from '../services/permissionService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
@@ -10,10 +11,19 @@ interface SimpleAuthPromptEventDetail {
   appName?: string;
   identityIndex: number;
   requestId?: string;
+  permissions?: {
+    getPublicKey?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    getRelays?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signEvent?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip04?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip44?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signData?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+  };
 }
 
 export const SimpleAuthPromptController: Component = () => {
   const auth = useAuth();
+  const { send } = useMessenger();
   const [visible, setVisible] = createSignal(false);
   const [detail, setDetail] = createSignal<SimpleAuthPromptEventDetail | null>(null);
   const [identity, setIdentity] = createSignal<any>(null);
@@ -89,23 +99,43 @@ export const SimpleAuthPromptController: Component = () => {
     }
 
     try {
-      // Grant default permissions:
-      // - getPublicKey: ALLOW (always allowed to read public key)
-      // - signEvent: ASK_EVERYTIME (ask before signing)
-      // - nip04: ASK_EVERYTIME (ask before encrypt/decrypt)
-      // - getRelays: ALLOW (allowed to read relay list)
+      // Use app-requested permissions or fall back to safe defaults
+      const permissionsToGrant = {
+        getPublicKey: d.permissions?.getPublicKey || 'ALLOW',
+        getRelays: d.permissions?.getRelays || 'ALLOW',
+        signEvent: d.permissions?.signEvent || 'ASK_EVERYTIME',
+        nip04: d.permissions?.nip04 || 'ASK_EVERYTIME',
+        nip44: d.permissions?.nip44 || 'ASK_EVERYTIME',
+        signData: d.permissions?.signData || 'ASK_EVERYTIME'
+      };
+
       await permissionService.saveAppPermissions(
         currentUser.profile.username,
         appKey,
-        {
-          getPublicKey: 'ALLOW',
-          getRelays: 'ALLOW',
-          signEvent: 'ASK_EVERYTIME',
-          nip04: 'ASK_EVERYTIME'
-        },
+        permissionsToGrant,
         d.appName,
         d.identityIndex
       );
+
+      // Set this identity as the active identity for this app
+      await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
+        activeIdentityByApp: {
+          ...(current.activeIdentityByApp || {}),
+          [appKey]: d.identityIndex
+        }
+      }), { syncToNostr: true });
+
+      // Trigger vault data refresh event to notify embassy
+      console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');
+      send('VAULT_DATA_UPDATED', {
+        username: currentUser.profile.username,
+        timestamp: Date.now()
+      });
+
+      // Also dispatch window event for components within the vault iframe
+      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+        detail: { username: currentUser.profile.username }
+      }));
 
       // Dispatch success event
       if (d.requestId) {
@@ -113,6 +143,9 @@ export const SimpleAuthPromptController: Component = () => {
           detail: { requestId: d.requestId, identityIndex: d.identityIndex }
         }));
       }
+
+      // Close the vault modal and return to the app
+      send('HIDE_VAULT');
     } catch (error) {
       console.error('Failed to authorize app:', error);
       if (d.requestId) {
@@ -161,6 +194,7 @@ export const SimpleAuthPromptController: Component = () => {
         appName={detail()!.appName}
         identity={identity()!}
         identityIndex={detail()!.identityIndex}
+        permissions={detail()!.permissions}
         onAuthorize={handleAuthorize}
         onDeny={handleDeny}
         onCustomize={handleCustomize}

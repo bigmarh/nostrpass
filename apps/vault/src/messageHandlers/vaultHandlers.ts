@@ -23,6 +23,25 @@ export const vaultHandlers: MessageHandler[] = [
   },
 
   {
+    route: Msg.NAVIGATE,
+    handler: async (data: any, _context: any, _deps: MessageHandlerDependencies) => {
+      console.log('[NAVIGATE] Received navigation request:', data);
+      const { path } = data;
+
+      if (!path || typeof path !== 'string') {
+        throw new Error('Invalid navigation path');
+      }
+
+      // Use window.history to navigate without reload
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+
+      console.log('[NAVIGATE] Navigated to:', path);
+      return { acknowledged: true, path };
+    }
+  },
+
+  {
     route: Msg.GET_RELAYS,
     handler: async (_data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
@@ -40,11 +59,12 @@ export const vaultHandlers: MessageHandler[] = [
         }
       }
 
-      // TODO: Return user's configured relays
+      // Return user's configured relays from vault data
+      // For now, return default relays - customRelays can be added to vault settings
       return {
-        'ws://localhost:8080': { read: true, write: true },
         'wss://relay.damus.io': { read: true, write: true },
-        'wss://nos.lol': { read: true, write: true }
+        'wss://nos.lol': { read: true, write: true },
+        'wss://relay.nostr.band': { read: true, write: true }
       };
     }
   },

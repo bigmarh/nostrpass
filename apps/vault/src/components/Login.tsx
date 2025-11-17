@@ -141,15 +141,12 @@ export const Login: Component = () => {
         // Login with password (new flow uses LoginObj lookup)
         setLoadingStatus('Verifying credentials...');
         await login(password(), username().trim().toLowerCase());
-        
+
         setLoadingStatus('Loading your vault...');
-        
-        // Check if PIN unlock is needed
-        if (hasPinVault()) {
-            navigate(`/${params.app}/unlock`);
-        } else {
-            navigate(`/${params.app}/dashboard`);
-        }
+
+        // Login successful - close vault and return to app
+        // Note: AuthProvider will automatically notify embassy via centralized auth listener
+        send('HIDE_VAULT');
     };
 
     const toggleMode = () => {
@@ -172,46 +169,44 @@ export const Login: Component = () => {
             
             // Create account with PIN encryption
             const { publicKey } = await createAccount(accountData.username, accountData.password, pin, undefined);
-            
-            // Automatically connect the current app with default permissions
-            try {
-                const appId = params.app;
-                if (appId) {
-                    setLoadingStatus('Connecting app with default permissions...');
-                    await permissionService.saveAppPermissions(
-                        accountData.username,
-                        appId,
-                        {
-                            permissions: { ...DEFAULT_PERMISSIONS },
-                            getPublicKey: DEFAULT_GET_PUBLIC_KEY
-                        },
-                        desanitizeDomain(appId)
-                    );
-                }
-            } catch (e) {
-                console.warn('Failed to auto-connect app permissions (non-fatal):', e);
-            }
-            
+
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
-        
-            
+
+
             // Get the user's relays from environment config
             const userRelays = getRelays();
-            
+
             await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
-            
+
             setLoadingStatus('Saving vault to Nostr...');
-            
+
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
-            
-            // Navigate to dashboard after successful signup
-            navigate(`/${params.app}/dashboard`);
+
+            // After signup, trigger simple-auth prompt overlay
+            const appId = params.app;
+            const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
+
+            console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
+
+            // Dispatch event to trigger simple-auth prompt overlay
+            // The prompt will show on top of current page and handle vault closing after user action
+            window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
+                detail: {
+                    appOrigin: appOrigin,
+                    appName: appOrigin,
+                    identityIndex: 0,
+                    afterSignup: true
+                }
+            }));
+
+            // Clear loading state to show the prompt
+            setIsLoading(false);
+            setLoadingStatus('');
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
-        } finally {
             setIsLoading(false);
             setLoadingStatus('');
         }
@@ -227,60 +222,57 @@ export const Login: Component = () => {
             setLoadingStatus('Securing your vault with PIN and recovery questions...');
             
             const { publicKey } = await createAccount(
-                accountData.username, 
-                accountData.password, 
+                accountData.username,
+                accountData.password,
                 pin,
                 { questions, answers }
             );
-            
-            // Automatically connect the current app with default permissions
-            try {
-                const appId = params.app;
-                if (appId) {
-                    setLoadingStatus('Connecting app with default permissions...');
-                    await permissionService.saveAppPermissions(
-                        accountData.username,
-                        appId,
-                        {
-                            permissions: { ...DEFAULT_PERMISSIONS },
-                            getPublicKey: DEFAULT_GET_PUBLIC_KEY
-                        },
-                        desanitizeDomain(appId)
-                    );
-                }
-            } catch (e) {
-                console.warn('Failed to auto-connect app permissions (non-fatal):', e);
-            }
-            
+
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
-         
+
             // Get the user's relays from environment config
             const userRelays = getRelays();
-            
+
             await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
-            
+
             setLoadingStatus('Saving vault to Nostr...');
-            
+
             // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
             setLoadingStatus('Finalizing registration...');
-            
-            
-            // Navigate to dashboard after successful signup
-            navigate(`/${params.app}/dashboard`);
+
+            // After signup, trigger simple-auth prompt overlay
+            const appId = params.app;
+            const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
+
+            console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
+
+            // Dispatch event to trigger simple-auth prompt overlay
+            // The prompt will show on top of current page and handle vault closing after user action
+            window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
+                detail: {
+                    appOrigin: appOrigin,
+                    appName: appOrigin,
+                    identityIndex: 0,
+                    afterSignup: true
+                }
+            }));
+
+            // Clear loading state to show the prompt
+            setIsLoading(false);
+            setLoadingStatus('');
         } catch (error) {
             setError(error instanceof Error ? error.message : 'An error occurred');
             setShowPinSetup(false);
-        } finally {
             setIsLoading(false);
             setLoadingStatus('');
         }
     };
 
     return (
-        <div class="w-full h-full bg-white dark:bg-gray-900">
+        <div class="w-full h-full bg-white dark:bg-gray-900 rounded-lg overflow-hidden">
             <div class="flex w-full h-full bg-white dark:bg-gray-800 flex-col md:flex-row">
-                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center  md:rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center pt-8 pb-2 px-4 md:p-4 md:w-48 md:min-w-[12rem]`}>
+                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center md:rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center pt-8 pb-2 px-4 md:p-4 md:w-48 md:min-w-[12rem]`}>
                     <div class="w-32 h-32 ">
                         <img class="w-full h-full " src="/logo.svg" alt="NostrPass Logo" />
                     </div>

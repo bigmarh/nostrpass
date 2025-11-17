@@ -21,7 +21,7 @@ import { NostrCrypto } from './crypto.noble';
 import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tools/nip04';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
-import { PERMISSION_KINDS, type PermissionLevel } from '@nostrpass/types';
+import { PERMISSION_KINDS, type PermissionLevel, type VaultObj } from '@nostrpass/types';
 import { cryptoPrimitives } from './crypto-primitives';
 import { nostrSync } from './nostr-sync';
 
@@ -79,23 +79,67 @@ export const activeSessions = new Map<string, ExtendedSession>();
  */
 const pinAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
+/**
+ * Session permission grants (temporary, in-memory)
+ * Maps: username -> origin -> action -> eventKind (optional) -> expiry timestamp
+ * Used for "ASK_PER_SESSION" permissions that expire after a certain time
+ */
+interface SessionPermissionKey {
+  username: string;
+  origin: string;
+  action: 'signEvent' | 'signData';
+  eventKind?: number;
+}
+
+interface SessionPermission {
+  expiresAt: number; // Unix timestamp in milliseconds
+}
+
+const sessionPermissions = new Map<string, SessionPermission>();
+
+/**
+ * Generate a unique key for session permission lookup
+ */
+function getSessionPermissionKey(key: SessionPermissionKey): string {
+  const { username, origin, action, eventKind } = key;
+  if (action === 'signEvent' && eventKind !== undefined) {
+    return `${username}:${origin}:${action}:${eventKind}`;
+  }
+  return `${username}:${origin}:${action}`;
+}
+
+/**
+ * Check if a session permission is valid (not expired)
+ */
+function isSessionPermissionValid(key: SessionPermissionKey): boolean {
+  const permKey = getSessionPermissionKey(key);
+  const perm = sessionPermissions.get(permKey);
+  if (!perm) return false;
+
+  const now = Date.now();
+  if (now >= perm.expiresAt) {
+    // Expired, remove it
+    sessionPermissions.delete(permKey);
+    return false;
+  }
+
+  return true;
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
 /**
  * Log session state changes for debugging
- * Stores session state in global object for inspection
  */
 export function logSessionState(action: string, username: string) {
-  // Also log to a global for debugging
-  (globalThis as any).__DEBUG_SESSIONS = {
-    count: activeSessions.size,
-    usernames: Array.from(activeSessions.keys()),
-    lastAction: action,
-    lastUsername: username,
+  console.log('[Session State]', {
+    action,
+    username,
+    activeSessionCount: activeSessions.size,
     timestamp: new Date().toISOString()
-  };
+  });
 }
 
 /**
@@ -239,19 +283,18 @@ export const sessionManager = {
       allKeys: Object.keys(params.vaultData)
     });
 
-    // Normalize vault data - map xprivEncrypted to encryptedVault for database storage
+    // Normalize vault data
     const vaultToSave = {
       ...params.vaultData,
-      encryptedVault: params.vaultData.xprivEncrypted,  // Map to DB field name
       publicKey: params.publicKey,
       lastUnlocked: Date.now(),
       createdAt: params.vaultData.createdAt || Date.now()
     };
 
-    console.log('💾 [initSession] Saving vault with mapped fields:', {
+    console.log('💾 [initSession] Saving vault:', {
       username: vaultToSave.username,
-      hasEncryptedVault: !!vaultToSave.encryptedVault,
-      encryptedVaultLength: vaultToSave.encryptedVault?.length,
+      hasXprivEncrypted: !!vaultToSave.xprivEncrypted,
+      xprivEncryptedLength: vaultToSave.xprivEncrypted?.length,
       hasIdentities: !!vaultToSave.identities,
       allKeys: Object.keys(vaultToSave)
     });
@@ -320,59 +363,64 @@ export const sessionManager = {
       let vaultData = await vaultDB.getVault(params.username);
       console.log('📦 [WORKER login] IndexedDB result:', vaultData ? 'found' : 'not found');
 
-      // 2. If not found locally, fetch from Nostr
+      // 2. If not found locally, fetch LoginObj from Nostr (password-decrypted)
       if (!vaultData) {
         console.log('📡 [WORKER login] Fetching from Nostr relays...');
 
         // Dynamic import to avoid circular dependencies
-        const { getLoginObj, getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+        const { getLoginObj } = await import('@nostrpass/nostrHelpers');
         const relays = params.relays || [];
         const env = params.environment || 'production';
 
-        const loginObj = await getLoginObj(params.username, env, relays);
-        if (!loginObj) {
-          return { success: false, error: 'No vault found for this username' };
+        // Get LoginObj - it will be password-decrypted using salt from event tags
+        const loginResult = await getLoginObj(params.username, env, relays, params.password);
+        if (!loginResult) {
+          return { success: false, error: 'No account found for this username or wrong password' };
         }
 
-        console.log('✅ [WORKER login] Found LoginObj on Nostr');
-
-        // Derive password key using salt from LoginObj
-        console.log('🔑 [WORKER login] Deriving password key...');
-        const passwordDeriveResult = await cryptoPrimitives.deriveKey({
-          password: params.password,
-          salt: loginObj.passwordSalt
+        const { loginObj, passwordSalt } = loginResult;
+        console.log('✅ [WORKER login] Found and decrypted LoginObj from Nostr');
+        console.log('📋 [WORKER login] LoginObj contains:', {
+          storagePublicKey: loginObj.storagePublicKey.substring(0, 16) + '...',
+          hasStorageKeypairEncrypted: !!loginObj.storageKeypairEncrypted,
+          pinSalt: loginObj.pinSalt.substring(0, 16) + '...'
         });
-        const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
 
-        // Decrypt VaultObj with password key
-        const nostrVault = await getVaultFromNostr(loginObj.storagePublicKey, relays, passwordKey);
+        // Cache the decrypted LoginObj in IndexedDB for future PIN unlocks
+        // This allows PIN-only unlock without password
+        console.log('💾 [WORKER login] Caching LoginObj to IndexedDB...');
 
-        if (!nostrVault) {
-          return { success: false, error: 'Vault data not found on Nostr' };
-        }
-
-        console.log('✅ [WORKER login] Found VaultObj on Nostr');
-
-        // Save to local IndexedDB for future use
-        console.log('💾 [WORKER login] Saving vault to IndexedDB...');
+        // Store LoginObj data in a way that PIN unlock can access it
+        // We'll save the encrypted storage keypair along with basic vault metadata
         await vaultDB.saveVault({
           username: params.username,
           publicKey: loginObj.storagePublicKey,
-          xprivEncrypted: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
-          encryptedVault: (nostrVault as any).encryptedVault || (nostrVault as any).xprivEncrypted,
-          salt: (nostrVault as any).salt,
-          identities: (nostrVault as any).identities || [],
-          activeIdentityByApp: (nostrVault as any).activeIdentityByApp || {},
-          passwordVerifier: (nostrVault as any).passwordVerifier,
-          passwordSalt: (nostrVault as any).passwordSalt,
-          recovery: (nostrVault as any).recovery,
+          // Store the PIN-encrypted storage keypair for PIN unlock
+          storageKeypairEncrypted: loginObj.storageKeypairEncrypted,
+          // xprivEncrypted will be loaded from VaultObj during PIN unlock
+          xprivEncrypted: '', // Placeholder - will be populated during PIN unlock
+          salt: loginObj.pinSalt,
+          identities: [], // Will be loaded during PIN unlock
+          activeIdentityByApp: {},
+          passwordSalt: passwordSalt,
           lastSyncedAt: Date.now(),
-          updatedAt: (nostrVault as any).updatedAt || Date.now(),
-          createdAt: (nostrVault as any).createdAt || Date.now()
+          updatedAt: Date.now(),
+          createdAt: Date.now()
         } as VaultData);
 
-        vaultData = await vaultDB.getVault(params.username);
-        console.log('✅ [WORKER login] Vault saved to IndexedDB');
+        console.log('✅ [WORKER login] LoginObj cached - vault needs PIN unlock to access');
+
+        // Return success - user will be prompted for PIN to unlock vault
+        return {
+          success: true,
+          user: {
+            publicKey: loginObj.storagePublicKey,
+            profile: {
+              username: params.username,
+              storagePublicKey: loginObj.storagePublicKey
+            }
+          }
+        };
       }
 
       if (!vaultData) {
@@ -671,7 +719,7 @@ export const sessionManager = {
     recipientPubkey: string;
     identityIndex: number;
     origin?: string
-  }, handlers: any): Promise<string> => {
+  }): Promise<string> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.isUnlocked || isSessionExpired(session)) {
       throw new Error('Session expired or locked');
@@ -703,7 +751,7 @@ export const sessionManager = {
     if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
-      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
       privateKey = derived.privateKey;
     }
     if (!privateKey) throw new Error('No session key available for encryption');
@@ -722,7 +770,7 @@ export const sessionManager = {
     senderPubkey: string;
     identityIndex: number;
     origin?: string
-  }, handlers: any): Promise<string> => {
+  }): Promise<string> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.isUnlocked || isSessionExpired(session)) {
       throw new Error('Session expired or locked');
@@ -754,7 +802,7 @@ export const sessionManager = {
     if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
-      const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
       privateKey = derived.privateKey;
     }
     if (!privateKey) throw new Error('No session key available for decryption');
@@ -767,7 +815,7 @@ export const sessionManager = {
    * Derive identity keypair using xpriv from the current session
    * Requires unlocked session with xpriv
    */
-  deriveIdentityFromSession: async (params: { username: string; index: number }, handlers: any): Promise<{ publicKey: string; path: string }> => {
+  deriveIdentityFromSession: async (params: { username: string; index: number }): Promise<{ publicKey: string; path: string }> => {
     const session = activeSessions.get(params.username);
     if (!session || !session.xpriv) {
       throw new Error('No xpriv in session - please unlock with PIN first');
@@ -775,8 +823,8 @@ export const sessionManager = {
 
     const xpriv = session.xpriv;
 
-    // Use existing derive helper
-    const derived = await handlers.deriveKeypairFromXpriv({ xpriv, index: params.index });
+    // Use cryptoPrimitives directly (already imported)
+    const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv, index: params.index });
 
     let publicKey: string;
     let path: string;
@@ -807,11 +855,30 @@ export const sessionManager = {
    * Preflight check for crypto operations
    */
   hasKeysInSession: async (params: { username: string }): Promise<{ hasPrivateKey: boolean; hasXpriv: boolean; hasStorageKeypair: boolean }> => {
+    console.log('[hasKeysInSession] Checking for username:', params.username);
+    console.log('[hasKeysInSession] activeSessions size:', activeSessions.size);
+    console.log('[hasKeysInSession] activeSessions keys:', Array.from(activeSessions.keys()));
+
     const session = activeSessions.get(params.username);
+    console.log('[hasKeysInSession] Found session:', session ? 'yes' : 'no');
+
+    if (session) {
+      console.log('[hasKeysInSession] Session details:', {
+        hasPrivateKey: !!session.privateKey,
+        hasXpriv: !!session.xpriv,
+        hasStorageKeypair: !!(session.storagePrivateKey && session.storagePublicKey),
+        isUnlocked: session.isUnlocked,
+        unlockedAt: session.unlockedAt
+      });
+    }
+
     const hasPrivateKey = !!(session && session.privateKey);
     const hasXpriv = !!(session && session.xpriv);
     const hasStorageKeypair = !!(session && session.storagePrivateKey && session.storagePublicKey);
-    return { hasPrivateKey, hasXpriv, hasStorageKeypair };
+
+    const result = { hasPrivateKey, hasXpriv, hasStorageKeypair };
+    console.log('[hasKeysInSession] Returning:', result);
+    return result;
   },
 
   /**
@@ -879,7 +946,7 @@ export const sessionManager = {
     const vaultDataToSave = {
       username: vault.username,
       publicKey: vault.publicKey,
-      encryptedVault: vault.xprivEncrypted || vault.encryptedVault,
+      xprivEncrypted: vault.xprivEncrypted,
       salt: vault.salt,
       derivationPath: vault.derivationPath,
       identities: [defaultIdentity],
@@ -894,6 +961,10 @@ export const sessionManager = {
 
     console.log('💾 [createVault] Saving vault to IndexedDB:', {
       username: vaultDataToSave.username,
+      hasXprivEncrypted: !!vaultDataToSave.xprivEncrypted,
+      xprivEncryptedLength: vaultDataToSave.xprivEncrypted?.length,
+      hasSalt: !!vaultDataToSave.salt,
+      saltLength: vaultDataToSave.salt?.length,
       hasPasswordVerifier: !!vaultDataToSave.passwordVerifier,
       hasPasswordSalt: !!vaultDataToSave.passwordSalt,
       identitiesCount: vaultDataToSave.identities.length
@@ -902,11 +973,23 @@ export const sessionManager = {
     await vaultDB.saveVault(vaultDataToSave);
     console.log('✅ [createVault] Vault saved to IndexedDB successfully');
 
+    // Mirror to xprivs store for PIN unlock fallback
+    console.log('💾 [createVault] Mirroring to xprivs store...');
+    try {
+      await vaultDB.saveXpriv(vault.username, vaultDataToSave.xprivEncrypted, vault.salt, passwordSalt);
+      console.log('✅ [createVault] Mirrored to xprivs store');
+    } catch (err) {
+      console.error('❌ [createVault] Failed to mirror to xprivs store:', err);
+    }
+
     // Verify it was saved
     const savedVault = await vaultDB.getVault(vault.username);
     if (savedVault) {
       console.log('✅ [createVault] Vault verified in IndexedDB:', {
         username: savedVault.username,
+        hasXprivEncrypted: !!savedVault.xprivEncrypted,
+        xprivEncryptedLength: savedVault.xprivEncrypted?.length,
+        hasSalt: !!savedVault.salt,
         hasPasswordVerifier: !!savedVault.passwordVerifier,
         hasPasswordSalt: !!savedVault.passwordSalt
       });
@@ -945,118 +1028,111 @@ export const sessionManager = {
   },
 
   /**
-   * Unlock vault with PIN
-   * Decrypts xpriv, validates it, derives storage keypair, and creates active session
+   * Unlock vault with PIN (NEW ARCHITECTURE)
+   * 1. Decrypt storage keypair from cached LoginObj with PIN
+   * 2. Fetch VaultObj from Nostr using storage private key
+   * 3. Decrypt xpriv from VaultObj with PIN
+   * 4. Create session with all keys
    */
   unlockVault: async (params: UnlockVaultParams, crypto: NostrCrypto, handlers: any): Promise<UnlockVaultResult> => {
-    // Get vault data from IndexedDB
-    const vaultData = await vaultDB.getVault(params.username);
-    if (!vaultData) {
-      throw new Error('Vault not found');
+    // Get cached vault data from IndexedDB (contains storageKeypairEncrypted from login)
+    const cachedData = await vaultDB.getVault(params.username);
+    if (!cachedData) {
+      throw new Error('Vault not found - please login first');
     }
 
-    console.log('[Unlock] Starting unlock', { username: params.username });
-    console.log('[Unlock] Vault fields presence:', {
-      hasXprivEncrypted: !!(vaultData as any).encryptedVault,
-      hasSalt: !!(vaultData as any).salt
+    console.log('[Unlock] Starting unlock with new architecture', { username: params.username });
+    console.log('[Unlock] Cached data fields:', {
+      hasStorageKeypairEncrypted: !!cachedData.storageKeypairEncrypted,
+      hasSalt: !!cachedData.salt,
+      storagePublicKey: cachedData.publicKey.substring(0, 16) + '...'
     });
 
-    // Decrypt the vault
     ensureNotLocked(params.username);
-    const decryptedResult = crypto.decryptVault(
-      vaultData.encryptedVault,
-      params.pin
-    );
 
-    // Handle result Map
-    let decrypted: any;
-    if (decryptedResult instanceof Map) {
-      decrypted = {
-        privateKey: decryptedResult.get('privateKey'),
-        xpriv: decryptedResult.get('xpriv'),
-        publicKey: decryptedResult.get('publicKey')
-      };
-    } else {
-      decrypted = decryptedResult;
+    // STEP 1: Decrypt storage keypair from LoginObj cache using PIN
+    if (!cachedData.storageKeypairEncrypted) {
+      throw new Error('No storage keypair found - vault may need re-login with new architecture');
     }
 
-    // Validate xpriv if present
-    if (decrypted.xpriv) {
-      const sanitized = decrypted.xpriv.trim().replace(/\s+/g, '');
+    console.log('🔐 [Unlock] Decrypting storage keypair with PIN...');
+    const storageKeypairJson = await cryptoPrimitives.decryptDataWithSalt({
+      encryptedData: cachedData.storageKeypairEncrypted,
+      password: params.pin,
+      salt: cachedData.salt
+    });
 
-      // Basic format check
-      if (!/^(xprv|tprv)/.test(sanitized)) {
-        throw new Error('Invalid xpriv after PIN decrypt - must start with xprv or tprv');
-      }
+    const storageKeypair = JSON.parse(storageKeypairJson);
+    const storagePrivateKey = storageKeypair.privateKey;
+    const storagePublicKey = storageKeypair.publicKey;
 
-      // Test derivation to ensure xpriv is valid
-      try {
-        const testDerive = await handlers.deriveKeypairFromXpriv({
-          xpriv: sanitized,
-          index: 0
-        });
+    console.log('✅ [Unlock] Storage keypair decrypted successfully');
 
-        if (!testDerive || !testDerive.publicKey) {
-          throw new Error('Invalid xpriv - derivation test failed');
-        }
+    // STEP 2: Fetch VaultObj from Nostr using storage private key
+    console.log('📡 [Unlock] Fetching VaultObj from Nostr...');
+    const { getVaultFromNostr } = await import('@nostrpass/nostrHelpers');
+    const relays = cachedData.customRelays || [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net'
+    ];
 
-        console.log('[Worker] xpriv validated successfully via test derivation');
-      } catch (error: any) {
-        console.error('[Worker] xpriv validation failed:', error);
-        throw new Error(`Invalid xpriv - validation failed: ${error.message}`);
-      }
-
-      decrypted.xpriv = sanitized;
-    } else {
-      console.warn('[Unlock] No xpriv in decrypted payload');
+    const vaultData = await getVaultFromNostr(storagePublicKey, relays, storagePrivateKey);
+    if (!vaultData) {
+      throw new Error('Vault data not found on Nostr - may need to sync');
     }
 
-    // Derive storage keypair from xpriv for Nostr operations
-    let storagePrivateKey: string | undefined;
-    let storagePublicKey: string | undefined;
+    console.log('✅ [Unlock] VaultObj fetched and decrypted from Nostr');
+    console.log('📋 [Unlock] VaultObj contains:', {
+      identitiesCount: vaultData.identities?.length || 0,
+      hasXprivEncrypted: !!vaultData.xprivEncrypted
+    });
 
-    if (decrypted.xpriv) {
-      try {
-        // IMPORTANT: Use STORAGE_INDEX (8907) to match account creation
-        const { STORAGE_INDEX } = await import('@nostrpass/types');
-        const storageKeypair = await handlers.deriveKeypairFromXpriv({ xpriv: decrypted.xpriv, index: STORAGE_INDEX });
-        if (storageKeypair instanceof Map) {
-          storagePrivateKey = storageKeypair.get('privateKey');
-          storagePublicKey = storageKeypair.get('publicKey');
-        } else {
-          storagePrivateKey = storageKeypair.privateKey;
-          storagePublicKey = storageKeypair.publicKey;
-        }
-        console.log('[Unlock] Storage keypair derived for Nostr operations with STORAGE_INDEX');
-      } catch (error) {
-        console.error('[Unlock] Failed to derive storage keypair:', error);
-        // Continue without storage keypair - will affect Nostr sync but not local operations
-      }
+    // STEP 3: Decrypt xpriv from VaultObj using PIN
+    console.log('🔐 [Unlock] Decrypting xpriv with PIN...');
+    const xpriv = await cryptoPrimitives.decryptDataWithSalt({
+      encryptedData: vaultData.xprivEncrypted,
+      password: params.pin,
+      salt: vaultData.salt
+    });
+
+    // Validate xpriv
+    const sanitized = xpriv.trim().replace(/\s+/g, '');
+    if (!/^(xprv|tprv)/.test(sanitized)) {
+      throw new Error('Invalid xpriv after PIN decrypt - must start with xprv or tprv');
     }
 
-    // Update session
+    console.log('✅ [Unlock] xpriv decrypted and validated successfully');
+
+    // Update cached vault with fresh data from Nostr
+    await vaultDB.saveVault({
+      ...cachedData,
+      xprivEncrypted: vaultData.xprivEncrypted,
+      identities: vaultData.identities || [],
+      activeIdentityByApp: vaultData.activeIdentityByApp || {},
+      updatedAt: vaultData.updatedAt || Date.now(),
+      lastSyncedAt: Date.now()
+    } as VaultData);
+
+    console.log('💾 [Unlock] Vault data updated in IndexedDB cache');
+
+    // STEP 4: Create session with all keys
     const session: ExtendedSession = {
       username: params.username,
-      publicKey: vaultData.publicKey,
-      privateKey: decrypted.privateKey,
-      xpriv: decrypted.xpriv,
+      publicKey: storagePublicKey,
+      privateKey: undefined, // Not used in new architecture
+      xpriv: sanitized,
       isUnlocked: true,
       unlockedAt: Date.now(),
       // Cache storage keypair for Nostr operations (signing/encryption)
       storagePrivateKey,
       storagePublicKey
     };
-    console.log('[Unlock] Session seeds:', {
-      hasPrivateKey: !!session.privateKey,
+
+    console.log('[Unlock] Session created:', {
       hasXpriv: !!session.xpriv,
       hasStorageKeypair: !!(storagePrivateKey && storagePublicKey)
     });
-
-    // Store recovery data if available
-    if (vaultData.recoveryQuestions && vaultData.recoveryAnswers) {
-      session.recoveryQuestions = vaultData.recoveryQuestions;
-      session.answers = vaultData.recoveryAnswers;
-    }
 
     activeSessions.set(params.username, session);
     resetPinAttempts(params.username);
@@ -1065,15 +1141,16 @@ export const sessionManager = {
     // Update last unlocked time
     await vaultDB.updateLastUnlocked(params.username);
 
-    // Broadcast unlock as SESSION_UNLOCKED for consistency with UI handlers
+    // Broadcast unlock
     broadcastVaultUpdate(params.username, 'SESSION_UNLOCKED', {
-      publicKey: vaultData.publicKey
+      publicKey: storagePublicKey
     });
-    console.log('[Unlock] Unlock flow completed');
+
+    console.log('✅ [Unlock] Unlock flow completed successfully');
 
     return {
       username: params.username,
-      publicKey: vaultData.publicKey,
+      publicKey: storagePublicKey,
       isUnlocked: true
     };
   },
@@ -1101,7 +1178,7 @@ export const sessionManager = {
     if (session.xpriv && !session.storagePrivateKey) {
       try {
         const { STORAGE_INDEX } = await import('@nostrpass/types');
-        const derived = await handlers.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
+        const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: STORAGE_INDEX });
         if (derived instanceof Map) {
           session.storagePrivateKey = derived.get('privateKey');
           session.storagePublicKey = derived.get('publicKey');
@@ -1115,7 +1192,15 @@ export const sessionManager = {
       }
     }
 
+    console.log('[UnlockSession] Setting session in activeSessions for:', params.username);
+    console.log('[UnlockSession] Session has keys:', {
+      hasPrivateKey: !!session.privateKey,
+      hasXpriv: !!session.xpriv,
+      hasStorageKeypair: !!(session.storagePrivateKey && session.storagePublicKey)
+    });
     activeSessions.set(params.username, session);
+    console.log('[UnlockSession] activeSessions size after set:', activeSessions.size);
+    console.log('[UnlockSession] activeSessions keys:', Array.from(activeSessions.keys()));
     resetPinAttempts(params.username);
     logSessionState('UNLOCKED_ALIAS', params.username);
 
@@ -1272,7 +1357,7 @@ export const sessionManager = {
 
     // Update vault
     await vaultDB.updateVault(params.username, {
-      encryptedVault: vault.encryptedVault,
+      xprivEncrypted: vault.xprivEncrypted,
       salt: vault.salt
     });
 
@@ -1466,12 +1551,25 @@ export const sessionManager = {
         level = 'ASK_EVERYTIME';
     }
 
-    const allowed = level === 'ALLOW';
+    // Check if there's an active session permission grant
+    let sessionGranted = false;
+    if (action === 'signEvent' || action === 'signData') {
+      sessionGranted = isSessionPermissionValid({
+        username,
+        origin,
+        action,
+        eventKind: action === 'signEvent' ? eventKind : undefined
+      });
+    }
+
+    // If session is granted, allow the operation regardless of saved permission level
+    const allowed = level === 'ALLOW' || sessionGranted;
+
     return {
       allowed,
       level,
-      needsPrompt: level === 'ASK_EVERYTIME',
-      sessionGranted: false
+      needsPrompt: level === 'ASK_EVERYTIME' && !sessionGranted,
+      sessionGranted
     };
   },
 
@@ -1589,6 +1687,36 @@ export const sessionManager = {
       origin,
       permissions: merged
     });
+
+    return { success: true };
+  },
+
+  /**
+   * Grant temporary session permission for an action
+   * Used for "ASK_PER_SESSION" and one-time permission grants
+   * Permission expires after sessionDurationMinutes
+   */
+  grantSessionPermission: async (params: {
+    username: string;
+    origin: string;
+    action: 'signEvent' | 'signData';
+    eventKind?: number;
+    sessionDurationMinutes: number;
+  }): Promise<{ success: boolean }> => {
+    const { username, origin, action, eventKind, sessionDurationMinutes } = params;
+
+    const key = getSessionPermissionKey({
+      username,
+      origin,
+      action,
+      eventKind: action === 'signEvent' ? eventKind : undefined
+    });
+
+    const expiresAt = Date.now() + (sessionDurationMinutes * 60 * 1000);
+
+    sessionPermissions.set(key, { expiresAt });
+
+    console.log(`[SessionManager] Granted session permission: ${key}, expires in ${sessionDurationMinutes} minutes`);
 
     return { success: true };
   },

@@ -295,27 +295,21 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         [props.appId]: identityIndex
       };
 
-      console.log('💾 [Authorize] Saving to vault data...');
+      console.log('💾 [Authorize] Saving vault data (will auto-sync to Nostr)...');
+      console.log('💾 [Authorize] Updated data:', {
+        identitiesCount: updatedIdentities.length,
+        activeIdentityByApp: updatedActive,
+        identitiesWithPermissions: updatedIdentities.map((id: any, idx: number) => ({
+          index: idx,
+          nickname: id.nickname,
+          appKeys: id.appPermissions ? Object.keys(id.appPermissions) : []
+        }))
+      });
 
-      // Add timeout to prevent hanging
-      const savePromise = props.onUpdateVaultData({ identities: updatedIdentities, activeIdentityByApp: updatedActive }, { syncToNostr: false });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Save timeout after 5s')), 5000)
-      );
+      // Save vault data - auto-syncs to Nostr in background by default
+      await props.onUpdateVaultData({ identities: updatedIdentities, activeIdentityByApp: updatedActive });
 
-      await Promise.race([savePromise, timeoutPromise]);
-      console.log('✅ [Authorize] Authorization complete (saved locally)!');
-
-      // Sync to Nostr in background (non-blocking)
-      (async () => {
-        try {
-          console.log('📡 [Authorize] Syncing to Nostr in background...');
-          await props.onSyncToNostr();
-          console.log('✅ [Authorize] Synced to Nostr');
-        } catch (error) {
-          console.warn('⚠️ [Authorize] Nostr sync failed (non-critical):', error);
-        }
-      })();
+      console.log('✅ [Authorize] Authorization complete (saved locally + syncing to Nostr)!');
     } catch (error) {
       console.error('❌ [Authorize] Failed to authorize identity for app:', error);
       // Show error to user
@@ -392,9 +386,11 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
   // Handle disconnecting an identity from an app
   const handleDisconnectIdentity = async (identityIndex: number, appId: string) => {
+    console.log('[DISCONNECT] Starting disconnect for identity:', identityIndex, 'app:', appId);
+
     // Check if vault is locked before proceeding
     if (props.isVaultLocked) {
-      console.warn('Cannot disconnect identity: vault is locked');
+      console.warn('[DISCONNECT] Cannot disconnect identity: vault is locked');
       return;
     }
 
@@ -405,22 +401,50 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       // Get current vault data
       const currentVault = props.vaultData;
       if (!currentVault) {
-        console.warn('Cannot disconnect identity: no vault data available');
+        console.warn('[DISCONNECT] Cannot disconnect identity: no vault data available');
         return;
       }
 
-      // Create updated identities array
-      const updatedIdentities = [...currentVault.identities];
-      if (updatedIdentities[identityIndex].appPermissions) {
-        delete updatedIdentities[identityIndex].appPermissions[appId];
-      }
+      // Create updated identities array - deep clone to avoid mutation issues
+      const updatedIdentities = currentVault.identities.map((identity: any, idx: number) => {
+        if (idx === identityIndex) {
+          // Clone this identity and remove the app permissions
+          const { appPermissions = {}, ...rest } = identity;
+          const newAppPermissions = { ...appPermissions };
+          delete newAppPermissions[appId];
 
-      // Update vault data with the new identities
-      await props.onUpdateVaultData({
-        identities: updatedIdentities
+          console.log('[DISCONNECT] Identity before:', {
+            index: idx,
+            appKeys: Object.keys(appPermissions)
+          });
+          console.log('[DISCONNECT] Identity after:', {
+            index: idx,
+            appKeys: Object.keys(newAppPermissions)
+          });
+
+          return {
+            ...rest,
+            appPermissions: newAppPermissions
+          };
+        }
+        return identity;
       });
 
-      console.log('✅ Identity disconnected successfully');
+      // If this identity was active for this app, clear the active identity
+      const updatedActiveIdentityByApp = { ...(currentVault.activeIdentityByApp || {}) };
+      if (updatedActiveIdentityByApp[appId] === identityIndex) {
+        console.log('[DISCONNECT] Clearing active identity for app:', appId);
+        delete updatedActiveIdentityByApp[appId];
+      }
+
+      // Update vault data - auto-syncs to Nostr in background by default
+      console.log('[DISCONNECT] Saving updated vault data (will auto-sync to Nostr)...');
+      await props.onUpdateVaultData({
+        identities: updatedIdentities,
+        activeIdentityByApp: updatedActiveIdentityByApp
+      });
+
+      console.log('✅ [DISCONNECT] Identity disconnected successfully (syncing to Nostr)!');
     } catch (error: any) {
       console.error('Failed to disconnect identity:', error);
 
@@ -449,6 +473,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
   // Set active identity for this app (does not change authorization)
   const handleSetActiveIdentityForApp = async (identityIndex: number) => {
+    console.log('🔄 [SetActive] Setting active identity:', identityIndex, 'for app:', props.appId);
     if (!props.appId) return;
     const currentVault = props.vaultData;
     if (!currentVault) return;
@@ -458,24 +483,18 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         ...(currentVault.activeIdentityByApp || {}),
         [props.appId]: identityIndex
       };
-      // Save locally first (fast, non-blocking)
-      await props.onUpdateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: false });
-
-      // Sync to Nostr in background (non-blocking)
-      (async () => {
-        try {
-          await props.onSyncToNostr();
-        } catch (error) {
-          console.warn('Background sync failed (non-critical):', error);
-        }
-      })();
+      console.log('💾 [SetActive] Updating vault data with:', updatedActive);
+      // Save vault data - auto-syncs to Nostr in background by default
+      await props.onUpdateVaultData({ activeIdentityByApp: updatedActive });
+      console.log('✅ [SetActive] Active identity updated successfully');
     } catch (error) {
-      console.error('Failed to set active identity for app:', error);
+      console.error('❌ [SetActive] Failed to set active identity for app:', error);
     }
   };
 
   // Unset active identity for this app (keeps authorization intact)
   const handleUnsetActiveIdentityForApp = async () => {
+    console.log('🔄 [UnsetActive] Unsetting active identity for app:', props.appId);
     if (!props.appId) return;
     const currentVault = props.vaultData;
     if (!currentVault) return;
@@ -485,17 +504,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         ...(currentVault.activeIdentityByApp || {}),
         [props.appId]: null
       };
-      // Save locally first (fast, non-blocking)
-      await props.onUpdateVaultData({ activeIdentityByApp: updatedActive }, { syncToNostr: false });
-
-      // Sync to Nostr in background (non-blocking)
-      (async () => {
-        try {
-          await props.onSyncToNostr();
-        } catch (error) {
-          console.warn('Background sync failed (non-critical):', error);
-        }
-      })();
+      console.log('💾 [UnsetActive] Updating vault data with:', updatedActive);
+      // Save vault data - auto-syncs to Nostr in background by default
+      await props.onUpdateVaultData({ activeIdentityByApp: updatedActive });
+      console.log('✅ [UnsetActive] Active identity cleared successfully');
     } catch (error) {
       console.error('Failed to unset active identity for app:', error);
     }
@@ -524,13 +536,23 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         props.onShowPinUnlock();
         return;
       }
+
+      // Check if we have xpriv in session before attempting to derive
+      if (!props.cryptoWorker) {
+        throw new Error('Crypto worker not ready');
+      }
+
+      const status: any = await props.cryptoWorker.hasKeysInSession({ username: props.username });
+      if (!status?.hasXpriv) {
+        console.warn('No xpriv in session, requesting unlock');
+        props.onShowPinUnlock();
+        return;
+      }
+
       // Derive next identity index
       const current = props.vaultData;
       const nextIndex = (current?.identities?.length ?? 0);
       // Ask worker to derive publicKey for this index using xpriv in session
-      if (!props.cryptoWorker) {
-        throw new Error('Crypto worker not ready');
-      }
       const derived = await props.cryptoWorker.deriveIdentityFromSession({ username: props.username, index: nextIndex });
       // Build identity object
       const identity = {
@@ -540,9 +562,9 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         index: nextIndex,
         createdAt: Date.now()
       } as any;
-      // Save locally first (fast)
-      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: false });
-      console.log('✅ [Add Identity] Saved locally');
+      // Save and sync to Nostr
+      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: true });
+      console.log('✅ [Add Identity] Saved locally and synced to Nostr');
 
       // Publish identity meta as PRE (non-blocking)
       try {
@@ -553,17 +575,6 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
       setShowAddIdentityModal(false);
       setNewIdentityNickname('');
-
-      // Sync to Nostr in background (non-blocking)
-      (async () => {
-        try {
-          console.log('📡 [Add Identity] Starting background Nostr sync...');
-          await props.onSyncToNostr();
-          console.log('✅ [Add Identity] Synced to Nostr successfully');
-        } catch (error) {
-          console.error('❌ [Add Identity] Nostr sync failed:', error);
-        }
-      })();
     } catch (e) {
       console.error('Failed to add identity:', e);
     }
@@ -625,7 +636,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         <For each={filteredIdentities()}>
           {(identity) => (
             <div
-              class={`flex flex-col cursor-pointer border rounded-lg p-4 justify-between items-center hover:shadow-md dark:hover:shadow-lg transition-all ${identity.isActive ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              class={`flex flex-col border rounded-lg p-4 justify-between items-center hover:shadow-md dark:hover:shadow-lg transition-all ${identity.isActive ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
             >
               <div class="flex flex-row justify-between w-full items-center ">
@@ -713,8 +724,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        console.log('⚙️ [Settings] Opening settings for identity:', identity.nickname, identity.publicKey);
                         setSelectedIdentityKey(identity.publicKey);
                         setShowSettingsPanel(true);
+                        console.log('⚙️ [Settings] Panel should be open, showSettingsPanel:', showSettingsPanel());
                       }}
                       class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors border border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500"
                       title="Settings"
@@ -948,6 +961,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
+                              console.log('🔘 [BUTTON CLICK] Authorize button clicked for identity:', identity().index);
                               handleAuthorizeIdentityForApp(identity().index);
                             }}
                             class="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"

@@ -65,25 +65,50 @@ class VaultDB {
 
   async saveVault(vaultData: VaultData): Promise<void> {
     if (!this.db) await this.init();
-    
+
+    // MIGRATION: Read from legacy encryptedVault field if xprivEncrypted is missing
+    // This ensures old vaults continue to work after standardizing on xprivEncrypted
+    const normalizedVault = { ...vaultData } as any;
+
+    // CRITICAL CHECK: Warn if xprivEncrypted is missing
+    if (!normalizedVault.xprivEncrypted) {
+      console.error('🚨 [DB] WARNING: Attempting to save vault WITHOUT xprivEncrypted!', {
+        username: normalizedVault.username,
+        hasEncryptedVault: !!normalizedVault.encryptedVault,
+        allKeys: Object.keys(normalizedVault),
+        stackTrace: new Error().stack
+      });
+
+      // Try migration as fallback
+      if (normalizedVault.encryptedVault) {
+        console.log('🔄 [DB Migration] Migrating encryptedVault → xprivEncrypted');
+        normalizedVault.xprivEncrypted = normalizedVault.encryptedVault;
+      } else {
+        console.error('❌ [DB] CRITICAL: No xprivEncrypted AND no encryptedVault to migrate!');
+      }
+    }
+
+    // Clean up: Remove legacy encryptedVault field to avoid confusion
+    delete normalizedVault.encryptedVault;
+
     const startTime = Date.now();
-    const dataSize = JSON.stringify(vaultData).length;
-    
+    const dataSize = JSON.stringify(normalizedVault).length;
+
     console.log('💾 Saving vault to IndexedDB:', {
-      username: vaultData.username,
+      username: normalizedVault.username,
       dataSize: `${(dataSize / 1024).toFixed(2)} KB`,
-      identitiesCount: vaultData.identities?.length || 0,
-      hasXprivEncrypted: !!(vaultData as any).xprivEncrypted,
-      xprivEncryptedLength: (vaultData as any).xprivEncrypted?.length,
-      hasPasswordSalt: !!(vaultData as any).passwordSalt,
-      allKeys: Object.keys(vaultData)
+      identitiesCount: normalizedVault.identities?.length || 0,
+      hasXprivEncrypted: !!normalizedVault.xprivEncrypted,
+      xprivEncryptedLength: normalizedVault.xprivEncrypted?.length,
+      hasPasswordSalt: !!normalizedVault.passwordSalt,
+      allKeys: Object.keys(normalizedVault)
     });
-    
+
     const run = (): Promise<void> => new Promise((resolve, reject) => {
       try {
         const transaction = this.db!.transaction(['vaults'], 'readwrite');
         const store = transaction.objectStore('vaults');
-        const request = store.put(vaultData);
+        const request = store.put(normalizedVault);
 
         request.onsuccess = () => {
           console.log(`💾 Vault saved successfully in ${Date.now() - startTime}ms`);
@@ -329,7 +354,7 @@ class VaultDB {
     });
   }
 
-  async getXpriv(username: string): Promise<{ encryptedXpriv: string; pinSalt: string; passwordSalt?: string } | null> {
+  async getXpriv(username: string): Promise<{ xprivEncrypted: string; salt: string; passwordSalt?: string } | null> {
     if (!this.db) await this.init();
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(['xprivs'], 'readonly');
@@ -338,7 +363,12 @@ class VaultDB {
       request.onsuccess = () => {
         const row = request.result;
         if (!row) return resolve(null);
-        resolve({ encryptedXpriv: row.encryptedXpriv, pinSalt: row.pinSalt, passwordSalt: row.passwordSalt });
+        // Map internal field names to external API
+        resolve({
+          xprivEncrypted: row.encryptedXpriv,
+          salt: row.pinSalt,
+          passwordSalt: row.passwordSalt
+        });
       };
       request.onerror = () => reject(request.error);
     });

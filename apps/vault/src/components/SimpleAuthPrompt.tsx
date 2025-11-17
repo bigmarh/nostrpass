@@ -10,6 +10,14 @@ interface SimpleAuthPromptProps {
   onAuthorize: () => void;
   onDeny: () => void;
   onCustomize: () => void;
+  permissions?: {
+    getPublicKey?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    getRelays?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signEvent?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip04?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip44?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signData?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+  };
 }
 
 export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
@@ -26,8 +34,24 @@ export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
     return props.identity.nickname || `Identity ${props.identityIndex + 1}`;
   };
 
+  const getPermissionIcon = (level: string) => {
+    switch (level) {
+      case 'ALLOW': return <span class="text-green-500 mt-0.5">✓</span>;
+      case 'DENY': return <span class="text-red-500 mt-0.5">✗</span>;
+      default: return <span class="text-yellow-500 mt-0.5">?</span>;
+    }
+  };
+
+  const getPermissionText = (level: string) => {
+    switch (level) {
+      case 'ALLOW': return 'Always allow';
+      case 'DENY': return 'Always deny';
+      default: return 'Ask each time';
+    }
+  };
+
   return (
-    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="fixed inset-0 flex items-center justify-center z-50 p-4">
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
         <div class="p-6">
           {/* Header */}
@@ -51,23 +75,38 @@ export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
             </div>
           </div>
 
-          {/* Default Permissions */}
+          {/* Permissions being requested */}
           <div class="mb-6">
             <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-2">
-              Default Permissions
+              Permissions Being Granted
             </div>
             <div class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
               <div class="flex items-start gap-2">
-                <span class="text-green-500 mt-0.5">✓</span>
-                <span>Read your public key</span>
+                {getPermissionIcon(props.permissions?.getPublicKey || 'ALLOW')}
+                <div>
+                  <div>Read your public key</div>
+                  <div class="text-xs text-gray-500 dark:text-gray-500">
+                    {getPermissionText(props.permissions?.getPublicKey || 'ALLOW')}
+                  </div>
+                </div>
               </div>
               <div class="flex items-start gap-2">
-                <span class="text-yellow-500 mt-0.5">?</span>
-                <span>Ask permission before signing events</span>
+                {getPermissionIcon(props.permissions?.signEvent || 'ASK_EVERYTIME')}
+                <div>
+                  <div>Sign events</div>
+                  <div class="text-xs text-gray-500 dark:text-gray-500">
+                    {getPermissionText(props.permissions?.signEvent || 'ASK_EVERYTIME')}
+                  </div>
+                </div>
               </div>
               <div class="flex items-start gap-2">
-                <span class="text-yellow-500 mt-0.5">?</span>
-                <span>Ask permission for encrypted messages</span>
+                {getPermissionIcon(props.permissions?.nip04 || 'ASK_EVERYTIME')}
+                <div>
+                  <div>Encrypted messages (NIP-04)</div>
+                  <div class="text-xs text-gray-500 dark:text-gray-500">
+                    {getPermissionText(props.permissions?.nip04 || 'ASK_EVERYTIME')}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

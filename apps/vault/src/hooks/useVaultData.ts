@@ -51,6 +51,12 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     updates: Partial<VaultData> | ((current: VaultData) => Partial<VaultData>),
     options: { syncToNostr?: boolean; updateTimestamp?: boolean } = {}
   ) => {
+    console.log('[useVaultData] 🚀 updateVaultData called with:', {
+      updatesType: typeof updates,
+      options,
+      username: username()
+    });
+
     // Enable Nostr sync by default for vault updates
     const finalOptions = { syncToNostr: true, ...options };
     const currentUsername = username();
@@ -78,6 +84,48 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
       
       // Directly update the signal with the new data
       setVaultData(updatedData);
+      
+      // Dispatch refresh event for this tab and other components
+      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+        detail: { username: currentUsername, source: 'local-update' }
+      }));
+
+      // Notify parent window about vault data update
+      try {
+        console.log('[useVaultData] 📍 Current location:', window.location.href);
+        console.log('[useVaultData] 📍 Is in iframe:', window !== window.parent);
+
+        const { getMessenger } = await import('../providers/MessengerProvider');
+        const messenger = getMessenger();
+
+        console.log('[useVaultData] 🔍 Messenger status:', {
+          exists: !!messenger,
+          isInitialized: (messenger as any)?.isInitialized,
+          isParent: (messenger as any)?.isParent
+        });
+
+        if (messenger) {
+          console.log('[useVaultData] 📤 Sending VAULT_DATA_UPDATED to embassy', {
+            username: currentUsername,
+            timestamp: Date.now(),
+            updatedData: {
+              identitiesCount: updatedData.identities?.length,
+              activeIdentityByApp: updatedData.activeIdentityByApp
+            }
+          });
+
+          messenger.send('VAULT_DATA_UPDATED', {
+            username: currentUsername,
+            timestamp: Date.now()
+          });
+
+          console.log('[useVaultData] ✅ VAULT_DATA_UPDATED message sent successfully');
+        } else {
+          console.warn('[useVaultData] ⚠️ Messenger not available, cannot notify embassy');
+        }
+      } catch (err) {
+        console.error('[useVaultData] ❌ Failed to notify parent of vault data update:', err);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update vault data';
       setError(errorMessage);

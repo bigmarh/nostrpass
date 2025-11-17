@@ -22,7 +22,7 @@ import type { VaultData } from '@nostrpass/nostrHelpers';
  * This represents a subset of the worker client API.
  */
 interface CryptoWorker {
-  getVaultData(params: { username: string }): Promise<VaultData | null>;
+  getVaultData(params: { username: string; includeEncryptedVault?: boolean }): Promise<VaultData | null>;
   hasKeysInSession(params: { username: string }): Promise<{ hasPrivateKey: boolean; hasXpriv: boolean } | null>;
   startNostrSubscription(params: { username: string; relays: string[] }): Promise<void>;
 }

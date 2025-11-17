@@ -84,7 +84,7 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
   const actionInfo = getActionDescription();
 
   return (
-    <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="flex items-center justify-center w-full h-full p-4">
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
         <div class="text-center mb-6">
           <div class="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -105,9 +105,54 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
           <h3 class="font-medium text-gray-900 dark:text-white mb-1">
             {actionInfo.title}
           </h3>
-          <p class="text-sm text-gray-600 dark:text-gray-400">
+          <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
             {actionInfo.description}
           </p>
+
+          {/* Show request details */}
+          <Show when={props.request.action === 'signEvent' && props.request.event}>
+            <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+              <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase mb-2">
+                Event to Sign:
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono max-h-32 overflow-y-auto text-gray-900 dark:text-gray-100">
+                <div><span class="text-gray-500 dark:text-gray-400">Kind:</span> {props.request.event.kind}</div>
+                <Show when={props.request.event.content}>
+                  <div class="mt-1"><span class="text-gray-500 dark:text-gray-400">Content:</span> {props.request.event.content}</div>
+                </Show>
+                <Show when={props.request.event.tags && props.request.event.tags.length > 0}>
+                  <div class="mt-1"><span class="text-gray-500 dark:text-gray-400">Tags:</span> {JSON.stringify(props.request.event.tags)}</div>
+                </Show>
+              </div>
+            </div>
+          </Show>
+
+          <Show when={props.request.action === 'signData' && props.request.data}>
+            <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+              <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase mb-2">
+                Data to Sign:
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono break-all max-h-32 overflow-y-auto text-gray-900 dark:text-gray-100">
+                {props.request.data}
+              </div>
+            </div>
+          </Show>
+
+          <Show when={props.request.action === 'nip04' && (props.request.plaintext || props.request.ciphertext)}>
+            <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+              <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase mb-2">
+                {props.request.plaintext ? 'Message to Encrypt:' : 'Encrypted Message:'}
+              </div>
+              <Show when={props.request.pubkey}>
+                <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">
+                  {props.request.plaintext ? 'To: ' : 'From: '}{props.request.pubkey!.substring(0, 16)}...
+                </div>
+              </Show>
+              <div class="bg-white dark:bg-gray-800 rounded p-2 text-xs font-mono break-all max-h-32 overflow-y-auto text-gray-900 dark:text-gray-100">
+                {props.request.plaintext || props.request.ciphertext}
+              </div>
+            </div>
+          </Show>
         </div>
 
         <div class="space-y-2 mb-6">

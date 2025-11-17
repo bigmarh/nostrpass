@@ -6,6 +6,12 @@ export interface PermissionRequest {
   appName?: string;
   action: 'signEvent' | 'signData' | 'getPublicKey' | 'nip04' | 'getRelays';
   eventKind?: number;
+  // Data being requested
+  event?: any; // Full event object for signEvent
+  data?: string; // Data for signData
+  pubkey?: string; // Recipient for nip04
+  ciphertext?: string; // Encrypted content for nip04 decrypt
+  plaintext?: string; // Plaintext for nip04 encrypt
 }
 
 export interface PermissionCheckResult {

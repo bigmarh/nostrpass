@@ -18,8 +18,19 @@ interface MessengerContextType {
 
 const MessengerContext = createContext<MessengerContextType>();
 
+// Global messenger instance for use outside of components
+let globalMessenger: IframeMessenger | null = null;
+
 // Global registry for auth ready callback
 let authReadyCallback: ((auth: any) => void) | null = null;
+
+/**
+ * Get the global messenger instance (for use outside of components)
+ * Returns null if messenger is not yet initialized
+ */
+export function getMessenger(): IframeMessenger | null {
+  return globalMessenger;
+}
 
 export function registerAuthReady(callback: (auth: any) => void) {
   authReadyCallback = callback;
@@ -51,9 +62,11 @@ export const MessengerProvider: ParentComponent = (props) => {
   };
 
   onMount(() => {
+    console.log('🔧 [MessengerProvider] Initializing messenger in iframe');
+
     // Initialize messenger
     const messengerInstance = new IframeMessenger(window);
-    
+
     // Configure allowed origins based on environment
     const allowedOrigins: string[] = [];
     
@@ -89,9 +102,16 @@ export const MessengerProvider: ParentComponent = (props) => {
     allowedOrigins.push(window.location.origin);
     
     messengerInstance.init(allowedOrigins);
-    
+
+    // Store in global variable for use outside components
+    globalMessenger = messengerInstance;
+
     // Mark as ready immediately after init
     setIsReady(true);
+    console.log('✅ [MessengerProvider] Messenger initialized and ready', {
+      allowedOrigins,
+      isInIframe: window.parent !== window
+    });
 
     // Handle show/hide vault commands
     messengerInstance.route('SHOW_VAULT_RESPONSE', {
@@ -137,6 +157,7 @@ export const MessengerProvider: ParentComponent = (props) => {
     if (m) {
       m.destroy();
       setMessenger(null);
+      globalMessenger = null;
     }
   });
 

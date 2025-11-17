@@ -70,38 +70,35 @@ const PinPad: Component<PinPadProps> = (props) => {
 
   return (
     <div class="w-full flex flex-col items-center">
-      {/* PIN Display */}
-      <div class={`flex justify-center gap-1.5 mb-3 ${isShaking() ? 'shake-animation' : ''}`}>
+      {/* PIN Display - Clerk style */}
+      <div class={`flex justify-center gap-1.5 mb-2 ${isShaking() ? 'shake-animation' : ''}`}>
         {Array.from({ length: 6 }).map((_, index) => (
-          <div class={`w-3.5 h-3.5 rounded-full border-2 transition-all duration-400 ${index < currentPin().length
-            ? 'bg-gray-900 dark:bg-gray-100 border-gray-900 dark:border-gray-100'
-            : 'bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+          <div class={`w-2 h-2 rounded-full transition-all duration-200 ${index < currentPin().length
+            ? 'bg-gray-900 dark:bg-gray-100 scale-110'
+            : 'bg-gray-300 dark:bg-gray-600'
             }`} />
         ))}
       </div>
 
-      {/* PIN Pad */}
-      <div class="grid grid-cols-3 gap-1 w-full mx-auto">
-
+      {/* PIN Pad - Compact layout */}
+      <div class="grid grid-cols-3  w-full max-w-[220px] mx-auto">
         {scrambledNumbers().map((num) => (
           <button
-            class="aspect-square border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-xl font-semibold cursor-pointer transition-colors flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="aspect-square border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-md text-base font-semibold cursor-pointer transition-all flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
             onClick={() => addDigit(num)}
             disabled={currentPin().length >= 6}
           >
             {num}
           </button>
-          ))}
-        
+        ))}
 
         {/* Backspace button spans 2 columns */}
         <button
-          class="col-span-2 w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-2xl font-medium cursor-pointer transition-colors flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
-          style="aspect-ratio: 2/1;"
+          class="col-span-2 aspect-[2/1] border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-md text-xs font-medium cursor-pointer transition-all flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           onClick={removeDigit}
           disabled={props.disabled}
         >
-          ←
+          ← Delete
         </button>
 
         {/* Empty cell for 3x4 grid layout */}

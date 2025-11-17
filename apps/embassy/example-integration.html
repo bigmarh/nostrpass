@@ -4,12 +4,92 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NostrPass Integration Example</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            padding: 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .theme-demo {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .auth-section {
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .auth-section.light {
+            background: #ffffff;
+            color: #111827;
+        }
+        .auth-section.dark {
+            background: #1f2937;
+            color: #f9fafb;
+        }
+        .auth-section.auto {
+            background: #f9fafb;
+            color: #111827;
+        }
+        .auth-section h2 {
+            margin-top: 0;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            opacity: 0.7;
+        }
+        .info {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f0f9ff;
+            border-left: 4px solid #3b82f6;
+            border-radius: 4px;
+        }
+        .info code {
+            background: #dbeafe;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+        }
+    </style>
 </head>
 <body>
-    <h1>NostrPass Embassy Integration Example</h1>
-    
+    <h1>NostrPass Button - Theme Configuration</h1>
+
+    <div class="theme-demo">
+        <div class="auth-section light">
+            <h2>Light Theme</h2>
+            <div id="nostrpass-button-light"></div>
+        </div>
+
+        <div class="auth-section dark">
+            <h2>Dark Theme</h2>
+            <div id="nostrpass-button-dark"></div>
+        </div>
+
+        <div class="auth-section auto">
+            <h2>Auto Theme</h2>
+            <div id="nostrpass-button-auto"></div>
+        </div>
+    </div>
+
+    <div class="info">
+        <h3>Theme Configuration</h3>
+        <p>Use the <code>theme</code> option to control button and dropdown appearance:</p>
+        <ul>
+            <li><code>theme: 'light'</code> - Always light theme (white background, dark text)</li>
+            <li><code>theme: 'dark'</code> - Always dark theme (dark background, light text)</li>
+            <li><code>theme: 'auto'</code> - Follow system preference (default)</li>
+        </ul>
+    </div>
+
     <div id="status">Loading NostrPass...</div>
-    
+
     <button id="get-pubkey" disabled>Get Public Key</button>
     <button id="sign-event" disabled>Sign Event</button>
     <div style="margin-top:12px">
@@ -66,6 +146,44 @@
                 document.getElementById('sign-data').disabled = false;
                 document.getElementById('nip04-encrypt').disabled = false;
                 document.getElementById('nip04-decrypt').disabled = false;
+
+                // Create theme-specific buttons
+                if (window.nostr.createNostrPassButton) {
+                    // Light theme button
+                    const lightButton = window.nostr.createNostrPassButton({
+                        appendTo: '#nostrpass-button-light',
+                        theme: 'light',
+                        onSignIn: (user) => {
+                            console.log('User signed in (light):', user);
+                        }
+                    });
+
+                    // Dark theme button
+                    const darkButton = window.nostr.createNostrPassButton({
+                        appendTo: '#nostrpass-button-dark',
+                        theme: 'dark',
+                        onSignIn: (user) => {
+                            console.log('User signed in (dark):', user);
+                        }
+                    });
+
+                    // Auto theme button
+                    const autoButton = window.nostr.createNostrPassButton({
+                        appendTo: '#nostrpass-button-auto',
+                        theme: 'auto',
+                        onSignIn: (user) => {
+                            console.log('User signed in (auto):', user);
+                            document.getElementById('status').textContent = 'Signed in as: ' + (user.nickname || user.publicKey.slice(0, 8) + '...');
+                        },
+                        onSignOut: () => {
+                            console.log('User signed out');
+                            document.getElementById('status').textContent = 'Signed out';
+                        }
+                    });
+
+                    // Try to restore previous session
+                    button.restoreSession();
+                }
             }
         }, 1000);
 

@@ -77,7 +77,7 @@ export interface SecuritySettings {
 /**
  * Simplified permission levels for app actions
  */
-export type PermissionLevel = 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+export type PermissionLevel = 'ALLOW' | 'ASK_PER_SESSION' | 'ASK_EVERYTIME' | 'DENY';
 
 /**
  * Permission categories with their associated event kinds

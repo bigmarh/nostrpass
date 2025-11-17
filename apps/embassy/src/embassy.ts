@@ -14,7 +14,14 @@ import { NostrPassButton, NostrPassButtonConfig, UserInfo } from './NostrPassBut
 interface EmbassyConfig {
   appName?: string;
   appDomain?: string;
-  permissions?: string[];
+  permissions?: {
+    getPublicKey?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    getRelays?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signEvent?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip04?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    nip44?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+    signData?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
+  };
   vaultUrl?: string;
   trustedOrigins?: string[]; // Custom trusted vault origins
   theme?: 'light' | 'dark' | 'auto';
@@ -38,6 +45,8 @@ interface NostrOperationOptions {
 
 interface AccountManagerOptions {
   forcePrompt?: boolean;
+  size?: 'full' | 'compact' | 'minimal';
+  buttonElement?: HTMLElement;
 }
 
 interface AccountIdentitySummary {
@@ -62,6 +71,49 @@ interface AccountManagerButtonOptions extends AccountManagerOptions {
   onSelect?: (result: AccountManagerResult) => void;
   onError?: (error: unknown) => void;
 }
+
+/**
+ * Vault pages with predefined routes and default sizes
+ */
+type VaultPage =
+  | 'login'        // Login/signup flow - full size modal
+  | 'unlock'       // Quick unlock (PIN only) - compact dropdown
+  | 'dashboard'    // Full vault dashboard - full size modal
+  | 'account'      // Account switcher/manager - tall popup
+  | 'permission'   // Permission request prompt - tall popup
+  ;
+
+interface VaultPageConfig {
+  route: string;
+  defaultSize: 'full' | 'compact' | 'tall' | 'minimal';
+  autoCloseOnSuccess?: boolean; // Auto-hide after successful action
+}
+
+const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
+  login: {
+    route: '',  // Root route for login/signup
+    defaultSize: 'minimal',  // Centered floating modal (500x600px) for login/signup
+  },
+  unlock: {
+    route: '/unlock-modal',
+    defaultSize: 'compact',
+    autoCloseOnSuccess: true,
+  },
+  dashboard: {
+    route: '/dashboard',  // Full-featured dashboard with identity, pin, and settings management
+    defaultSize: 'full',
+  },
+  account: {
+    route: '/account-picker',  // Dedicated account/identity picker page
+    defaultSize: 'tall',  // Taller popup for account selection with permissions
+    autoCloseOnSuccess: true,
+  },
+  permission: {
+    route: '/permission-request',  // Permission request prompt page
+    defaultSize: 'tall',  // Taller popup for permission details
+    autoCloseOnSuccess: true,
+  },
+};
 
 interface NostrProvider {
   getPublicKey(options?: NostrOperationOptions): Promise<string>;
@@ -89,8 +141,10 @@ class NostrPassEmbassy {
   // Reserved for future cooldown logic; intentionally unused for now
   // private lastUnlockAt = 0;
   private unlockResolvers: Array<() => void> = [];
+  private permissionResolvers: Array<() => void> = [];
+  private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
-  
+
   private waitForUnlock(): Promise<void> {
     return new Promise((resolve) => {
       this.unlockResolvers.push(resolve);
@@ -104,11 +158,33 @@ class NostrPassEmbassy {
       }, 60000);
     });
   }
-  
+
+  private waitForPermission(): Promise<void> {
+    return new Promise((resolve) => {
+      this.permissionResolvers.push(resolve);
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        const index = this.permissionResolvers.indexOf(resolve);
+        if (index > -1) {
+          this.permissionResolvers.splice(index, 1);
+          resolve();
+        }
+      }, 60000);
+    });
+  }
+
   public notifyUnlocked(): void {
     console.log('🔓 Notifying unlock resolvers:', this.unlockResolvers.length);
     while (this.unlockResolvers.length > 0) {
       const resolve = this.unlockResolvers.shift();
+      if (resolve) resolve();
+    }
+  }
+
+  public notifyPermissionGranted(): void {
+    console.log('✅ Notifying permission resolvers:', this.permissionResolvers.length);
+    while (this.permissionResolvers.length > 0) {
+      const resolve = this.permissionResolvers.shift();
       if (resolve) resolve();
     }
   }
@@ -285,10 +361,22 @@ class NostrPassEmbassy {
     }
 
   constructor(config: EmbassyConfig = {}) {
+    // Normalize appDomain to just origin (host:port), strip any paths
+    let appDomain = config.appDomain || window.location.host;
+    if (appDomain.includes('://')) {
+      try {
+        appDomain = new URL(appDomain).host;
+      } catch {
+        // If URL parsing fails, use as-is
+      }
+    }
+    // Remove any trailing slashes or paths
+    appDomain = appDomain.split('/')[0];
+
     this.config = {
       appName: config.appName || document.title || 'Unknown App',
-      appDomain: config.appDomain || window.location.host,
-      permissions: config.permissions || ['getPublicKey', 'signEvent'],
+      appDomain,
+      permissions: config.permissions,
       vaultUrl: config.vaultUrl || 'http://localhost:3001',
       trustedOrigins: config.trustedOrigins, // Keep as-is, will handle defaults in initializeMessenger
       theme: config.theme || 'auto',
@@ -302,6 +390,12 @@ class NostrPassEmbassy {
 
     // Inject styles on initialization
     this.injectStyles();
+
+    // Listen for permission-granted events from the vault
+    window.addEventListener('permission-granted', () => {
+      console.log('✅ [Embassy] Permission granted event received, notifying resolvers');
+      this.notifyPermissionGranted();
+    });
 
     // Create iframe immediately (hidden) when DOM is ready
     if (document.readyState === 'loading') {
@@ -325,14 +419,18 @@ class NostrPassEmbassy {
       this.iframe = document.createElement('iframe');
       this.iframe.id = 'nostrpass-vault-iframe';
 
-      // Build URL with config
+      // Build URL with config (appDomain is already normalized in constructor)
       const url = new URL(this.config.vaultUrl!+'/'+sanitizeDomain(this.config.appDomain!));
       url.searchParams.set('appName', this.config.appName!);
       url.searchParams.set('appDomain', this.config.appDomain!);
       url.searchParams.set('theme', this.config.theme!);
 
       this.iframe.src = url.toString();
-      console.log('iframe.src', url.toString());
+      console.log('[Embassy] Creating iframe with:', {
+        appDomain: this.config.appDomain,
+        sanitized: sanitizeDomain(this.config.appDomain!),
+        iframeSrc: url.toString()
+      });
 
     
 
@@ -383,7 +481,11 @@ class NostrPassEmbassy {
       if (!this.backdropEl) {
         this.backdropEl = document.createElement('div');
         this.backdropEl.className = 'nostrpass-backdrop';
-        this.backdropEl.addEventListener('click', () => this.hide());
+        this.backdropEl.addEventListener('click', (e) => {
+          console.log('🎯 Backdrop clicked');
+          e.stopPropagation();
+          this.hide();
+        });
       }
 
       // Add to DOM: backdrop first, then iframe on top
@@ -394,52 +496,187 @@ class NostrPassEmbassy {
     });
   }
 
-  public show(page: string = 'vault', mode: 'full' | 'minimal' = 'full'): void {
+  /**
+   * Open a specific vault page
+   * @param page - The vault page to open
+   * @param options - Optional size override, button element, and query params
+   */
+  public openPage(
+    page: VaultPage,
+    options?: {
+      size?: 'full' | 'compact' | 'tall' | 'minimal';
+      buttonElement?: HTMLElement;
+      queryParams?: Record<string, string>;
+    }
+  ): void {
     if (!this.iframe) {
       console.warn('Cannot show iframe - not created yet');
-      this.createIframe().then(() => this.show(page, mode));
+      this.createIframe().then(() => this.openPage(page, options));
       return;
     }
 
-    // Remove hidden class to show iframe
+    const pageConfig = VAULT_PAGES[page];
+    const size = options?.size || pageConfig.defaultSize;
+    const buttonElement = options?.buttonElement;
+    const queryParams = options?.queryParams || {};
+
+    // Navigate to the requested page using message-based routing (avoids iframe reload)
+    const appDomain = sanitizeDomain(this.config.appDomain!);
+    const targetPath = pageConfig.route ? `/${appDomain}${pageConfig.route}` : `/${appDomain}`;
+
+    // Build query string from params
+    const queryString = Object.keys(queryParams).length > 0
+      ? '?' + new URLSearchParams(queryParams).toString()
+      : '';
+    const targetPathWithQuery = targetPath + queryString;
+
+    const currentUrl = new URL(this.iframe.src);
+    const currentPathWithQuery = currentUrl.pathname + currentUrl.search;
+
+    if (currentPathWithQuery !== targetPathWithQuery) {
+      // Use message-based navigation to avoid iframe reload and preserve Shared Worker session
+      if (this.messenger) {
+        this.messenger.request(Msg.NAVIGATE, { path: targetPathWithQuery })
+          .then(() => {
+            console.log('🔄 Navigated vault to:', page, 'at path', targetPathWithQuery);
+          })
+          .catch((error: any) => {
+            console.error('Navigation failed, falling back to iframe reload:', error);
+            // Fallback to iframe reload if message-based navigation fails
+            const newUrl = new URL(this.config.vaultUrl!);
+            newUrl.pathname = targetPath;
+            newUrl.searchParams.set('appName', this.config.appName!);
+            newUrl.searchParams.set('appDomain', this.config.appDomain!);
+            newUrl.searchParams.set('theme', this.config.theme!);
+            // Add custom query params
+            Object.keys(queryParams).forEach(key => {
+              newUrl.searchParams.set(key, queryParams[key]);
+            });
+            if (this.iframe) {
+              this.iframe.src = newUrl.toString();
+              console.log('🔄 Opening vault page (fallback):', page, 'at', newUrl.toString());
+            }
+          });
+      }
+    }
+
+    // Apply size styling and positioning
     this.iframe.classList.remove('nostrpass-iframe-hidden');
-    
-    // Apply the appropriate visibility mode
-    if (mode === 'minimal') {
-      this.iframe.classList.remove('nostrpass-iframe-visible');
+    this.iframe.classList.remove('nostrpass-iframe-visible');
+    this.iframe.classList.remove('nostrpass-iframe-compact');
+    this.iframe.classList.remove('nostrpass-iframe-tall');
+    this.iframe.classList.remove('nostrpass-iframe-minimal');
+
+    // Clear any inline styles that might have been set for compact mode
+    this.iframe.style.top = '';
+    this.iframe.style.left = '';
+    this.iframe.style.transform = '';
+
+    if (size === 'minimal') {
       this.iframe.classList.add('nostrpass-iframe-minimal');
+    } else if (size === 'compact' || size === 'tall') {
+      this.iframe.classList.add(size === 'tall' ? 'nostrpass-iframe-tall' : 'nostrpass-iframe-compact');
+
+      // Position compact/tall mode relative to button if provided, otherwise center
+      if (buttonElement) {
+        const rect = buttonElement.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        const iframeWidth = 395;
+        const iframeHeight = size === 'tall' ? 600 : 395; // Taller for account picker
+        const gap = 8;
+
+        let top: number;
+        let left: number;
+
+        // Determine vertical position (above or below button)
+        if (spaceBelow >= iframeHeight + gap) {
+          top = rect.bottom + gap;
+        } else if (spaceAbove >= iframeHeight + gap) {
+          top = rect.top - iframeHeight - gap;
+        } else {
+          // Centered fallback
+          this.iframe.style.top = '50%';
+          this.iframe.style.left = '50%';
+          this.iframe.style.transform = 'translate(-50%, -50%)';
+          return;
+        }
+
+        // Determine horizontal position (keep within viewport)
+        left = rect.left;
+        if (left + iframeWidth > window.innerWidth - gap) {
+          left = rect.right - iframeWidth;
+        }
+        if (left < gap) {
+          left = gap;
+        }
+
+        this.iframe.style.top = `${top}px`;
+        this.iframe.style.left = `${left}px`;
+        this.iframe.style.transform = 'none';
+      } else {
+        // No button provided, center the compact modal
+        this.iframe.style.top = '50%';
+        this.iframe.style.left = '50%';
+        this.iframe.style.transform = 'translate(-50%, -50%)';
+      }
     } else {
-      this.iframe.classList.remove('nostrpass-iframe-minimal');
       this.iframe.classList.add('nostrpass-iframe-visible');
     }
 
-    // Show backdrop
+    // Show backdrop with appropriate styling
     if (this.backdropEl) {
-      this.backdropEl.style.display = 'block';
+      this.backdropEl.classList.add('visible');
+      // Always use transparent backdrop
+      this.backdropEl.style.background = 'transparent';
+      this.backdropEl.style.backdropFilter = 'none';
+    }
+
+    // Add click-outside handler for compact and tall modes
+    if (size === 'compact' || size === 'tall') {
+      if (this.outsideClickHandler) {
+        document.removeEventListener('click', this.outsideClickHandler);
+      }
+      setTimeout(() => {
+        this.outsideClickHandler = (e: MouseEvent) => {
+          const target = e.target as HTMLElement;
+          if (this.iframe && !this.iframe.contains(target) &&
+              this.backdropEl && this.backdropEl === target) {
+            console.log('🎯 Click outside iframe detected');
+            this.hide();
+          }
+        };
+        document.addEventListener('click', this.outsideClickHandler);
+      }, 100);
     }
 
     // Accessibility
     this.iframe.setAttribute('aria-hidden', 'false');
     this.iframe.removeAttribute('tabindex');
+    document.body.style.overflow = 'hidden';
+  }
 
-    document.body.style.overflow = 'hidden'; // Prevent background scrolling
-
-    // Navigate to appropriate page based on mode using message passing (not iframe reload)
-    if (mode === 'minimal' && page === 'vault' && this.messenger) {
-      // Tell the vault to navigate to unlock-quick internally
-      try {
-        this.messenger.send('NAVIGATE_TO_UNLOCK', {});
-      } catch (err) {
-        console.warn('Failed to send navigation message:', err);
-      }
+  /**
+   * Legacy method for backward compatibility
+   * @deprecated Use openPage() instead
+   */
+  public show(page: string = 'vault', mode: 'full' | 'compact' | 'minimal' = 'full', buttonElement?: HTMLElement): void {
+    // Map old page names to new VaultPage type
+    let vaultPage: VaultPage;
+    if (page === 'unlock' || page === 'unlock-modal') {
+      vaultPage = 'unlock';
+    } else if (page === 'dashboard') {
+      vaultPage = 'dashboard';
+    } else {
+      vaultPage = 'login'; // default to login page
     }
 
-    if (this.config.debug) console.log('Iframe shown in', mode, 'mode');
+    this.openPage(vaultPage, { size: mode, buttonElement });
   }
 
   public hide(): void {
     console.log('🔙 Embassy hide() method called');
-    
+
     if (!this.iframe) {
       console.warn('Cannot hide iframe - not created yet');
       return;
@@ -449,12 +686,20 @@ class NostrPassEmbassy {
 
     // Add hidden class to move off-screen
     this.iframe.classList.remove('nostrpass-iframe-visible');
+    this.iframe.classList.remove('nostrpass-iframe-compact');
+    this.iframe.classList.remove('nostrpass-iframe-tall');
     this.iframe.classList.remove('nostrpass-iframe-minimal');
     this.iframe.classList.add('nostrpass-iframe-hidden');
 
     // Hide backdrop
     if (this.backdropEl) {
-      this.backdropEl.style.display = 'none';
+      this.backdropEl.classList.remove('visible');
+    }
+
+    // Remove click-outside handler
+    if (this.outsideClickHandler) {
+      document.removeEventListener('click', this.outsideClickHandler);
+      this.outsideClickHandler = null;
     }
 
     // Accessibility
@@ -499,21 +744,72 @@ class NostrPassEmbassy {
         background-color: transparent !important;
       }
       
-      /* Visible state - fullscreen overlay with transparent background */
+      /* Visible state - Large modal for full dashboard */
       .nostrpass-iframe-visible {
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
+        transform: none !important;
         width: 100vw !important;
         height: 100vh !important;
         opacity: 1 !important;
         visibility: visible !important;
         pointer-events: auto !important;
         border: none !important;
+        border-radius: 0 !important;
         background: transparent !important;
-        background-color: transparent !important;
-        z-index: 2147483647 !important; /* Maximum z-index */
-        color-scheme: light dark; /* Support both themes */
+        z-index: 2147483647 !important;
+        overflow: visible !important;
+      }
+
+      /* Compact state - Smaller modal for PIN unlock, account picker */
+      .nostrpass-iframe-compact {
+        position: fixed !important;
+        width: 395px !important;
+        height: 395px !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        border-radius: 16px !important;
+        background: transparent !important;
+        z-index: 2147483647 !important;
+        overflow: hidden !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+      }
+
+      @media (max-width: 500px) {
+        .nostrpass-iframe-compact {
+          width: 90vw !important;
+          height: 90vw !important;
+          max-width: 395px !important;
+          max-height: 395px !important;
+        }
+      }
+
+      /* Tall state - Taller modal for account picker with more content */
+      .nostrpass-iframe-tall {
+        position: fixed !important;
+        width: 395px !important;
+        height: 600px !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        background: transparent !important;
+        border-radius: 12px !important;
+        transition: opacity 0.2s ease, visibility 0.2s ease !important;
+        z-index: 2147483646 !important;
+        overflow: hidden !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+      }
+
+      @media (max-width: 500px) {
+        .nostrpass-iframe-tall {
+          width: 90vw !important;
+          height: min(600px, 80vh) !important;
+          max-width: 395px !important;
+        }
       }
 
       /* Minimal state - centered modal for quick unlock */
@@ -536,18 +832,47 @@ class NostrPassEmbassy {
         color-scheme: light dark; /* Support both themes */
       }
 
-      /* Dimmed backdrop behind iframe - provides the modal overlay effect */
+      /* Dimmed backdrop behind iframe - Clerk-style subtle overlay */
       .nostrpass-backdrop {
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
         width: 100vw !important;
         height: 100vh !important;
-        background: rgba(0, 0, 0, 0.5) !important;
-        backdrop-filter: blur(2px) !important;
-        z-index: 2147483646 !important; /* Just beneath iframe */
+        background: rgba(0, 0, 0, 0.4) !important;
+        backdrop-filter: blur(4px) !important;
+        z-index: 2147483646 !important;
         pointer-events: auto !important;
-        display: none !important;
+        display: none;
+        animation: nostrpass-fade-in 0.2s ease !important;
+      }
+
+      .nostrpass-backdrop.visible {
+        display: block !important;
+      }
+
+      @keyframes nostrpass-fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes nostrpass-modal-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -48%);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, -50%);
+        }
+      }
+
+      .nostrpass-iframe-visible {
+        animation: nostrpass-modal-in 0.2s ease !important;
       }
       
       /* Debug mode - visible but smaller */
@@ -697,10 +1022,20 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: check if a prompt is needed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const preflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'getPublicKey',
@@ -713,11 +1048,49 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
-          this.show('vault', 'full');
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-getPublicKey-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'getPublicKey',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -733,6 +1106,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -763,10 +1143,20 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed, so the op can proceed without error
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signEvent',
@@ -780,11 +1170,51 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
-          this.show('vault', 'full');
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-signEvent-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'signEvent',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            eventKind: (event?.kind || 0).toString(),
+            event: JSON.stringify(event)
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -800,6 +1230,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -849,10 +1286,20 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed so the op can proceed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signData',
@@ -865,11 +1312,50 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
-          this.show('vault', 'full');
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-signData-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'signData',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            data: message
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -885,6 +1371,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       const doSign = async () => this.messenger!.request(Msg.SIGN_DATA, {
@@ -935,10 +1428,20 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
@@ -951,11 +1454,51 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
-          this.show('vault', 'full');
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-nip04-encrypt-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'nip04',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            pubkey,
+            plaintext
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -971,6 +1514,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -1022,10 +1572,20 @@ class NostrPassEmbassy {
     }
 
     try {
-      const identityIndex = options?.identityIndex ?? 0;
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
 
       // Preflight: prompt for PIN first if needed
       let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
       try {
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'nip04',
@@ -1038,11 +1598,51 @@ class NostrPassEmbassy {
           if (!ok) throw new Error('User canceled PIN prompt');
         } else if (needsPin && !this.config.parentPinOverlay) {
           // Create the wait promise BEFORE showing the UI
-          console.log('⏳ Setting up unlock wait promise...');
+          console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.show('vault', 'minimal');
+          this.openPage('unlock', { size: 'compact' });
         } else if (needsPrompt && !this.config.parentPinOverlay) {
-          this.show('vault', 'full');
+          // Create permission wait promise BEFORE showing the vault
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-nip04-decrypt-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'nip04',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            pubkey,
+            ciphertext
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -1058,6 +1658,13 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+      }
+
+      // If we set up a permission wait, now wait for it
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
       }
 
       // Send request to vault using messenger
@@ -1101,6 +1708,67 @@ class NostrPassEmbassy {
     }
   }
 
+  async getAuthStatus(): Promise<any> {
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      const response = await this.messenger!.request(Msg.AUTH_STATUS, {});
+      return response;
+    } catch (error) {
+      console.error('Failed to get auth status:', error);
+      throw error;
+    }
+  }
+
+  async getAllIdentities(): Promise<any> {
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      const response = await this.messenger!.request(Msg.GET_ALL_IDENTITIES, {});
+      return response;
+    } catch (error) {
+      console.error('Failed to get all identities:', error);
+      throw error;
+    }
+  }
+
+  async switchIdentity(identityIndex: number): Promise<any> {
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      const response = await this.messenger!.request(Msg.SWITCH_IDENTITY, { identityIndex });
+      return response;
+    } catch (error) {
+      console.error('Failed to switch identity:', error);
+      throw error;
+    }
+  }
+
+  async logout(): Promise<void> {
+    if (!this.iframe || !this.messenger) {
+      console.log('[Embassy] No iframe/messenger to logout from');
+      return;
+    }
+
+    try {
+      console.log('[Embassy] Sending LOGOUT message to vault');
+      await this.messenger!.request(Msg.LOGOUT, {});
+      console.log('[Embassy] Logout successful');
+    } catch (error) {
+      console.error('[Embassy] Logout failed:', error);
+      throw error;
+    }
+  }
+
   async manageAccount(options: AccountManagerOptions = {}): Promise<AccountManagerResult> {
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
@@ -1109,7 +1777,9 @@ class NostrPassEmbassy {
 
     const forcePrompt = options.forcePrompt ?? true;
 
-    this.show('vault', 'full');
+    // Use minimal mode for initial auth (login/signup), compact for quick operations
+    const mode = options.size || 'minimal';
+    this.show('vault', mode, options.buttonElement);
 
     try {
       const response = await this.messenger!.request(Msg.MANAGE_ACCOUNTS, {
@@ -1117,13 +1787,12 @@ class NostrPassEmbassy {
         appDomain: this.config.appDomain,
         forcePrompt
       });
+      // Only hide on success
+      this.hide();
       return response;
-    } finally {
-      try {
-        this.hide();
-      } catch (error) {
-        console.warn('Failed to hide vault after manageAccount:', error);
-      }
+    } catch (error) {
+      // Don't hide on error - user needs to see the vault to unlock/login
+      throw error;
     }
   }
 

@@ -8,6 +8,7 @@ import { ParentMessenger } from '@nostrpass/messenger';
 import { embassyMessageHandlers } from './embassyMessageHandlers';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { Msg } from '../../../packages/types/src/messages';
+import { NostrPassButton } from './NostrPassButton';
 class NostrPassEmbassy {
     sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
     waitForUnlock() {
@@ -298,13 +299,17 @@ class NostrPassEmbassy {
         }
         // Remove hidden class to show iframe
         this.iframe.classList.remove('nostrpass-iframe-hidden');
+        this.iframe.classList.remove('nostrpass-iframe-visible');
+        this.iframe.classList.remove('nostrpass-iframe-compact');
+        this.iframe.classList.remove('nostrpass-iframe-minimal');
         // Apply the appropriate visibility mode
         if (mode === 'minimal') {
-            this.iframe.classList.remove('nostrpass-iframe-visible');
             this.iframe.classList.add('nostrpass-iframe-minimal');
         }
+        else if (mode === 'compact') {
+            this.iframe.classList.add('nostrpass-iframe-compact');
+        }
         else {
-            this.iframe.classList.remove('nostrpass-iframe-minimal');
             this.iframe.classList.add('nostrpass-iframe-visible');
         }
         // Show backdrop
@@ -337,6 +342,7 @@ class NostrPassEmbassy {
         console.log('🔙 Hiding iframe, current classes:', this.iframe.className);
         // Add hidden class to move off-screen
         this.iframe.classList.remove('nostrpass-iframe-visible');
+        this.iframe.classList.remove('nostrpass-iframe-compact');
         this.iframe.classList.remove('nostrpass-iframe-minimal');
         this.iframe.classList.add('nostrpass-iframe-hidden');
         // Hide backdrop
@@ -383,21 +389,51 @@ class NostrPassEmbassy {
         background-color: transparent !important;
       }
       
-      /* Visible state - fullscreen overlay with transparent background */
+      /* Visible state - Large modal for full dashboard */
       .nostrpass-iframe-visible {
         position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: min(900px, 95vw) !important;
+        height: min(700px, 90vh) !important;
+        max-height: 800px !important;
         opacity: 1 !important;
         visibility: visible !important;
         pointer-events: auto !important;
         border: none !important;
+        border-radius: 16px !important;
         background: transparent !important;
-        background-color: transparent !important;
-        z-index: 2147483647 !important; /* Maximum z-index */
-        color-scheme: light dark; /* Support both themes */
+        z-index: 2147483647 !important;
+        overflow: visible !important;
+      }
+
+      /* Compact state - Smaller modal for PIN unlock, account picker */
+      .nostrpass-iframe-compact {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: 395px !important;
+        height: 395px !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        border-radius: 16px !important;
+        background: transparent !important;
+        z-index: 2147483647 !important;
+        overflow: hidden !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+      }
+
+      @media (max-width: 500px) {
+        .nostrpass-iframe-compact {
+          width: 90vw !important;
+          height: 90vw !important;
+          max-width: 395px !important;
+          max-height: 395px !important;
+        }
       }
 
       /* Minimal state - centered modal for quick unlock */
@@ -420,18 +456,43 @@ class NostrPassEmbassy {
         color-scheme: light dark; /* Support both themes */
       }
 
-      /* Dimmed backdrop behind iframe - provides the modal overlay effect */
+      /* Dimmed backdrop behind iframe - Clerk-style subtle overlay */
       .nostrpass-backdrop {
         position: fixed !important;
         top: 0 !important;
         left: 0 !important;
         width: 100vw !important;
         height: 100vh !important;
-        background: rgba(0, 0, 0, 0.5) !important;
-        backdrop-filter: blur(2px) !important;
-        z-index: 2147483646 !important; /* Just beneath iframe */
+        background: rgba(0, 0, 0, 0.4) !important;
+        backdrop-filter: blur(4px) !important;
+        z-index: 2147483646 !important;
         pointer-events: auto !important;
         display: none !important;
+        animation: nostrpass-fade-in 0.2s ease !important;
+      }
+
+      @keyframes nostrpass-fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes nostrpass-modal-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -48%);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, -50%);
+        }
+      }
+
+      .nostrpass-iframe-visible {
+        animation: nostrpass-modal-in 0.2s ease !important;
       }
       
       /* Debug mode - visible but smaller */
@@ -447,6 +508,42 @@ class NostrPassEmbassy {
         border: 2px solid red !important;
         z-index: 999999 !important;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+      }
+
+      .nostrpass-account-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1rem;
+        border: none;
+        border-radius: 9999px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        font-family: inherit;
+        cursor: pointer;
+        background: linear-gradient(135deg, #2563eb, #6366f1);
+        color: #ffffff;
+        box-shadow: 0 10px 20px -12px rgba(37, 99, 235, 0.75);
+        transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+      }
+
+      .nostrpass-account-button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 24px -12px rgba(79, 70, 229, 0.55);
+        filter: brightness(1.02);
+      }
+
+      .nostrpass-account-button:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 6px 12px -6px rgba(79, 70, 229, 0.45);
+        filter: brightness(0.96);
+      }
+
+      .nostrpass-account-button:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+        box-shadow: none;
       }
     `;
         document.head.appendChild(this.styleElement);
@@ -945,6 +1042,100 @@ class NostrPassEmbassy {
             throw error;
         }
     }
+    async getAuthStatus() {
+        if (!this.iframe || !this.messenger) {
+            await this.createIframe();
+            await this.waitForReady();
+        }
+        try {
+            const response = await this.messenger.request(Msg.AUTH_STATUS, {});
+            return response;
+        }
+        catch (error) {
+            console.error('Failed to get auth status:', error);
+            throw error;
+        }
+    }
+    async manageAccount(options = {}) {
+        if (!this.iframe || !this.messenger) {
+            await this.createIframe();
+            await this.waitForReady();
+        }
+        const forcePrompt = options.forcePrompt ?? true;
+        // Use compact mode for initial auth/unlock, full mode for management
+        const mode = options.size || 'compact';
+        this.show('vault', mode);
+        try {
+            const response = await this.messenger.request(Msg.MANAGE_ACCOUNTS, {
+                appName: this.config.appName,
+                appDomain: this.config.appDomain,
+                forcePrompt
+            });
+            // Only hide on success
+            this.hide();
+            return response;
+        }
+        catch (error) {
+            // Don't hide on error - user needs to see the vault to unlock/login
+            throw error;
+        }
+    }
+    createAccountManagerButton(options = {}) {
+        const { label = 'Manage NostrPass Account', className = 'nostrpass-account-button', appendTo, buttonElement, disabledText, onSelect, onError, forcePrompt } = options;
+        const button = buttonElement ?? document.createElement('button');
+        if (!buttonElement) {
+            button.type = 'button';
+            button.className = className;
+            button.textContent = label;
+        }
+        else if (className) {
+            buttonElement.className = className;
+        }
+        const handleClick = async (event) => {
+            event.preventDefault();
+            const previousLabel = button.textContent;
+            try {
+                button.disabled = true;
+                if (disabledText) {
+                    button.textContent = disabledText;
+                }
+                const result = await this.manageAccount({ forcePrompt });
+                onSelect?.(result);
+            }
+            catch (error) {
+                if (onError) {
+                    onError(error);
+                }
+                else {
+                    console.error('[NostrPass] Failed to manage account:', error);
+                }
+            }
+            finally {
+                button.disabled = false;
+                if (disabledText && previousLabel !== undefined && previousLabel !== null) {
+                    button.textContent = previousLabel;
+                }
+            }
+        };
+        button.addEventListener('click', handleClick);
+        if (appendTo) {
+            const target = typeof appendTo === 'string' ? document.querySelector(appendTo) : appendTo;
+            if (!target) {
+                console.warn('[NostrPass] Unable to find target element for account manager button:', appendTo);
+            }
+            else if (!button.parentElement) {
+                target.appendChild(button);
+            }
+        }
+        return button;
+    }
+    /**
+     * Create a production-ready NostrPass authentication button
+     * Similar to Clerk's user button pattern
+     */
+    createNostrPassButton(config = {}) {
+        return new NostrPassButton(this, config);
+    }
     // Public utility methods
     isReady() {
         return this._isReady;
@@ -1010,7 +1201,10 @@ function initNostrPass(config = {}) {
         nip04: {
             encrypt: (pubkey, plaintext, options) => embassyInstance.encrypt(pubkey, plaintext, options),
             decrypt: (pubkey, ciphertext, options) => embassyInstance.decrypt(pubkey, ciphertext, options)
-        }
+        },
+        manageAccount: (options) => embassyInstance.manageAccount(options),
+        createAccountManagerButton: (options) => embassyInstance.createAccountManagerButton(options),
+        createNostrPassButton: (config) => embassyInstance.createNostrPassButton(config)
     };
     return nostrProvider;
 }
@@ -1056,5 +1250,5 @@ if (typeof window !== 'undefined') {
     }
     console.log('💡 Use window.initNostrPass(config) to customize');
 }
-export { initNostrPass, NostrPassEmbassy };
+export { initNostrPass, NostrPassEmbassy, NostrPassButton };
 //# sourceMappingURL=embassy.js.map

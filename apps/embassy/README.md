@@ -66,6 +66,36 @@ const signedEvent = await window.nostr.signEvent({
 const encrypted = await window.nostr.nip04.encrypt(recipientPubkey, "secret message");
 ```
 
+#### NostrPass Button Component
+
+Create a customizable authentication button similar to Clerk's user button:
+
+```javascript
+const button = window.nostr.createNostrPassButton({
+  appendTo: '#auth-button',        // Element selector or HTMLElement
+  theme: 'auto',                    // 'light', 'dark', or 'auto' (default)
+  showNpub: true,                   // Show npub in dropdown
+  showManageAccount: true,          // Show "Manage Account" option
+  onSignIn: (user) => {
+    console.log('User signed in:', user);
+  },
+  onSignOut: () => {
+    console.log('User signed out');
+  }
+});
+```
+
+**Theme Options:**
+- `'light'` - Always light theme (white background, dark text)
+- `'dark'` - Always dark theme (dark background, light text)
+- `'auto'` - Follow system preference (default)
+
+The button automatically:
+- Shows "Sign in with NostrPass" when logged out
+- Shows user avatar and nickname when logged in
+- Provides dropdown with identity switching and logout
+- Syncs across all instances when vault data changes
+
 #### Programmatic Control
 
 ```javascript

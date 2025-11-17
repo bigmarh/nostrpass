@@ -13,6 +13,12 @@ interface PermissionEventDetail {
   eventKind?: number;
   identityIndex?: number;
   requestId?: string; // Added for async tracking
+  // Data being requested
+  event?: any; // Full event object for signEvent
+  data?: string; // Data for signData
+  pubkey?: string; // Recipient for nip04
+  ciphertext?: string; // Encrypted content for nip04 decrypt
+  plaintext?: string; // Plaintext for nip04 encrypt
 }
 
 export const PermissionPromptController: Component = () => {
@@ -152,7 +158,16 @@ export const PermissionPromptController: Component = () => {
       <PermissionPrompt
         appOrigin={detail()!.appOrigin}
         appName={detail()!.appName}
-        request={{ action: detail()!.action, eventKind: detail()!.eventKind, origin: detail()!.appOrigin }}
+        request={{
+          action: detail()!.action,
+          eventKind: detail()!.eventKind,
+          origin: detail()!.appOrigin,
+          event: detail()!.event,
+          data: detail()!.data,
+          pubkey: detail()!.pubkey,
+          ciphertext: detail()!.ciphertext,
+          plaintext: detail()!.plaintext
+        }}
         onApprove={handleApprove}
         onDeny={handleDeny}
       />

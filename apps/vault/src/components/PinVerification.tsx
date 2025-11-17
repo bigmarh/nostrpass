@@ -50,16 +50,9 @@ const PinVerification: Component<PinVerificationProps> = (props) => {
   };
 
   return (
-    <div class="w-full max-w-md mx-auto p-6">
-      <div class="text-center mb-6">
-        <h2 class="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">Unlock Vault</h2>
-        <p class="text-gray-600 dark:text-gray-400 text-sm">
-          Enter your PIN to unlock your vault
-        </p>
-      </div>
-
+    <div class="w-full mx-auto">
       <Show when={error()}>
-        <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-3 py-2 rounded-md text-sm mb-4 text-center">
+        <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-2 py-0.5 rounded-md text-[10px] mb-1 text-center">
           {error()}
         </div>
       </Show>

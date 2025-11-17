@@ -585,11 +585,16 @@ export const nostrSync = {
       xprivEncrypted: (vaultRaw as any).encryptedVault || (vaultRaw as any).xprivEncrypted,
     };
 
-    console.log('📤 [createInitialVaultForNostr] Creating initial password-encrypted vault:', {
+    console.log('📤 [createInitialVaultForNostr] Vault from IndexedDB:', {
       username: vault.username,
       identitiesCount: vault.identities?.length || 0,
       hasXprivEncrypted: !!vault.xprivEncrypted,
+      xprivEncryptedLength: vault.xprivEncrypted?.length,
+      xprivEncryptedPreview: vault.xprivEncrypted?.substring(0, 50),
+      salt: vault.salt,
+      saltLength: vault.salt?.length,
       updatedAt: new Date(vault.updatedAt || Date.now()).toISOString(),
+      allVaultKeys: Object.keys(vault)
     });
 
     const session = (activeSessions as any).get(params.username);
@@ -636,8 +641,14 @@ export const nostrSync = {
 
     console.log('✅ [createInitialVaultForNostr] Payload created:', {
       identitiesCount: payload.identities.length,
+      identities: payload.identities,
       hasXprivEncrypted: !!payload.xprivEncrypted,
       xprivEncryptedLength: payload.xprivEncrypted?.length,
+      xprivEncryptedPreview: payload.xprivEncrypted?.substring(0, 50),
+      salt: payload.salt,
+      saltLength: payload.salt?.length,
+      passwordSalt: payload.passwordSalt,
+      allPayloadKeys: Object.keys(payload)
     });
 
     // CRITICAL: Encrypt the payload with PASSWORD KEY for initial vault creation
@@ -820,19 +831,20 @@ export const nostrSync = {
       xprivEncryptedLength: payload.xprivEncrypted?.length,
     });
 
-    // CRITICAL: Encrypt the payload with STORAGE PRIVATE KEY (NIP-04) for sync operations
-    // This allows cross-tab sync without requiring the password
+    // CRITICAL: Encrypt the payload with STORAGE PRIVATE KEY (NIP-04)
+    // Architecture: LoginObj (password-encrypted) contains PIN-encrypted storage keypair
+    // This allows vault access with PIN only (no password needed after login)
     const payloadJson = JSON.stringify(payload);
     let encryptedContent: string;
 
-    console.log('🔐 [WORKER saveVaultToNostr] Starting NIP-04 encryption with storage key...');
+    console.log('🔐 [WORKER saveVaultToNostr] Starting NIP-04 encryption with STORAGE key...');
     console.log('🔐 [WORKER saveVaultToNostr] Using storage private key from session');
 
     try {
-      // Use NIP-04 encryption with storage key for sync operations
+      // Use NIP-04 encryption with STORAGE key
       const { encrypt } = await import('nostr-tools/nip04');
       encryptedContent = await encrypt(priv, String(pub), payloadJson);
-      console.log('✅ [WORKER saveVaultToNostr] Payload encrypted with storage key!', {
+      console.log('✅ [WORKER saveVaultToNostr] Payload encrypted with STORAGE key!', {
         encryptedSize: encryptedContent.length,
         identities: payload.identities.length,
       });
@@ -855,6 +867,10 @@ export const nostrSync = {
       keysMatch: pub === vault.publicKey,
       env,
     });
+
+    console.log('📤 [saveVaultToNostr] Publishing with d-tag:', dTag);
+    console.log('📤 [saveVaultToNostr] Author pubkey:', pub);
+    console.log('📤 [saveVaultToNostr] Environment:', env);
 
     const event = {
       kind: 30078 as number, // NIP-78 arbitrary custom app data (replaceable) - MUST match getVaultFromNostr
@@ -893,6 +909,21 @@ export const nostrSync = {
         pubkey: signedEvent.get('pubkey') || event.pubkey,
         sig: signedEvent.get('sig') || '',
       };
+
+      // Publish to relays
+      console.log('📡 [saveVaultToNostr] Publishing vault event to relays...');
+      const relays = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://relay.primal.net',
+        'wss://relay.nostr.band',
+        'ws://localhost:8080',
+      ];
+      const pool = new SimplePool();
+      await Promise.all(pool.publish(relays, eventObj));
+      pool.close(relays);
+      console.log('✅ [saveVaultToNostr] Vault event published to relays successfully');
+
       return { event: eventObj };
     }
 
@@ -906,6 +937,21 @@ export const nostrSync = {
       content: (signedEvent as any).content || event.content,
       sig: (signedEvent as any).sig,
     };
+
+    // Publish to relays
+    console.log('📡 [saveVaultToNostr] Publishing vault event to relays...');
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080',
+    ];
+    const pool = new SimplePool();
+    await Promise.all(pool.publish(relays, normalized));
+    pool.close(relays);
+    console.log('✅ [saveVaultToNostr] Vault event published to relays successfully');
+
     return { event: normalized };
   },
 

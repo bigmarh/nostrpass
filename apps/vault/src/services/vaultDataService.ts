@@ -182,7 +182,7 @@ export class VaultDataService {
     await this.updateVaultData(username, (current) => {
       const updatedIdentities = [...(current.identities || []), identity];
       return { identities: updatedIdentities };
-    });
+    }, { syncToNostr: true }); // Auto-sync when adding identity
   }
 
   /**
@@ -203,8 +203,19 @@ export class VaultDataService {
    * Sync vault data to Nostr
    */
   async syncToNostr(username: string): Promise<void> {
-    // No-op in PRE model; operational changes publish per-stream events directly
-    console.log('ℹ️ [syncToNostr] No-op under PRE model');
+    const cryptoWorker = getCryptoWorker();
+    if (!cryptoWorker) {
+      throw new Error('Crypto worker not ready');
+    }
+
+    try {
+      console.log('📤 [syncToNostr] Syncing vault data to Nostr...');
+      await cryptoWorker.saveVaultToNostr({ username });
+      console.log('✅ [syncToNostr] Vault data synced to Nostr successfully');
+    } catch (error) {
+      console.error('❌ [syncToNostr] Failed to sync vault to Nostr:', error);
+      throw error;
+    }
   }
 
   /**

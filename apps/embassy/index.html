@@ -544,10 +544,7 @@
     <div class="app-container">
       <div class="header">
         <h1>Embassy Test Console</h1>
-        <div id="nostrpass-button-container" style="display: flex; align-items: center; gap: 16px;">
-          <div class="account-manager-badge" style="font-size: 12px; color: var(--text-secondary);">
-            NostrPass Auth Demo →
-          </div>
+        <div id="nostrpass-button-container" style="margin-left: auto;">
           <!-- NostrPass button will be injected here -->
         </div>
       </div>
@@ -1490,12 +1487,7 @@
         await updateAccountInfo();
         log('info', 'Account info refreshed');
       });
-      
-      // Auto-update account info when switching to encryption tab
-      document.querySelector('[data-tab="encryption"]').addEventListener('click', () => {
-        setTimeout(updateAccountInfo, 100);
-      });
-      
+
       // Auto-initialize NostrPass on page load
       function initializeNostrPass() {
         try {
@@ -1536,18 +1528,37 @@
       log('info', 'Embassy Test Console ready');
 
       function setupNostrPassButton() {
-        if (nostrpassButton || !nostrpassButtonContainer || !window.nostr) return;
+        console.log('[Button Setup] Starting setup...', {
+          hasButton: !!nostrpassButton,
+          hasContainer: !!nostrpassButtonContainer,
+          hasNostr: !!window.nostr,
+          hasCreateFn: !!(window.nostr?.createNostrPassButton)
+        });
+
+        if (nostrpassButton) {
+          console.log('[Button Setup] Button already exists, skipping');
+          return;
+        }
+        if (!nostrpassButtonContainer) {
+          console.log('[Button Setup] Container not found!');
+          return;
+        }
+        if (!window.nostr) {
+          console.log('[Button Setup] window.nostr not available');
+          return;
+        }
         if (typeof window.nostr.createNostrPassButton !== 'function') {
+          console.log('[Button Setup] createNostrPassButton not a function');
           log('warning', 'NostrPass button API not available yet');
           return;
         }
 
         try {
+          console.log('[Button Setup] Creating button...');
           nostrpassButton = window.nostr.createNostrPassButton({
             appendTo: nostrpassButtonContainer,
+            signInText: 'Login with NostrPass',
             theme: 'auto',
-            showNpub: true,
-            showManageAccount: true,
             onSignIn: (user) => {
               log('success', 'User signed in', {
                 identityIndex: user.identityIndex,
@@ -1556,13 +1567,11 @@
                 npub: user.npub
               });
             },
-            onSignOut: () => {
-              log('info', 'User signed out');
-            },
             onError: (error) => {
               log('error', 'NostrPass button error', { error: String(error) });
             }
           });
+          console.log('[Button Setup] Button created successfully!', nostrpassButton);
 
           // Try to restore session
           nostrpassButton.restoreSession().then(restored => {

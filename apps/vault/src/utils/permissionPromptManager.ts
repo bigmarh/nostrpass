@@ -10,6 +10,11 @@ interface PermissionPromptRequest {
   action: 'signEvent' | 'signData' | 'getPublicKey' | 'nip04' | 'getRelays';
   eventKind?: number;
   identityIndex: number;
+  event?: any;
+  data?: string;
+  pubkey?: string;
+  plaintext?: string;
+  ciphertext?: string;
 }
 
 interface PermissionPromptResult {
@@ -23,6 +28,23 @@ class PermissionPromptManager {
     reject: (error: Error) => void;
     timeout: NodeJS.Timeout;
   }>();
+
+  constructor() {
+    // Listen for permission-granted and permission-denied events from embassy
+    window.addEventListener('permission-granted', ((e: CustomEvent) => {
+      const { requestId, level } = e.detail;
+      if (requestId) {
+        this.resolvePermission(requestId, { granted: true, level });
+      }
+    }) as EventListener);
+
+    window.addEventListener('permission-denied', ((e: CustomEvent) => {
+      const { requestId } = e.detail;
+      if (requestId) {
+        this.rejectPermission(requestId, 'Permission denied by user');
+      }
+    }) as EventListener);
+  }
 
   /**
    * Request permission from user with async wait
@@ -46,18 +68,43 @@ class PermissionPromptManager {
       // Store the promise handlers
       this.pendingPrompts.set(requestId, { resolve, reject, timeout });
 
-      // Dispatch the permission prompt event
+      // Navigate to permission request page
       try {
-        window.dispatchEvent(new CustomEvent('vault-permission-prompt', {
-          detail: {
-            ...request,
-            requestId
-          }
-        }));
+        const currentPath = window.location.pathname;
+        const appMatch = currentPath.match(/^\/([^\/]+)/);
+        const app = appMatch ? appMatch[1] : 'vault';
+
+        // Build query params
+        const queryParams = new URLSearchParams({
+          appOrigin: request.appOrigin,
+          action: request.action,
+          requestId
+        });
+
+        if (request.appName) queryParams.set('appName', request.appName);
+        if (request.eventKind !== undefined) queryParams.set('eventKind', request.eventKind.toString());
+        if (request.identityIndex !== undefined) queryParams.set('identityIndex', request.identityIndex.toString());
+        if (request.event) queryParams.set('event', JSON.stringify(request.event));
+        if (request.data) queryParams.set('data', request.data);
+        if (request.pubkey) queryParams.set('pubkey', request.pubkey);
+        if (request.plaintext) queryParams.set('plaintext', request.plaintext);
+        if (request.ciphertext) queryParams.set('ciphertext', request.ciphertext);
+
+        // Navigate using message (preserves Shared Worker connection)
+        const messenger = (window as any).__messenger;
+        if (messenger) {
+          messenger.send('NAVIGATE', {
+            path: `/${app}/permission-request?${queryParams.toString()}`
+          });
+        } else {
+          // Fallback to direct navigation
+          window.history.pushState({}, '', `/${app}/permission-request?${queryParams.toString()}`);
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }
       } catch (error) {
         clearTimeout(timeout);
         this.pendingPrompts.delete(requestId);
-        reject(new Error('Failed to dispatch permission prompt'));
+        reject(new Error('Failed to navigate to permission prompt'));
       }
     });
   }
