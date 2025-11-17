@@ -92,12 +92,21 @@ export const PermissionRequestPage: Component = () => {
     }
 
     try {
-      // Save the permission for future requests
+      // ALWAYS grant a temporary session permission so the pending operation can execute immediately
+      // This allows the current operation to succeed after user approval
+      if (action === 'signEvent' || action === 'signData') {
+        // Grant 1-minute session permission for the immediate retry
+        await permissionService.grantSessionPermission(currentUser.profile.username, appKey, action, eventKind, 1);
+      }
+
+      // Save the permission for future requests based on selected level
       if (level === 'ASK_PER_SESSION') {
         if (action === 'signEvent' || action === 'signData') {
+          // Extend the session to 60 minutes if user selected "Ask per session"
           await permissionService.grantSessionPermission(currentUser.profile.username, appKey, action, eventKind, 60);
         }
       } else {
+        // Save permanent permission setting
         const perms: any = {};
         switch (action) {
           case 'getPublicKey':

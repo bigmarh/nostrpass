@@ -1055,7 +1055,42 @@ class NostrPassEmbassy {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
           permissionPromise = this.waitForPermission();
-          this.show('vault', 'full');
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-getPublicKey-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'getPublicKey',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -1142,7 +1177,44 @@ class NostrPassEmbassy {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
           permissionPromise = this.waitForPermission();
-          this.show('vault', 'full');
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-signEvent-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'signEvent',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            eventKind: (event?.kind || 0).toString(),
+            event: JSON.stringify(event)
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -1263,7 +1335,27 @@ class NostrPassEmbassy {
             path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
           });
 
-          this.show('vault', 'full');
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -1369,7 +1461,44 @@ class NostrPassEmbassy {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
           permissionPromise = this.waitForPermission();
-          this.show('vault', 'full');
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-nip04-encrypt-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'nip04',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            pubkey,
+            plaintext
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
@@ -1476,7 +1605,44 @@ class NostrPassEmbassy {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
           permissionPromise = this.waitForPermission();
-          this.show('vault', 'full');
+
+          // Navigate to permission-request page with the operation details
+          const requestId = `${this.config.appDomain}-nip04-decrypt-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'nip04',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            pubkey,
+            ciphertext
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          // Show the vault (iframe is already navigated to permission page, just make it visible)
+          // Apply full-screen display styling
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            // Show backdrop
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            // Accessibility
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login

@@ -79,6 +79,53 @@ export const activeSessions = new Map<string, ExtendedSession>();
  */
 const pinAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
+/**
+ * Session permission grants (temporary, in-memory)
+ * Maps: username -> origin -> action -> eventKind (optional) -> expiry timestamp
+ * Used for "ASK_PER_SESSION" permissions that expire after a certain time
+ */
+interface SessionPermissionKey {
+  username: string;
+  origin: string;
+  action: 'signEvent' | 'signData';
+  eventKind?: number;
+}
+
+interface SessionPermission {
+  expiresAt: number; // Unix timestamp in milliseconds
+}
+
+const sessionPermissions = new Map<string, SessionPermission>();
+
+/**
+ * Generate a unique key for session permission lookup
+ */
+function getSessionPermissionKey(key: SessionPermissionKey): string {
+  const { username, origin, action, eventKind } = key;
+  if (action === 'signEvent' && eventKind !== undefined) {
+    return `${username}:${origin}:${action}:${eventKind}`;
+  }
+  return `${username}:${origin}:${action}`;
+}
+
+/**
+ * Check if a session permission is valid (not expired)
+ */
+function isSessionPermissionValid(key: SessionPermissionKey): boolean {
+  const permKey = getSessionPermissionKey(key);
+  const perm = sessionPermissions.get(permKey);
+  if (!perm) return false;
+
+  const now = Date.now();
+  if (now >= perm.expiresAt) {
+    // Expired, remove it
+    sessionPermissions.delete(permKey);
+    return false;
+  }
+
+  return true;
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -1504,12 +1551,25 @@ export const sessionManager = {
         level = 'ASK_EVERYTIME';
     }
 
-    const allowed = level === 'ALLOW';
+    // Check if there's an active session permission grant
+    let sessionGranted = false;
+    if (action === 'signEvent' || action === 'signData') {
+      sessionGranted = isSessionPermissionValid({
+        username,
+        origin,
+        action,
+        eventKind: action === 'signEvent' ? eventKind : undefined
+      });
+    }
+
+    // If session is granted, allow the operation regardless of saved permission level
+    const allowed = level === 'ALLOW' || sessionGranted;
+
     return {
       allowed,
       level,
-      needsPrompt: level === 'ASK_EVERYTIME',
-      sessionGranted: false
+      needsPrompt: level === 'ASK_EVERYTIME' && !sessionGranted,
+      sessionGranted
     };
   },
 
@@ -1627,6 +1687,36 @@ export const sessionManager = {
       origin,
       permissions: merged
     });
+
+    return { success: true };
+  },
+
+  /**
+   * Grant temporary session permission for an action
+   * Used for "ASK_PER_SESSION" and one-time permission grants
+   * Permission expires after sessionDurationMinutes
+   */
+  grantSessionPermission: async (params: {
+    username: string;
+    origin: string;
+    action: 'signEvent' | 'signData';
+    eventKind?: number;
+    sessionDurationMinutes: number;
+  }): Promise<{ success: boolean }> => {
+    const { username, origin, action, eventKind, sessionDurationMinutes } = params;
+
+    const key = getSessionPermissionKey({
+      username,
+      origin,
+      action,
+      eventKind: action === 'signEvent' ? eventKind : undefined
+    });
+
+    const expiresAt = Date.now() + (sessionDurationMinutes * 60 * 1000);
+
+    sessionPermissions.set(key, { expiresAt });
+
+    console.log(`[SessionManager] Granted session permission: ${key}, expires in ${sessionDurationMinutes} minutes`);
 
     return { success: true };
   },
