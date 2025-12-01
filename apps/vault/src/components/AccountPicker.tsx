@@ -1,4 +1,4 @@
-import { Component, createSignal, For } from 'solid-js';
+import { Component, createSignal, For, Show, createMemo } from 'solid-js';
 import type { Identity } from '@nostrpass/types';
 import { nip19 } from 'nostr-tools';
 
@@ -19,6 +19,22 @@ interface AccountPickerProps {
 export const AccountPicker: Component<AccountPickerProps> = (props) => {
   // Default to first identity's original index
   const [selectedIndex, setSelectedIndex] = createSignal<number>(props.identities[0]?.index || 0);
+  const [searchQuery, setSearchQuery] = createSignal('');
+
+  // Show search when there are more than 4 identities
+  const showSearch = () => props.identities.length > 4;
+
+  // Filter identities based on search query
+  const filteredIdentities = createMemo(() => {
+    const query = searchQuery().toLowerCase();
+    if (!query) return props.identities;
+
+    return props.identities.filter(item => {
+      const name = getDisplayName(item.identity, item.index).toLowerCase();
+      const npub = getNpub(item.identity).toLowerCase();
+      return name.includes(query) || npub.includes(query);
+    });
+  });
 
   const handleSelect = () => {
     props.onSelect(selectedIndex());
@@ -56,9 +72,20 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
             </p>
           </div>
 
-          {/* Identity List */}
-          <div class="space-y-2 mb-6">
-            <For each={props.identities}>
+          {/* Search input - only show when more than 4 identities */}
+          <Show when={showSearch()}>
+            <input
+              type="text"
+              placeholder="Search identities..."
+              value={searchQuery()}
+              onInput={(e) => setSearchQuery(e.currentTarget.value)}
+              class="w-full px-3 py-2 mb-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            />
+          </Show>
+
+          {/* Identity List - scrollable with max 3 visible */}
+          <div class="space-y-2 mb-6 max-h-[calc(3*88px)] overflow-y-auto">
+            <For each={filteredIdentities()}>
               {(item) => (
                 <button
                   onClick={() => setSelectedIndex(item.index)}
@@ -97,6 +124,13 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
                 </button>
               )}
             </For>
+
+            {/* Empty state */}
+            <Show when={filteredIdentities().length === 0}>
+              <div class="text-center py-8 text-gray-500 dark:text-gray-400">
+                No identities found matching "{searchQuery()}"
+              </div>
+            </Show>
           </div>
 
           {/* Actions */}

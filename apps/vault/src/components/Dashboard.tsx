@@ -237,9 +237,11 @@ export const Dashboard: Component = () => {
             <Show when={showGlobalSettings()}>
                 <GlobalSettings
                     username={user()?.profile.username || ''}
-                    identityCount={vaultData()?.identities?.length || 0}
+                    identityCount={vaultData()?.identities?.filter((id: any) => !id.archived).length || 0}
                     isOpen={showGlobalSettings()}
                     onClose={() => setShowGlobalSettings(false)}
+                    vaultData={vaultData()}
+                    onUpdateVaultData={updateVaultData}
                 />
             </Show>
         </div>
