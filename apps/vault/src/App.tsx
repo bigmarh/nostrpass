@@ -10,6 +10,7 @@ import { I18nProvider } from './i18n';
 import { VaultCoreDemo } from './components/VaultCoreDemo';
 import { VaultCoreProvider } from './providers/VaultCoreProvider';
 import { NostrSyncIndicator } from './components/NostrSyncIndicator';
+import { AtomicAuthTest } from './components/AtomicAuthTest';
 
 const AppContent: Component = () => {
   return (
@@ -29,6 +30,7 @@ const AppContent: Component = () => {
           <VaultCoreDemo />
         </VaultCoreProvider>
       )} />
+      <Route path="/:app/atomic-auth-test" component={AtomicAuthTest} />
     </Router>
   );
 };
