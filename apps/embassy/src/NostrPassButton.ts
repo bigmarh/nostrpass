@@ -565,6 +565,38 @@ export class NostrPassButton {
       }
 
       /* Identity switcher styles */
+      .nostrpass-identity-list {
+        max-height: calc(3 * 56px); /* 3 items visible */
+        overflow-y: auto;
+      }
+
+      .nostrpass-identity-search {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        font-size: 13px;
+        margin-bottom: 8px;
+        outline: none;
+        background: #fff;
+        color: #111827;
+      }
+
+      .nostrpass-identity-search:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+      }
+
+      [data-theme="dark"] .nostrpass-identity-search {
+        background: #374151;
+        border-color: #4b5563;
+        color: #f9fafb;
+      }
+
+      [data-theme="dark"] .nostrpass-identity-search:focus {
+        border-color: #60a5fa;
+      }
+
       .nostrpass-identity-item {
         cursor: pointer;
       }
@@ -770,33 +802,37 @@ export class NostrPassButton {
     // Build identities list HTML
     let identitiesHTML = '';
     if (allIdentities.length > 1) {
+      const showSearch = allIdentities.length > 4;
       identitiesHTML = `
         <div class="nostrpass-dropdown-divider"></div>
         <div class="nostrpass-dropdown-section">
           <div style="padding: 8px 12px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
             Switch Identity
           </div>
-          ${allIdentities.map((identity: any) => {
-            const isCurrentIdentity = identity.index === user.identityIndex;
-            const idInitials = identity.nickname ? this.getInitialsFromName(identity.nickname) : `I${identity.index + 1}`;
-            const rawIdName = identity.nickname || `Identity ${identity.index + 1}`;
-            const idName = rawIdName.charAt(0).toUpperCase() + rawIdName.slice(1);
-            return `
-              <button class="nostrpass-dropdown-item nostrpass-identity-item ${isCurrentIdentity ? 'nostrpass-identity-active' : ''}" data-action="switch-identity" data-identity-index="${identity.index}">
-                <div class="nostrpass-identity-avatar">
-                  ${idInitials}
-                </div>
-                <div class="nostrpass-identity-info">
-                  <div class="nostrpass-identity-name">
-                    ${idName}
+          ${showSearch ? '<input type="text" class="nostrpass-identity-search" placeholder="Search identities..." data-search-identities />' : ''}
+          <div class="nostrpass-identity-list" data-identity-container>
+            ${allIdentities.map((identity: any) => {
+              const isCurrentIdentity = identity.index === user.identityIndex;
+              const idInitials = identity.nickname ? this.getInitialsFromName(identity.nickname) : `I${identity.index + 1}`;
+              const rawIdName = identity.nickname || `Identity ${identity.index + 1}`;
+              const idName = rawIdName.charAt(0).toUpperCase() + rawIdName.slice(1);
+              return `
+                <button class="nostrpass-dropdown-item nostrpass-identity-item ${isCurrentIdentity ? 'nostrpass-identity-active' : ''}" data-action="switch-identity" data-identity-index="${identity.index}" data-identity-name="${idName.toLowerCase()}" data-identity-npub="${identity.npub || ''}">
+                  <div class="nostrpass-identity-avatar">
+                    ${idInitials}
                   </div>
-                  ${identity.npub ? `<div class="nostrpass-identity-npub">${identity.npub.slice(0, 12)}...</div>` : ''}
-                </div>
-                ${isCurrentIdentity ? `<svg class="nostrpass-identity-check" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.333 4L6 11.333 2.667 8" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
-                ${!identity.isAuthorized && !isCurrentIdentity ? `<span class="nostrpass-identity-badge">Not authorized</span>` : ''}
-              </button>
-            `;
-          }).join('')}
+                  <div class="nostrpass-identity-info">
+                    <div class="nostrpass-identity-name">
+                      ${idName}
+                    </div>
+                    ${identity.npub ? `<div class="nostrpass-identity-npub">${identity.npub.slice(0, 12)}...</div>` : ''}
+                  </div>
+                  ${isCurrentIdentity ? `<svg class="nostrpass-identity-check" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.333 4L6 11.333 2.667 8" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
+                  ${!identity.isAuthorized && !isCurrentIdentity ? `<span class="nostrpass-identity-badge">Not authorized</span>` : ''}
+                </button>
+              `;
+            }).join('')}
+          </div>
         </div>
       `;
     }
@@ -872,6 +908,21 @@ export class NostrPassButton {
         this.toggleDropdown();
       }
     });
+
+    // Identity search input
+    const searchInput = this.container.querySelector('[data-search-identities]') as HTMLInputElement;
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        const query = (e.target as HTMLInputElement).value.toLowerCase();
+        const identityBtns = this.container.querySelectorAll('[data-action="switch-identity"]');
+        identityBtns.forEach(btn => {
+          const name = (btn as HTMLElement).getAttribute('data-identity-name') || '';
+          const npub = (btn as HTMLElement).getAttribute('data-identity-npub') || '';
+          const matches = name.includes(query) || npub.toLowerCase().includes(query);
+          (btn as HTMLElement).style.display = matches ? '' : 'none';
+        });
+      });
+    }
 
     // Switch identity buttons
     const switchBtns = this.container.querySelectorAll('[data-action="switch-identity"]');

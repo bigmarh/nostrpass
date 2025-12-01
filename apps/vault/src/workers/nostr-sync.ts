@@ -110,13 +110,26 @@ async function pollOnceAndApply(params: {
         }
         if (!remote) continue;
         const local = await vaultDB.getVault(username);
-        const remoteVersion = (remote as any).version || 0;
-        const localVersion = (local as any)?.version || 0;
-        if (remoteVersion > localVersion) {
+
+        // Use timestamp-based comparison like DMs (simpler and more reliable)
+        const remoteTimestamp = ev.created_at || 0; // Nostr event timestamp
+        const localTimestamp = (local as any)?.updatedAt ? Math.floor((local as any).updatedAt / 1000) : 0; // Convert ms to seconds
+
+        console.log('⏱️ [Worker Poll] Comparing timestamps:', {
+          remoteTimestamp,
+          localTimestamp,
+          remoteDate: new Date(remoteTimestamp * 1000).toISOString(),
+          localDate: local?.updatedAt ? new Date(local.updatedAt).toISOString() : 'never',
+          remoteIdentities: remote.identities?.length,
+          localIdentities: local?.identities?.length,
+        });
+
+        if (remoteTimestamp > localTimestamp) {
           console.log('📥 [Worker] Applying newer vault from Nostr (poll):', {
-            remoteVersion,
-            localVersion,
+            remoteTimestamp,
+            localTimestamp,
             remoteIdentities: remote.identities?.length,
+            localIdentities: local?.identities?.length,
           });
           await vaultOperations.updateVaultData({
             username,
@@ -124,6 +137,8 @@ async function pollOnceAndApply(params: {
             skipVersionIncrement: true,
           });
           break;
+        } else {
+          console.log('⏭️ [Worker Poll] Skipping older/same vault (local is newer or equal)');
         }
       } catch {}
     }
@@ -342,7 +357,9 @@ export const nostrSync = {
     username: string;
     relays: string[];
   }): Promise<{ started: boolean }> => {
+    console.log('🚀 [Worker.startNostrSubscription] FUNCTION CALLED with params:', params);
     await ensureCryptoReady();
+    console.log('🚀 [Worker.startNostrSubscription] Crypto ready');
     const { username, relays } = params;
     const session = activeSessions.get(username);
     const vault = await vaultDB.getVault(username);
@@ -382,14 +399,28 @@ export const nostrSync = {
         relaysCount: relays.length,
       });
 
-      const sub: any = (pool as any).subscribeMany
-        ? (pool as any).subscribeMany(relays, [filter])
-        : (pool as any).sub(relays as any, [filter]);
+      console.log('🔍 [Worker] SimplePool API check:', {
+        hasSubscribeMany: typeof (pool as any).subscribeMany,
+        hasSub: typeof (pool as any).sub,
+        hasSubscribeManyToOne: typeof (pool as any).subscribeManyToOne,
+        poolKeys: Object.keys(pool).slice(0, 10)
+      });
 
+      // Define event handler first
       const onEvent = async (ev: NostrEvent) => {
         try {
           const d = ev.tags.find((t) => t[0] === 'd')?.[1] || '';
-          if (!d) return;
+          console.log('📨 [Worker] Received Nostr event:', {
+            kind: ev.kind,
+            d: d ? d.slice(0, 50) : '(no d-tag)',
+            created_at: new Date(ev.created_at * 1000).toISOString(),
+            eventId: ev.id.slice(0, 12)
+          });
+
+          if (!d) {
+            console.warn('⚠️ [Worker] Event missing d-tag, ignoring');
+            return;
+          }
 
           // Identity PRE stream
           if (d.startsWith('np/identity/')) {
@@ -457,6 +488,11 @@ export const nostrSync = {
 
           // Legacy/full-vault stream (initial snapshot or older clients)
           if (d.startsWith(`nostrpass.com_vault_`)) {
+            console.log('📥 [Worker] Received full VaultObj event:', {
+              d: d.slice(0, 40),
+              eventId: ev.id.slice(0, 12),
+            });
+
             let remote: VaultData | null = null;
             try {
               const plaintext = await nip04DecryptJS(
@@ -465,23 +501,45 @@ export const nostrSync = {
                 ev.content
               );
               remote = JSON.parse(plaintext) as VaultData;
-            } catch {
+              console.log('✅ [Worker] Decrypted VaultObj successfully');
+            } catch (decryptErr) {
+              console.error('❌ [Worker] Failed to decrypt VaultObj:', decryptErr);
               remote = null;
             }
+
             if (!remote) return;
+
             const local = await vaultDB.getVault(username);
-            const remoteVersion = (remote as any).version || 0;
-            const localVersion = (local as any)?.version || 0;
-            if (remoteVersion > localVersion) {
+
+            // Use timestamp-based comparison like DMs (simpler and more reliable)
+            const remoteTimestamp = ev.created_at || 0; // Nostr event timestamp
+            const localTimestamp = (local as any)?.updatedAt ? Math.floor((local as any).updatedAt / 1000) : 0; // Convert ms to seconds
+
+            console.log('📊 [Worker] VaultObj timestamp comparison:', {
+              remoteTimestamp,
+              localTimestamp,
+              remoteDate: new Date(remoteTimestamp * 1000).toISOString(),
+              localDate: local?.updatedAt ? new Date(local.updatedAt).toISOString() : 'never',
+              remoteIdentities: remote.identities?.length || 0,
+              localIdentities: local?.identities?.length || 0,
+              willUpdate: remoteTimestamp > localTimestamp
+            });
+
+            if (remoteTimestamp > localTimestamp) {
               console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', {
-                remoteVersion,
-                localVersion,
+                remoteTimestamp,
+                localTimestamp,
+                remoteIdentities: remote.identities?.length || 0,
+                localIdentities: local?.identities?.length || 0,
               });
               await vaultOperations.updateVaultData({
                 username,
                 vaultData: remote,
                 skipVersionIncrement: true,
               });
+              console.log('✅ [Worker] Vault updated successfully from realtime event');
+            } else {
+              console.log('ℹ️ [Worker] Remote timestamp not newer, skipping update');
             }
           }
         } catch (e) {
@@ -489,47 +547,71 @@ export const nostrSync = {
         }
       };
 
-      // Attach listeners using whichever API is available
-      if (sub && typeof sub.on === 'function') {
-        sub.on('event', onEvent);
-        sub.on('eose', () => console.log('📡 [Worker] Nostr EOSE for', username));
-        nostrSubscriptions.set(username, {
-          pool,
-          relays,
-          unsub: () => {
-            try {
-              sub.unsub?.();
-            } catch {}
-          },
-        });
-      } else if (sub && typeof sub.onEvent === 'function') {
-        sub.onEvent(onEvent);
-        if (typeof sub.onEnd === 'function')
-          sub.onEnd(() => console.log('📡 [Worker] Nostr EOSE for', username));
-        nostrSubscriptions.set(username, {
-          pool,
-          relays,
-          unsub: () => {
-            try {
-              sub.close?.();
-            } catch {}
-          },
-        });
-      } else {
-        throw new Error('Unknown subscription interface');
-      }
+      // Create subscription with callbacks (nostr-tools v2 API)
+      // Use subscribeMany with async iterator approach for better compatibility
+      console.log('📡 [Worker] Creating subscription with callback-based API');
+      console.log('📡 [Worker] Relays:', relays);
+      console.log('📡 [Worker] Filter:', filter);
 
-      // Light periodic reconcile (author query) as safety net
+      // Try the iterator-based approach which is more reliable in nostr-tools v2
+      const sub = pool.subscribeMany(relays, [filter], {
+        onevent(event: NostrEvent) {
+          console.log('🔔 [Worker] onevent callback FIRED!', {
+            kind: event.kind,
+            id: event.id.slice(0, 12),
+            created_at: new Date(event.created_at * 1000).toISOString()
+          });
+          // Call the handler asynchronously
+          onEvent(event).catch((err) => {
+            console.error('❌ [Worker] Error in onevent handler:', err);
+          });
+        },
+        oneose() {
+          console.log('📡 [Worker] EOSE callback FIRED for', username);
+        },
+        onclose(reasons: string[]) {
+          console.log('📡 [Worker] onclose callback FIRED:', reasons);
+        }
+      });
+
+      console.log('✅ [Worker] Subscription object created:', {
+        hasClose: typeof sub?.close,
+        subType: typeof sub,
+        subConstructor: sub?.constructor?.name
+      });
+
+      nostrSubscriptions.set(username, {
+        pool,
+        relays,
+        unsub: () => {
+          try {
+            console.log('🛑 [Worker] Closing subscription for', username);
+            sub.close();
+          } catch (e) {
+            console.warn('⚠️ [Worker] Error closing subscription:', e);
+          }
+        },
+      });
+
+      // Optional: Slow polling as backup (every 60 seconds)
+      // Realtime subscription should handle most updates now
       const key = `${username}`;
       const reconcile = setInterval(() => {
+        console.log('🔄 [Worker] Running periodic vault poll (backup) for', username);
         pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });
       }, 60000) as unknown as number;
       nostrPollers.set(key, reconcile);
+      console.log('🔄 [Worker] Backup polling configured (60s interval)');
 
       console.log('✅ [Worker] Realtime subscription active');
       return { started: true };
     } catch (subErr) {
-      console.warn('⚠️ [Worker] Realtime subscription failed; falling back to polling:', subErr);
+      console.error('❌ [Worker] Realtime subscription FAILED - Error details:', {
+        errorMessage: subErr instanceof Error ? subErr.message : String(subErr),
+        errorStack: subErr instanceof Error ? subErr.stack : undefined,
+        errorType: subErr?.constructor?.name
+      });
+      console.warn('⚠️ [Worker] Falling back to polling mode');
       const pool = new SimplePool();
       nostrSubscriptions.set(username, { pool, relays, unsub: null });
       await pollOnceAndApply({ username, relays, pubkey, storagePriv, storagePub, env });

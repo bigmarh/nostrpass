@@ -33,6 +33,8 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   const [permissionSaveError, setPermissionSaveError] = createSignal<string | null>(null);
   const [showSettingsPanel, setShowSettingsPanel] = createSignal(false);
   const [isRefreshing, setIsRefreshing] = createSignal(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = createSignal(false);
+  const [identityToArchive, setIdentityToArchive] = createSignal<{index: number, nickname: string} | null>(null);
 
   const permissionService = PermissionService.getInstance();
 
@@ -44,34 +46,46 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       return [];
     }
 
-    // Use real vault identities - this will now be reactive to vault data changes
+    // Use real vault identities - filter out archived ones and preserve original index
     const activeIndex = props.appId ? (vault.activeIdentityByApp?.[props.appId] ?? null) : null;
-    return vault.identities.map((identity: any, index: number) => {
-      // Get npub from public key
-      let npub = '';
-      try {
-        npub = nip19.npubEncode(identity.publicKey);
-      } catch (e) {
-        npub = identity.publicKey;
-      }
+    return vault.identities
+      .map((identity: any, originalIndex: number) => ({ identity, originalIndex }))
+      .filter(({ identity }) => !identity.archived)
+      .map(({ identity, originalIndex }) => {
+        // Get npub from public key
+        let npub = '';
+        try {
+          npub = nip19.npubEncode(identity.publicKey);
+        } catch (e) {
+          npub = identity.publicKey;
+        }
 
-      // Check if this identity has permissions for the current app (authorization)
-      const hasAppPermissions = props.appId && identity.appPermissions?.[props.appId];
-      const connectedApps = identity.appPermissions ? Object.keys(identity.appPermissions) : [];
-      const otherConnectedApps = connectedApps.filter(app => app !== props.appId);
+        // Check if this identity has permissions for the current app (authorization)
+        const hasAppPermissions = props.appId && identity.appPermissions?.[props.appId];
+        const connectedApps = identity.appPermissions ? Object.keys(identity.appPermissions) : [];
+        const otherConnectedApps = connectedApps.filter(app => app !== props.appId);
 
-      return {
-        nickname: identity.nickname || 'Personal',
-        publicKey: identity.publicKey,
-        npub: npub,
-        createdAt: identity.createdAt || new Date().toISOString(),
-        isActive: activeIndex === index,
-        hasAppPermissions,
-        connectedApps,
-        otherConnectedApps,
-        index
-      };
-    });
+        return {
+          nickname: identity.nickname || 'Personal',
+          publicKey: identity.publicKey,
+          npub: npub,
+          createdAt: identity.createdAt || new Date().toISOString(),
+          isActive: activeIndex === originalIndex,
+          hasAppPermissions,
+          connectedApps,
+          otherConnectedApps,
+          index: originalIndex  // Use original index from full vault array
+        };
+      });
+  });
+
+  // Show search when there are more than 4 identities
+  createEffect(() => {
+    const shouldShowSearch = identities().length > 4;
+    setShowSearch(shouldShowSearch);
+    if (!shouldShowSearch) {
+      setSearchQuery(''); // Clear search when not needed
+    }
   });
 
   const filteredIdentities = createMemo(() => {
@@ -529,6 +543,77 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     setIdentitySelectionCallback(null);
   };
 
+  // Show archive confirmation dialog
+  const confirmArchiveIdentity = (identityIndex: number) => {
+    const identity = props.vaultData?.identities[identityIndex];
+    if (!identity) return;
+
+    setIdentityToArchive({ index: identityIndex, nickname: identity.nickname });
+    setShowArchiveConfirm(true);
+  };
+
+  // Handle archive identity (soft delete - keeps path and nickname for recovery)
+  const handleArchiveIdentity = async () => {
+    const toArchive = identityToArchive();
+    if (!toArchive) return;
+
+    if (props.isVaultLocked) {
+      props.onShowPinUnlock();
+      return;
+    }
+
+    setShowArchiveConfirm(false);
+
+    try {
+      const currentVault = props.vaultData;
+      if (!currentVault) return;
+
+      // Mark identity as archived (add archived flag and timestamp)
+      const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
+        if (idx === toArchive.index) {
+          return {
+            ...id,
+            archived: true,
+            archivedAt: Date.now()
+          };
+        }
+        return id;
+      });
+
+      // Update activeIdentityByApp - clear if this identity was active
+      const updatedActiveIdentityByApp = { ...(currentVault.activeIdentityByApp || {}) };
+      Object.keys(updatedActiveIdentityByApp).forEach(appId => {
+        if (updatedActiveIdentityByApp[appId] === toArchive.index) {
+          delete updatedActiveIdentityByApp[appId];
+        }
+      });
+
+      // Save and sync to Nostr
+      await props.onUpdateVaultData({
+        identities: updatedIdentities,
+        activeIdentityByApp: updatedActiveIdentityByApp
+      }, { syncToNostr: true });
+
+      console.log('✅ [Archive Identity] Identity archived and synced to Nostr');
+      setShowSettingsPanel(false);
+      setIdentityToArchive(null);
+    } catch (e) {
+      console.error('Failed to archive identity:', e);
+      const errorMsg = e instanceof Error ? e.message : String(e);
+
+      // Check for rate limit errors
+      if (errorMsg.includes('rate-limit') || errorMsg.includes('too much')) {
+        setIdentityOperationError('✅ Archived locally. Syncing to Nostr in background...');
+        setTimeout(() => setIdentityOperationError(null), 5000);
+        setShowSettingsPanel(false);
+        setIdentityToArchive(null);
+      } else {
+        setIdentityOperationError(`Failed to archive identity: ${errorMsg}`);
+        setTimeout(() => setIdentityOperationError(null), 5000);
+      }
+    }
+  };
+
   // Handle add identity
   const handleAddIdentity = async () => {
     try {
@@ -583,7 +668,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   return (
     <>
       {/* Identity list */}
-      <div class="flex flex-col gap-2 p-4 relative">
+      <div class="flex flex-col gap-2 relative">
         <header class="flex justify-between items-center">
           <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
           <div class="flex gap-2">
@@ -607,6 +692,17 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
             </button>
           </div>
         </header>
+
+        {/* Search input - only show when more than 4 identities */}
+        <Show when={showSearch()}>
+          <input
+            type="text"
+            placeholder="Search identities..."
+            value={searchQuery()}
+            onInput={(e) => setSearchQuery(e.currentTarget.value)}
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          />
+        </Show>
 
         {/* Lock overlay when vault is locked */}
         <Show when={props.isVaultLocked}>
@@ -633,7 +729,9 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
           </div>
         </Show>
 
-        <For each={filteredIdentities()}>
+        {/* Scrollable identity list - max 5 visible */}
+        <div class="overflow-y-auto space-y-2" style="max-height: 550px;">
+          <For each={filteredIdentities()}>
           {(identity) => (
             <div
               class={`flex flex-col border rounded-lg p-4 justify-between items-center hover:shadow-md dark:hover:shadow-lg transition-all ${identity.isActive ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
@@ -719,7 +817,23 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                     </span>
                   </Show>
                 </div>
-                <div>          {/* Settings button */}
+                <div class="flex items-center gap-2">
+                  {/* Archive button */}
+                  <Show when={!props.isVaultLocked}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        confirmArchiveIdentity(identity.index);
+                      }}
+                      class="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors border border-gray-200 dark:border-gray-600 hover:border-red-300 dark:hover:border-red-800"
+                      title="Archive Identity"
+                    >
+                      <svg class="w-4 h-4 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                      </svg>
+                    </button>
+                  </Show>
+                  {/* Settings button */}
                   <Show when={!props.isVaultLocked}>
                     <button
                       onClick={(e) => {
@@ -760,6 +874,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
             }
           </div>
         )}
+        </div>
       </div>
 
       {/* Identity Selection Modal */}
@@ -849,20 +964,20 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
             </div>
             <div class="flex gap-3">
               <button
-                class="flex-1 px-4 py-2 bg-black dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 disabled:bg-gray-400 dark:disabled:bg-gray-600"
-                disabled={!newIdentityNickname() || props.isVaultLocked}
-                onClick={handleAddIdentity}
-              >
-                Add Identity
-              </button>
-              <button
-                class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
                 onClick={() => {
                   setShowAddIdentityModal(false);
                   setNewIdentityNickname('');
                 }}
               >
                 Cancel
+              </button>
+              <button
+                class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors font-medium"
+                disabled={!newIdentityNickname() || props.isVaultLocked}
+                onClick={handleAddIdentity}
+              >
+                Add Identity
               </button>
             </div>
             <Show when={props.isVaultLocked}>
@@ -988,9 +1103,59 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                         <p class="text-sm text-red-700">{identityOperationError()}</p>
                       </div>
                     </Show>
+
+                    {/* Archive Identity Section */}
+                    <div class="pt-6 mt-6 border-t border-gray-200 dark:border-gray-700">
+                      <h3 class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">Danger Zone</h3>
+                      <Show when={!props.isVaultLocked} fallback={
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Unlock your vault to archive identities.</p>
+                      }>
+                        <button
+                          onClick={() => confirmArchiveIdentity(identity().index)}
+                          class="w-full px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors text-sm font-medium"
+                        >
+                          Archive Identity
+                        </button>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                          Archived identities are hidden but can be restored later with their path and nickname.
+                        </p>
+                      </Show>
+                    </div>
                   </div>
                 )}
               </Show>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Archive Confirmation Modal */}
+      <Show when={showArchiveConfirm()}>
+        <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-gray-300 dark:border-gray-600 p-6 max-w-md w-full mx-4">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Archive Identity?</h2>
+            <p class="text-gray-700 dark:text-gray-300 mb-2">
+              Are you sure you want to archive <strong class="text-gray-900 dark:text-gray-100">{identityToArchive()?.nickname}</strong>?
+            </p>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              This identity will be hidden but can be restored later with its path and nickname.
+            </p>
+            <div class="flex gap-3">
+              <button
+                onClick={handleArchiveIdentity}
+                class="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors font-medium"
+              >
+                Archive
+              </button>
+              <button
+                onClick={() => {
+                  setShowArchiveConfirm(false);
+                  setIdentityToArchive(null);
+                }}
+                class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
