@@ -282,8 +282,10 @@ export const Login: Component = () => {
 
             if (success) {
                 setLoadingStatus('Vault unlocked successfully!');
-                // Close the vault - account is now fully ready
-                send('HIDE_VAULT');
+
+                // After login+unlock, navigate to account picker so user can select identity
+                const appOrigin = params.app ? desanitizeDomain(params.app) : 'unknown';
+                navigate(`/${params.app || 'vault'}/account-picker?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&afterLogin=true`);
             } else {
                 throw new Error('Failed to unlock vault. Please try again.');
             }
