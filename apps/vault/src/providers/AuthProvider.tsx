@@ -1107,10 +1107,23 @@ export const AuthProvider: ParentComponent = (props) => {
           if (assembled && Array.isArray(assembled.identities) && assembled.identities.length > 0) {
             console.log('✅ [UNLOCK] Fetched VaultObj from Nostr with', assembled.identities.length, 'identities');
 
-            // Update local vault with fetched data
+            // Get existing vault data to preserve username and other fields
+            const existingVault = await cryptoWorker.getVaultData({
+              username: currentUser.profile.username,
+              includeEncryptedVault: true
+            });
+
+            // Merge assembled data with existing vault data
+            const mergedVaultData = {
+              ...existingVault,
+              identities: assembled.identities,
+              activeIdentityByApp: assembled.perms || existingVault.activeIdentityByApp || {}
+            };
+
+            // Update local vault with merged data
             await cryptoWorker.updateVaultData({
               username: currentUser.profile.username,
-              vaultData: assembled,
+              vaultData: mergedVaultData,
               skipVersionIncrement: true
             });
 
@@ -1265,10 +1278,14 @@ export const AuthProvider: ParentComponent = (props) => {
   // After unlock, start realtime Nostr subscription
   const startRealtime = async (username: string) => {
     try {
+      console.log('🔧 [startRealtime] Starting subscription for:', username);
       const cryptoWorker = getCryptoWorker();
+      console.log('🔧 [startRealtime] Got crypto worker:', !!cryptoWorker);
       const relays = getRelays();
-      await cryptoWorker.startNostrSubscription({ username, relays });
-      console.log('📡 Realtime Nostr subscription started');
+      console.log('🔧 [startRealtime] Got relays:', relays);
+      console.log('🔧 [startRealtime] Calling worker.startNostrSubscription...');
+      const result = await cryptoWorker.startNostrSubscription({ username, relays });
+      console.log('📡 Realtime Nostr subscription started. Result:', result);
     } catch (e) {
       console.warn('⚠️ Failed to start realtime subscription:', e);
     }
