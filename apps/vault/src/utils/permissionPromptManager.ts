@@ -90,14 +90,25 @@ class PermissionPromptManager {
         if (request.plaintext) queryParams.set('plaintext', request.plaintext);
         if (request.ciphertext) queryParams.set('ciphertext', request.ciphertext);
 
-        // Navigate using message (preserves Shared Worker connection)
+        // Request embassy to open permission page with proper sizing
         const messenger = (window as any).__messenger;
         if (messenger) {
-          messenger.send('NAVIGATE', {
-            path: `/${app}/permission-request?${queryParams.toString()}`
+          // Use OPEN_PERMISSION_PAGE message to tell embassy to open with 'tall' size
+          messenger.send('OPEN_PERMISSION_PAGE', {
+            appOrigin: request.appOrigin,
+            appName: request.appName,
+            action: request.action,
+            requestId,
+            eventKind: request.eventKind,
+            identityIndex: request.identityIndex,
+            event: request.event,
+            data: request.data,
+            pubkey: request.pubkey,
+            plaintext: request.plaintext,
+            ciphertext: request.ciphertext
           });
         } else {
-          // Fallback to direct navigation
+          // Fallback to direct navigation (for standalone vault)
           window.history.pushState({}, '', `/${app}/permission-request?${queryParams.toString()}`);
           window.dispatchEvent(new PopStateEvent('popstate'));
         }

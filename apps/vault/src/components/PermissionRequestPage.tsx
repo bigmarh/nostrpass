@@ -5,6 +5,7 @@ import type { PermissionLevel } from '@nostrpass/types';
 import { useAuth, useMessenger } from '../providers';
 import { permissionService } from '../services/permissionService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { getPermissionCategoryForKind } from '@nostrpass/types';
 
 /**
  * PermissionRequestPage - Dedicated page for permission requests
@@ -55,6 +56,17 @@ export const PermissionRequestPage: Component = () => {
   const ciphertext: string | undefined = Array.isArray(searchParams.ciphertext) ? searchParams.ciphertext[0] : searchParams.ciphertext;
 
   onMount(async () => {
+    console.log('[PermissionRequestPage] 🔍 Mount - URL params:', {
+      action,
+      appOrigin,
+      appName,
+      eventKind,
+      identityIndex,
+      requestId,
+      hasEvent: !!event,
+      hasData: !!data
+    });
+
     const currentUser = auth.user();
     if (!currentUser) {
       setError('Not authenticated');
@@ -78,6 +90,8 @@ export const PermissionRequestPage: Component = () => {
   });
 
   const handleApprove = async (level: PermissionLevel) => {
+    console.log('[PermissionRequestPage] ✅ Approve clicked:', { action, level, requestId });
+
     const currentUser = auth.user();
     if (!currentUser) {
       setError('Not authenticated');
@@ -122,7 +136,20 @@ export const PermissionRequestPage: Component = () => {
             perms.getRelays = level;
             break;
           case 'signEvent':
-            perms.kinds = { [eventKind || 0]: level };
+            {
+              // For signEvent, save permission based on the category of the event kind
+              const category = eventKind !== undefined ? getPermissionCategoryForKind(eventKind) : null;
+
+              if (category) {
+                // Save to the appropriate category (social, messaging, financial, signData)
+                perms.permissions = { [category]: level };
+                console.log(`[PermissionRequestPage] Saving signEvent permission to category: ${category} = ${level}`);
+              } else {
+                // Unknown event kind - save as top-level signEvent permission as fallback
+                perms.signEvent = level;
+                console.log(`[PermissionRequestPage] Saving signEvent permission to top-level signEvent = ${level}`);
+              }
+            }
             break;
         }
         await permissionService.saveAppPermissions(currentUser.profile.username, appKey, perms, appName, identityIndex);

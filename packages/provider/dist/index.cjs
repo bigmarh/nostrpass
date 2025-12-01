@@ -1,6 +1,6 @@
 'use strict';
 
-var embassy = require('@nostrpass/embassy/src/embassy');
+var embassy = require('../../apps/embassy/src/embassy');
 
 
 

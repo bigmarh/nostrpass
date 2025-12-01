@@ -53,13 +53,21 @@ export const SimpleAuthPage: Component = () => {
 
     try {
       // Grant safe default permissions
+      // Use category-based permissions for better UX
       const permissionsToGrant = {
         getPublicKey: 'ALLOW' as const,
         getRelays: 'ALLOW' as const,
-        signEvent: 'ASK_EVERYTIME' as const,
+        // Category-based permissions (nested under 'permissions')
+        permissions: {
+          social: 'ALLOW' as const,             // Posts, profiles, reactions (safe for most apps)
+          messaging: 'ASK_EVERYTIME' as const,  // Private messages (sensitive)
+          signData: 'ASK_EVERYTIME' as const,   // Arbitrary data signing (auth, etc.)
+          zaps: 'ASK_EVERYTIME' as const,       // Lightning tips (can be set to ALLOW for seamless tipping)
+          financial: 'ASK_EVERYTIME' as const   // Wallet config (very sensitive)
+        },
+        // Legacy top-level fields for backward compatibility
         nip04: 'ASK_EVERYTIME' as const,
-        nip44: 'ASK_EVERYTIME' as const,
-        signData: 'ASK_EVERYTIME' as const
+        nip44: 'ASK_EVERYTIME' as const
       };
 
       await permissionService.saveAppPermissions(

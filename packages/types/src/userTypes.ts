@@ -89,7 +89,9 @@ export interface PermissionCategories {
   messaging: PermissionLevel;
   /** General data signing (arbitrary data, authentication, etc.) - ASK_EVERYTIME by default */
   signData: PermissionLevel;
-  /** Financial operations (payments, zaps, etc.) - ASK_EVERYTIME by default */
+  /** Zaps and tips (kinds 9734, 9735) - ASK_EVERYTIME by default, but can be set to ALLOW for seamless tipping */
+  zaps: PermissionLevel;
+  /** Financial/wallet operations (kind 13194, etc.) - ASK_EVERYTIME by default */
   financial: PermissionLevel;
 }
 

@@ -1,6 +1,7 @@
 import { Component, createSignal, Show, For } from 'solid-js';
 import type { PermissionLevel } from '@nostrpass/types';
 import type { PermissionRequest } from '../services/permissionService';
+import { getPermissionCategoryForKind } from '@nostrpass/types';
 
 interface PermissionPromptProps {
   appOrigin: string;
@@ -23,37 +24,64 @@ export const PermissionPrompt: Component<PermissionPromptProps> = (props) => {
         return {
           title: 'Read Public Key',
           description: 'View your public Nostr identity',
-          icon: '👤'
+          icon: '👤',
+          category: null
         };
       case 'signEvent':
-        return {
-          title: `Sign Event${props.request.eventKind !== undefined ? ` (Kind ${props.request.eventKind})` : ''}`,
-          description: 'Create and sign Nostr events on your behalf',
-          icon: '✍️'
-        };
+        {
+          // Determine the category for this event kind
+          const category = props.request.eventKind !== undefined
+            ? getPermissionCategoryForKind(props.request.eventKind)
+            : null;
+
+          const categoryInfo = {
+            social: { label: 'Social Event', emoji: '💬', desc: 'posts, profiles, reactions, reposts' },
+            messaging: { label: 'Private Message', emoji: '🔐', desc: 'encrypted messages and DMs' },
+            signData: { label: 'Data Signing', emoji: '📝', desc: 'authentication and app-specific data' },
+            zaps: { label: 'Zap/Tip', emoji: '⚡', desc: 'lightning payments and tips' },
+            financial: { label: 'Wallet Config', emoji: '💰', desc: 'wallet settings and financial metadata' }
+          };
+
+          const info = category ? categoryInfo[category] : null;
+
+          return {
+            title: info
+              ? `Sign ${info.label} (Kind ${props.request.eventKind})`
+              : `Sign Event${props.request.eventKind !== undefined ? ` (Kind ${props.request.eventKind})` : ''}`,
+            description: info
+              ? `Sign ${info.desc} on your behalf`
+              : 'Create and sign Nostr events on your behalf',
+            icon: info?.emoji || '✍️',
+            category
+          };
+        }
       case 'signData':
         return {
-          title: 'Sign Data',
-          description: 'Sign arbitrary data with your private key',
-          icon: '📝'
+          title: 'Sign Arbitrary Data',
+          description: 'Sign arbitrary data with your private key (not a Nostr event)',
+          icon: '📝',
+          category: null
         };
       case 'nip04':
         return {
           title: 'Encrypt/Decrypt Messages',
           description: 'Send and receive encrypted direct messages',
-          icon: '🔐'
+          icon: '🔐',
+          category: null
         };
       case 'getRelays':
         return {
           title: 'Access Relay List',
           description: 'View your configured Nostr relay servers',
-          icon: '📡'
+          icon: '📡',
+          category: null
         };
       default:
         return {
           title: 'Unknown Action',
           description: 'Unknown permission request',
-          icon: '❓'
+          icon: '❓',
+          category: null
         };
     }
   };

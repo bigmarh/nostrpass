@@ -20,11 +20,9 @@ export const PERMISSION_KINDS = {
     43,  // Channel hide message
     44,  // Channel mute user
     1984, // Report
-    9735, // Zap (lightning payments for social)
     10000, // Mute list
     10001, // Pin list
     10002, // Relay list metadata
-    13194, // Wallet info
     30000, // Follow sets
     30001, // Communities
     30002, // Community approval
@@ -209,10 +207,14 @@ export const PERMISSION_KINDS = {
     50000, // Parameterized replaceable event
   ] as const,
   
-  /** Financial operations - payments and critical data */
-  financial: [
+  /** Zaps and tips - lightning payments for social tipping */
+  zaps: [
     9734, // Zap request
     9735, // Zap
+  ] as const,
+
+  /** Financial operations - wallet config and sensitive financial data */
+  financial: [
     13194, // Wallet info
   ] as const,
 } as const;
@@ -222,8 +224,9 @@ export const PERMISSION_KINDS = {
  */
 export const DEFAULT_PERMISSIONS: PermissionCategories = {
   social: 'ALLOW',
-  messaging: 'ASK_EVERYTIME', 
+  messaging: 'ASK_EVERYTIME',
   signData: 'ASK_EVERYTIME',
+  zaps: 'ASK_EVERYTIME',  // Can be set to ALLOW for seamless tipping
   financial: 'ASK_EVERYTIME',
 };
 
@@ -322,8 +325,10 @@ export function getPermissionCategoryDescription(category: keyof PermissionCateg
       return 'Private communications: encrypted messages, direct messages, and private data';
     case 'signData':
       return 'General data signing: authentication, arbitrary data, and application-specific data';
+    case 'zaps':
+      return 'Lightning tips and zaps: send small payments to appreciate content (kinds 9734, 9735)';
     case 'financial':
-      return 'Financial operations: payments, zaps, and sensitive financial data';
+      return 'Financial configuration: wallet settings and sensitive financial metadata';
     default:
       return 'Unknown permission category';
   }
