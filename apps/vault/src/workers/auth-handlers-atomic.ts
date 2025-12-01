@@ -6,7 +6,7 @@
  */
 
 import { getSessionStateManager, type CompleteSessionState } from './session-state-manager';
-import cryptoPrimitives from './crypto-primitives';
+import { cryptoPrimitives } from './crypto-primitives';
 
 /**
  * Get current auth state
