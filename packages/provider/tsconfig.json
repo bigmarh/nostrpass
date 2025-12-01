@@ -13,7 +13,8 @@
     "noEmit": false,
     "allowImportingTsExtensions": false,
     "paths": {
-      "@nostrpass/embassy/*": ["../../apps/embassy/*"]
+      "@nostrpass/embassy/*": ["../../apps/embassy/*"],
+      "../../apps/embassy/src/embassy": ["../../apps/embassy/src/embassy.ts"]
     }
   },
   "include": ["src"]

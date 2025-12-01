@@ -571,8 +571,10 @@ export const AuthProvider: ParentComponent = (props) => {
         isUnlocked: (sessionVerify as any)?.isUnlocked
       });
       
-      // Step 11: Queue Nostr sync (non-blocking)
-      console.log('🌐 [CREATE ACCOUNT] Step 11: Queueing Nostr sync...');
+      // Step 11: Blocking Nostr sync with timeout (Hybrid Approach)
+      console.log('🌐 [CREATE ACCOUNT] Step 11: Publishing to Nostr (blocking with timeout)...');
+
+      let syncedToNostr = false;
 
       try {
         const randomKey = await cryptoWorker.generateKeypair();
@@ -592,22 +594,97 @@ export const AuthProvider: ParentComponent = (props) => {
         const relays = getRelays();
         const env = environmentName ? environmentName() : 'development';
 
-        // Queue for background sync (non-blocking)
-        const NostrSyncService = (await import('../services/nostrSyncService')).default;
-        const syncService = NostrSyncService.getInstance();
-        await syncService.queueSync({
-          username,
-          loginObj,
-          randomPublicKey,
-          randomPrivateKey,
-          passwordKey,
-          environment: env,
-          relays
-        });
-        console.log('✅ [CREATE ACCOUNT] Nostr sync queued (will complete in background)');
+        // BLOCKING: Try to publish with 15s timeout
+        console.log('📤 [CREATE ACCOUNT] Attempting blocking publish to Nostr...');
+        await Promise.race([
+          // Attempt to publish both LoginObj and VaultObj
+          (async () => {
+            // Step 1: Publish LoginObj
+            const { saveLoginObj } = await import('@nostrpass/nostrHelpers');
+            const loginPublished = await saveLoginObj(
+              username,
+              loginObj,
+              randomPublicKey,
+              randomPrivateKey,
+              relays,
+              env,
+              passwordKey
+            );
+            console.log(`✅ [CREATE ACCOUNT] LoginObj published to ${loginPublished.length} relays`);
 
-      } catch (error) {
-        console.error('❌ [CREATE ACCOUNT] Failed to queue Nostr sync:', error);
+            // Step 2: Publish VaultObj
+            const vaultEvent = await cryptoWorker.createInitialVaultForNostr({
+              username,
+              passwordKey
+            });
+            const { publishEvent } = await import('@nostrpass/nostrHelpers');
+            const vaultPublished = await publishEvent(vaultEvent.event, relays);
+            console.log(`✅ [CREATE ACCOUNT] VaultObj published to ${vaultPublished.length} relays`);
+
+            // Verify minimum relay count
+            if (loginPublished.length < 2 || vaultPublished.length < 2) {
+              throw new Error('Failed to publish to minimum relay count (need 2+)');
+            }
+
+            // Mark as synced
+            await cryptoWorker.updateVaultData({
+              username,
+              vaultData: {
+                ...vaultData,
+                needsNostrSync: false,
+                lastSyncedAt: Date.now()
+              },
+              skipVersionIncrement: true
+            });
+
+            syncedToNostr = true;
+            console.log('🎉 [CREATE ACCOUNT] Successfully published to Nostr!');
+          })(),
+
+          // Timeout after 15 seconds
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Nostr publish timeout (15s)')), 15000)
+          )
+        ]);
+
+        console.log('✅ [CREATE ACCOUNT] Blocking sync completed successfully');
+
+      } catch (syncError) {
+        console.warn('⚠️ [CREATE ACCOUNT] Blocking sync failed/timed out:', syncError);
+
+        // Fallback: Queue for background retry
+        try {
+          const randomKey = await cryptoWorker.generateKeypair();
+          let randomPrivateKey: string;
+          let randomPublicKey: string;
+          if (randomKey instanceof Map) {
+            randomPrivateKey = randomKey.get('privateKey');
+            randomPublicKey = randomKey.get('publicKey');
+          } else {
+            randomPrivateKey = (randomKey as any).privateKey;
+            randomPublicKey = (randomKey as any).publicKey;
+          }
+
+          const relays = getRelays();
+          const env = environmentName ? environmentName() : 'development';
+
+          const NostrSyncService = (await import('../services/nostrSyncService')).default;
+          const syncService = NostrSyncService.getInstance();
+          await syncService.queueSync({
+            username,
+            loginObj,
+            randomPublicKey,
+            randomPrivateKey,
+            passwordKey,
+            environment: env,
+            relays
+          });
+
+          console.log('✅ [CREATE ACCOUNT] Queued for background retry');
+          showWarningToast('Account created! Syncing to Nostr in background. Wait 30 seconds before logging in from another device.');
+        } catch (queueError) {
+          console.error('❌ [CREATE ACCOUNT] Failed to queue background sync:', queueError);
+        }
       }
 
       // Step 12: Realtime will start after unlock via worker
@@ -648,19 +725,63 @@ export const AuthProvider: ParentComponent = (props) => {
       const relays = getRelays();
       const env = environmentName ? environmentName() : 'development';
 
-      const result = await cryptoWorker.login({
-        username,
-        password,
-        environment: env,
-        relays
-      });
+      // Auto-retry logic for newly created accounts
+      let result: any = null;
+      let retryCount = 0;
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY = 5000; // 5 seconds
 
-      if (!result.success) {
-        console.error('❌ [AuthProvider] Login failed:', result.error);
-        if (result.error === 'Invalid password') {
+      while (retryCount <= MAX_RETRIES) {
+        try {
+          result = await cryptoWorker.login({
+            username,
+            password,
+            environment: env,
+            relays
+          });
+
+          if (result.success) {
+            // Login successful
+            break;
+          }
+
+          // Login failed - check if it's "not found" error
+          if (result.error && result.error.includes('not found')) {
+            if (retryCount < MAX_RETRIES) {
+              console.log(`⏳ [LOGIN] Account not found on Nostr, retrying in ${RETRY_DELAY / 1000}s (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+              showWarningToast(`Looking for your account on Nostr (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+              retryCount++;
+            } else {
+              // All retries exhausted
+              throw new Error(
+                'Account not found on Nostr after retries. ' +
+                'If you just created this account, please wait 30 seconds and try again. ' +
+                'The initial sync may still be in progress.'
+              );
+            }
+          } else {
+            // Different error (e.g., invalid password) - don't retry
+            break;
+          }
+        } catch (loginError) {
+          // Network error or other exception - retry
+          if (retryCount < MAX_RETRIES) {
+            console.warn(`⚠️ [LOGIN] Login attempt failed, retrying... (${retryCount + 1}/${MAX_RETRIES})`, loginError);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            retryCount++;
+          } else {
+            throw loginError;
+          }
+        }
+      }
+
+      if (!result || !result.success) {
+        console.error('❌ [AuthProvider] Login failed:', result?.error);
+        if (result?.error === 'Invalid password') {
           showErrorToast('INVALID_PASSWORD' as ErrorCode);
         }
-        throw new Error(result.error || 'Login failed');
+        throw new Error(result?.error || 'Login failed');
       }
 
       console.log('✅ [AuthProvider] Login successful');
@@ -853,7 +974,7 @@ export const AuthProvider: ParentComponent = (props) => {
 
           // Open IndexedDB directly to access xprivs store
           // This is a fallback when the worker's getVaultData didn't return it
-          const dbRequest = indexedDB.open('NostrPassVault', 1);
+          const dbRequest = indexedDB.open('NostrPassVault', 2); // Use version 2 to match db.ts
           const db = await new Promise<IDBDatabase>((resolve, reject) => {
             dbRequest.onsuccess = () => resolve(dbRequest.result);
             dbRequest.onerror = () => reject(dbRequest.error);
@@ -870,11 +991,12 @@ export const AuthProvider: ParentComponent = (props) => {
 
           db.close();
 
-          if (xprivsData?.xprivEncrypted) {
-            console.log('✅ [UNLOCK] Found xprivEncrypted in xprivs store');
-            xprivEncryptedBlob = xprivsData.xprivEncrypted;
+          // The xprivs store uses 'encryptedXpriv' as the field name (see db.ts:346)
+          if (xprivsData?.encryptedXpriv) {
+            console.log('✅ [UNLOCK] Found encryptedXpriv in xprivs store');
+            xprivEncryptedBlob = xprivsData.encryptedXpriv;
           } else {
-            console.error('❌ [UNLOCK] xprivEncrypted not found in xprivs store either', {
+            console.error('❌ [UNLOCK] encryptedXpriv not found in xprivs store either', {
               hasXprivsData: !!xprivsData,
               keys: xprivsData ? Object.keys(xprivsData) : []
             });
@@ -930,25 +1052,114 @@ export const AuthProvider: ParentComponent = (props) => {
         showErrorToast('INVALID_PIN' as ErrorCode);
         return false;
       }
-      
-      // Step 3: Derive keypair
-      console.log('🔑 [UNLOCK] Step 3: Deriving keypair from xpriv...');
-      const currentIdentity = (freshVaultData as any).identities[(freshVaultData as any).currentIdentityIndex || 0];
-      console.log('👤 [UNLOCK] Current identity:', currentIdentity);
-      
-      const keypair = await getIdentityKeypair(xpriv, currentIdentity);
-      console.log('✅ [UNLOCK] Keypair derived:', {
-        hasPrivateKey: !!keypair.privateKey,
-        publicKey: keypair.publicKey
-      });
-      
-      // Step 4: Unlock session
-      console.log('🔓 [UNLOCK] Step 4: Unlocking session in worker...');
-      await cryptoWorker.unlockSession({
-        username: currentUser.profile.username,
-        privateKey: keypair.privateKey,
-        xpriv
-      });
+
+      // Step 3: Detect what we decrypted - storage keypair JSON or xpriv string
+      console.log('🔍 [UNLOCK] Step 3: Detecting decrypted data format...');
+      let storageKeypair: { privateKey: string; publicKey: string } | null = null;
+      let actualXpriv: string | null = null;
+
+      // Check if decrypted data is a JSON storage keypair (from LoginObj)
+      if (xpriv.startsWith('{')) {
+        try {
+          storageKeypair = JSON.parse(xpriv);
+          console.log('✅ [UNLOCK] Detected storage keypair JSON format');
+          console.log('🔑 [UNLOCK] Storage public key:', storageKeypair?.publicKey?.substring(0, 16) + '...');
+        } catch (e) {
+          console.error('❌ [UNLOCK] Failed to parse storage keypair JSON:', e);
+          showErrorToast('STORAGE_ERROR' as ErrorCode);
+          return false;
+        }
+      } else {
+        // It's an actual xpriv string
+        actualXpriv = xpriv;
+        console.log('✅ [UNLOCK] Detected xpriv string format');
+      }
+
+      // Step 4: Unlock session and fetch full vault from Nostr if needed
+      console.log('🔓 [UNLOCK] Step 4: Unlocking session...');
+      console.log('🔍 [UNLOCK] Identities in local vault:', (freshVaultData as any).identities);
+
+      const hasIdentities = (freshVaultData as any).identities && (freshVaultData as any).identities.length > 0;
+
+      if (storageKeypair && !hasIdentities) {
+        // We have storage keypair but no identities - need to fetch VaultObj from Nostr
+        console.log('🌐 [UNLOCK] Storage keypair detected with no identities - fetching VaultObj from Nostr...');
+
+        try {
+          // Unlock session with storage keypair first
+          console.log('🔐 [UNLOCK] Unlocking session with storage keypair...');
+          await cryptoWorker.unlockSession({
+            username: currentUser.profile.username,
+            storagePrivateKey: storageKeypair.privateKey,
+            storagePublicKey: storageKeypair.publicKey
+          });
+          console.log('✅ [UNLOCK] Session unlocked with storage keypair');
+
+          // Now fetch and decrypt VaultObj from Nostr
+          const relays = getRelays();
+          console.log('🌐 [UNLOCK] Calling assembleStateFromAuthor with relays:', relays);
+          const assembled = await cryptoWorker.assembleStateFromAuthor({
+            username: currentUser.profile.username,
+            relays
+          });
+          console.log('📦 [UNLOCK] assembleStateFromAuthor returned:', assembled);
+
+          if (assembled && Array.isArray(assembled.identities) && assembled.identities.length > 0) {
+            console.log('✅ [UNLOCK] Fetched VaultObj from Nostr with', assembled.identities.length, 'identities');
+
+            // Update local vault with fetched data
+            await cryptoWorker.updateVaultData({
+              username: currentUser.profile.username,
+              vaultData: assembled,
+              skipVersionIncrement: true
+            });
+
+            // Get the updated vault data including xpriv
+            const updatedVault = await cryptoWorker.getVaultData({
+              username: currentUser.profile.username,
+              includeEncryptedVault: true
+            });
+
+            if ((updatedVault as any).xprivEncrypted) {
+              actualXpriv = (updatedVault as any).xprivEncrypted;
+              console.log('✅ [UNLOCK] Extracted xpriv from VaultObj');
+            }
+          } else {
+            console.warn('⚠️ [UNLOCK] No identities found in VaultObj from Nostr');
+          }
+        } catch (nostrError) {
+          console.error('❌ [UNLOCK] Failed to fetch VaultObj from Nostr:', nostrError);
+          // Continue anyway - user is still unlocked, just without identities
+        }
+      } else if (hasIdentities && actualXpriv) {
+        // We have identities locally and an xpriv - normal flow
+        const currentIdentity = (freshVaultData as any).identities[(freshVaultData as any).currentIdentityIndex || 0];
+        console.log('✅ [UNLOCK] Found identity locally:', currentIdentity);
+
+        const keypair = await getIdentityKeypair(actualXpriv, currentIdentity);
+        console.log('✅ [UNLOCK] Keypair derived:', {
+          hasPrivateKey: !!keypair.privateKey,
+          publicKey: keypair.publicKey
+        });
+
+        await cryptoWorker.unlockSession({
+          username: currentUser.profile.username,
+          privateKey: keypair.privateKey,
+          xpriv: actualXpriv
+        });
+      } else if (actualXpriv) {
+        // Have xpriv but no identities - unlock and will fetch from Nostr later
+        console.log('⚠️ [UNLOCK] Have xpriv but no identities, unlocking with xpriv only');
+
+        await cryptoWorker.unlockSession({
+          username: currentUser.profile.username,
+          xpriv: actualXpriv
+        });
+      } else {
+        console.error('❌ [UNLOCK] Could not determine unlock method');
+        showErrorToast('STORAGE_ERROR' as ErrorCode);
+        return false;
+      }
       console.log('✅ [UNLOCK] Session unlocked in worker');
       
       const updatedUser = {
@@ -973,47 +1184,73 @@ export const AuthProvider: ParentComponent = (props) => {
       }
       
       await new Promise(resolve => setTimeout(resolve, 50));
-      
-      // IMPORTANT: Now that we have the storage key (from xpriv), re-fetch vault from Nostr
-      // This allows us to decrypt encrypted vault events that were published earlier
-      console.log('🔄 [UNLOCK] Re-fetching vault from Nostr with storage key...');
-      try {
-        // Derive storage keypair to decrypt Nostr events
-        await cryptoWorker.deriveKeypairFromXpriv({ xpriv, index: 8907 }); // STORAGE_INDEX
 
-        // Note: Vault data already loaded from IndexedDB during login
-      } catch (nostrError) {
-        console.warn('⚠️ [UNLOCK] Failed to fetch from Nostr (non-critical):', nostrError);
-      }
-        
       messenger.send('AUTH_STATUS', {
         isAuthenticated: true,
         publicKey: currentUser.publicKey
       });
-      
-      // Start realtime subscription now that we have storage key in session
-      await startRealtime(currentUser.profile.username);
 
-      // Hydrate from PRE streams (author-only) and reconcile
+      // Start realtime subscription now that we have storage key in session
       try {
-        const relays = getRelays();
-        const assembled = await cryptoWorker.assembleStateFromAuthor({ username: currentUser.profile.username, relays });
-        if (assembled && Array.isArray(assembled.identities)) {
-          const local = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
-          const localCount = local?.identities?.length || 0;
-          const remoteCount = assembled.identities.length || 0;
-          if (remoteCount > localCount) {
-            await cryptoWorker.updateVaultData({
-              username: currentUser.profile.username,
-              vaultData: { ...(local || {}), identities: assembled.identities },
-              skipVersionIncrement: true
-            });
-            window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: { username: currentUser.profile.username, source: 'nostr-pre' } }));
-          }
-        }
+        await startRealtime(currentUser.profile.username);
       } catch (e) {
-        console.warn('⚠️ [UNLOCK] PRE hydrate failed (non-critical):', e);
+        console.warn('⚠️ [UNLOCK] Failed to start realtime (non-critical):', e);
       }
+
+      // If we didn't already fetch from Nostr (because we had identities locally), do it now
+      if (!storageKeypair || hasIdentities) {
+        console.log('🔄 [UNLOCK] Syncing with Nostr for latest vault state...');
+        console.log('🔄 [UNLOCK] Conditions - storageKeypair:', !!storageKeypair, 'hasIdentities:', hasIdentities);
+        try {
+          const relays = getRelays();
+          console.log('🔄 [UNLOCK] Calling assembleStateFromAuthor with relays:', relays);
+          const assembled = await cryptoWorker.assembleStateFromAuthor({ username: currentUser.profile.username, relays });
+          console.log('🔄 [UNLOCK] assembleStateFromAuthor returned:', assembled);
+          if (assembled && Array.isArray(assembled.identities)) {
+            const local = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+            const localCount = local?.identities?.length || 0;
+            const remoteCount = assembled.identities.length || 0;
+            console.log('🔄 [UNLOCK] Identity counts - local:', localCount, 'remote:', remoteCount);
+
+            if (remoteCount > localCount) {
+              // Remote has more identities - pull from Nostr
+              console.log('🔄 [UNLOCK] Updating local vault with remote identities');
+              await cryptoWorker.updateVaultData({
+                username: currentUser.profile.username,
+                vaultData: { ...(local || {}), identities: assembled.identities },
+                skipVersionIncrement: true
+              });
+            } else if (localCount > remoteCount) {
+              // Local has more identities - push to Nostr
+              console.log('🔄 [UNLOCK] Local vault has more identities - syncing to Nostr');
+              try {
+                await cryptoWorker.saveVaultToNostr({ username: currentUser.profile.username });
+                console.log('✅ [UNLOCK] Successfully synced local identities to Nostr');
+              } catch (syncErr) {
+                console.error('❌ [UNLOCK] Failed to sync to Nostr:', syncErr);
+              }
+            } else {
+              console.log('🔄 [UNLOCK] Local and remote vaults are in sync');
+            }
+          } else {
+            console.warn('⚠️ [UNLOCK] assembleStateFromAuthor returned no identities or invalid data');
+          }
+        } catch (e) {
+          console.error('❌ [UNLOCK] Nostr sync failed:', e);
+        }
+      } else {
+        console.log('⏭️ [UNLOCK] Skipping Nostr sync - already fetched during unlock');
+      }
+
+      // Clear vaultDataService cache to ensure fresh data
+      console.log('🧹 [UNLOCK] Clearing vaultDataService cache');
+      vaultDataService.clearCache(currentUser.profile.username);
+
+      // Dispatch refresh event to update all components with fresh data
+      console.log('📡 [UNLOCK] Dispatching vault-data-refresh event');
+      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+        detail: { username: currentUser.profile.username, source: 'unlock-complete' }
+      }));
 
       console.log('🎉 [UNLOCK] Vault unlock complete!');
       return true;

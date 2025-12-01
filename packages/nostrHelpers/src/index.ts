@@ -289,47 +289,33 @@ export class UsernameRegistry {
       console.log('Registration service pubkey:', this.registrationKeys.publicKey);
 
       let events: NostrEvent[] = [];
-      let retryCount = 0;
-      const maxRetries = 2;
-      
-      // Retry logic to handle relay timing issues
-      while (retryCount <= maxRetries) {
-        try {
-          events = await this.pool.querySync(this.relays, filter);
-          console.log(`Attempt ${retryCount + 1}: Found ${events.length} events for username "${username}"`);
-          if (events.length > 0) {
-            console.log('Event authors:', events.map(e => e.pubkey));
-            console.log('Event d-tags:', events.map(e => e.tags.find(t => t[0] === 'd')?.[1]));
-            break; // Found events, no need to retry
-          }
-          
-          // If no events found and not on last retry, wait a bit
-          if (retryCount < maxRetries && events.length === 0) {
-            console.log(`No events found, retrying in 500ms...`);
-            await new Promise(resolve => setTimeout(resolve, 500));
-            retryCount++;
-          } else {
-            break; // Last attempt or found events
-          }
-        } catch (error: any) {
-          console.warn('Error during username availability check:', error);
-          // Try querying each relay individually to identify PoW requirements
-          for (const relay of this.relays) {
-            try {
-              const relayEvents = await this.pool.querySync([relay], filter);
-              events = [...events, ...relayEvents];
-              console.log(`✅ Queried ${relay} successfully`);
-            } catch (relayError: any) {
-              if (relayError.message?.includes('pow:')) {
-                const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
-                const bits = powMatch ? powMatch[1] : 'unknown';
-                console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for queries`);
-              } else {
-                console.error(`❌ Failed to query ${relay}:`, relayError.message);
-              }
+
+      // For availability check, we don't need retries - finding zero events is the expected result
+      // Only query once since an empty result is what we want for "available"
+      try {
+        events = await this.pool.querySync(this.relays, filter);
+        console.log(`Found ${events.length} events for username "${username}"`);
+        if (events.length > 0) {
+          console.log('Event authors:', events.map(e => e.pubkey));
+          console.log('Event d-tags:', events.map(e => e.tags.find(t => t[0] === 'd')?.[1]));
+        }
+      } catch (error: any) {
+        console.warn('Error during username availability check:', error);
+        // Try querying each relay individually to identify PoW requirements
+        for (const relay of this.relays) {
+          try {
+            const relayEvents = await this.pool.querySync([relay], filter);
+            events = [...events, ...relayEvents];
+            console.log(`✅ Queried ${relay} successfully`);
+          } catch (relayError: any) {
+            if (relayError.message?.includes('pow:')) {
+              const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
+              const bits = powMatch ? powMatch[1] : 'unknown';
+              console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for queries`);
+            } else {
+              console.error(`❌ Failed to query ${relay}:`, relayError.message);
             }
           }
-          break; // Exit retry loop after individual relay attempts
         }
       }
       console.log('Found events:', events.length);
@@ -526,44 +512,8 @@ export class UsernameRegistry {
         console.log('Publish results:', publishResults);
         console.log(`Successfully published to ${publishResults.length} relays`);
 
-        // Give relays more time to process and propagate
-        console.log('⏳ Waiting for relay propagation...');
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds
-        
-        // Verify the event was stored
-        const verifyFilter = {
-          kinds: [30078],
-          '#d': [`nostrpass.com_login_${hash}_${getEnvironment()}`],
-          limit: 1
-        };
-        let verifyEvents: NostrEvent[] = [];
-        try {
-          verifyEvents = await this.pool.querySync(this.relays, verifyFilter);
-        } catch (error: any) {
-          console.warn('Error during verification query:', error);
-          // Try each relay individually
-          for (const relay of this.relays) {
-            try {
-              const relayEvents = await this.pool.querySync([relay], verifyFilter);
-              verifyEvents = [...verifyEvents, ...relayEvents];
-              console.log(`✅ Verified on ${relay}`);
-            } catch (relayError: any) {
-              if (relayError.message?.includes('pow:')) {
-                const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
-                const bits = powMatch ? powMatch[1] : 'unknown';
-                console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for verification`);
-              } else {
-                console.error(`❌ Failed to verify on ${relay}:`, relayError.message);
-              }
-            }
-          }
-        }
-        console.log('Verification query found:', verifyEvents.length, 'events');
-        
-        if (verifyEvents.length === 0) {
-          console.warn('⚠️ Registration event not found after publishing. Relays may be slow.');
-          // Still return true as the event was published successfully
-        }
+        // No need to wait for propagation or verify - publish confirmations are enough
+        // The registration will be available immediately when needed for login
       } catch (error: any) {
         console.error('Error during username registration publish:', error);
         // Check if all relays require PoW

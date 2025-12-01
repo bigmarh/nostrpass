@@ -242,8 +242,8 @@ export class NostrPassButton {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       }
 
-      /* Sign In Button - Matches user button style */
-      .nostrpass-signin-btn {
+      /* Common button base styles */
+      .nostrpass-btn-base {
         display: inline-flex;
         align-items: center;
         gap: 8px;
@@ -253,13 +253,27 @@ export class NostrPassButton {
         cursor: pointer;
         transition: all 0.15s ease;
         background: #fff;
-        font-size: 14px;
-        font-weight: 500;
+        width: 200px;
       }
 
-      .nostrpass-signin-btn:hover {
+      .nostrpass-btn-base:hover {
         border-color: #d1d5db;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+
+      [data-theme="dark"] .nostrpass-btn-base {
+        background: #1f2937;
+        border-color: #374151;
+      }
+
+      [data-theme="dark"] .nostrpass-btn-base:hover {
+        border-color: #4b5563;
+      }
+
+      /* Sign In Button */
+      .nostrpass-signin-btn {
+        font-size: 14px;
+        font-weight: 500;
       }
 
       .nostrpass-signin-btn:active {
@@ -273,13 +287,7 @@ export class NostrPassButton {
       }
 
       [data-theme="dark"] .nostrpass-signin-btn {
-        background: #1f2937;
-        border-color: #374151;
         color: #f9fafb;
-      }
-
-      [data-theme="dark"] .nostrpass-signin-btn:hover {
-        border-color: #4b5563;
       }
 
       .nostrpass-signin-logo {
@@ -315,37 +323,14 @@ export class NostrPassButton {
         border-color: #374151;
       }
 
-      /* User Avatar Button - Compact with username */
+      /* User Avatar Button */
       .nostrpass-user-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 12px 6px 6px;
-        border: 1.5px solid #e5e7eb;
-        border-radius: 24px;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        background: #fff;
         position: relative;
-      }
-
-      .nostrpass-user-btn:hover {
-        border-color: #d1d5db;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       }
 
       .nostrpass-user-btn.active {
         border-color: #9ca3af;
         box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-      }
-
-      [data-theme="dark"] .nostrpass-user-btn {
-        background: #1f2937;
-        border-color: #374151;
-      }
-
-      [data-theme="dark"] .nostrpass-user-btn:hover {
-        border-color: #4b5563;
       }
 
       [data-theme="dark"] .nostrpass-user-btn.active {
@@ -745,7 +730,7 @@ export class NostrPassButton {
 
   private renderSignInButton() {
     this.container.innerHTML = `
-      <button class="nostrpass-signin-btn" data-action="signin">
+      <button class="nostrpass-btn-base nostrpass-signin-btn" data-action="signin">
         <div class="nostrpass-signin-logo">🥚</div>
         <span>NostrPass</span>
       </button>
@@ -758,7 +743,9 @@ export class NostrPassButton {
   private async renderUserButton() {
     const user = this.currentUser!;
     const initials = this.getUserInitials(user);
-    const displayName = user.nickname || `Identity ${user.identityIndex + 1}`;
+    const rawDisplayName = user.nickname || `Identity ${user.identityIndex + 1}`;
+    // Capitalize first letter
+    const displayName = rawDisplayName.charAt(0).toUpperCase() + rawDisplayName.slice(1);
 
     // Fetch username and all identities
     let username = '';
@@ -792,6 +779,8 @@ export class NostrPassButton {
           ${allIdentities.map((identity: any) => {
             const isCurrentIdentity = identity.index === user.identityIndex;
             const idInitials = identity.nickname ? this.getInitialsFromName(identity.nickname) : `I${identity.index + 1}`;
+            const rawIdName = identity.nickname || `Identity ${identity.index + 1}`;
+            const idName = rawIdName.charAt(0).toUpperCase() + rawIdName.slice(1);
             return `
               <button class="nostrpass-dropdown-item nostrpass-identity-item ${isCurrentIdentity ? 'nostrpass-identity-active' : ''}" data-action="switch-identity" data-identity-index="${identity.index}">
                 <div class="nostrpass-identity-avatar">
@@ -799,7 +788,7 @@ export class NostrPassButton {
                 </div>
                 <div class="nostrpass-identity-info">
                   <div class="nostrpass-identity-name">
-                    ${identity.nickname || `Identity ${identity.index + 1}`}
+                    ${idName}
                   </div>
                   ${identity.npub ? `<div class="nostrpass-identity-npub">${identity.npub.slice(0, 12)}...</div>` : ''}
                 </div>
@@ -814,7 +803,7 @@ export class NostrPassButton {
 
     this.container.innerHTML = `
       <div class="nostrpass-user-menu">
-        <button class="nostrpass-user-btn ${!hasAuthorizedIdentity ? 'nostrpass-user-btn-warning' : ''}" data-action="toggle-menu">
+        <button class="nostrpass-btn-base nostrpass-user-btn ${!hasAuthorizedIdentity ? 'nostrpass-user-btn-warning' : ''}" data-action="toggle-menu">
           ${user.avatar
             ? `<img src="${user.avatar}" alt="${displayName}" class="nostrpass-user-avatar" />`
             : `<div class="nostrpass-user-initials">${initials}</div>`

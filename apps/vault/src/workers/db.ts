@@ -70,26 +70,33 @@ class VaultDB {
     // This ensures old vaults continue to work after standardizing on xprivEncrypted
     const normalizedVault = { ...vaultData } as any;
 
-    // CRITICAL CHECK: Warn if xprivEncrypted is missing
-    if (!normalizedVault.xprivEncrypted) {
+    // CRITICAL CHECK: Warn if xprivEncrypted is missing or empty
+    if (!normalizedVault.xprivEncrypted || normalizedVault.xprivEncrypted === '') {
       console.error('🚨 [DB] WARNING: Attempting to save vault WITHOUT xprivEncrypted!', {
         username: normalizedVault.username,
+        xprivEncryptedValue: normalizedVault.xprivEncrypted,
         hasEncryptedVault: !!normalizedVault.encryptedVault,
+        hasStorageKeypairEncrypted: !!normalizedVault.storageKeypairEncrypted,
         allKeys: Object.keys(normalizedVault),
         stackTrace: new Error().stack
       });
 
-      // Try migration as fallback
+      // Try migration as fallback - check multiple legacy field names
       if (normalizedVault.encryptedVault) {
         console.log('🔄 [DB Migration] Migrating encryptedVault → xprivEncrypted');
         normalizedVault.xprivEncrypted = normalizedVault.encryptedVault;
+      } else if (normalizedVault.storageKeypairEncrypted) {
+        console.log('🔄 [DB Migration] Migrating storageKeypairEncrypted → xprivEncrypted');
+        normalizedVault.xprivEncrypted = normalizedVault.storageKeypairEncrypted;
       } else {
-        console.error('❌ [DB] CRITICAL: No xprivEncrypted AND no encryptedVault to migrate!');
+        console.error('❌ [DB] CRITICAL: No xprivEncrypted AND no legacy field to migrate from!');
+        // Keep the empty string if that's what was provided (for new logins that will populate later)
       }
     }
 
-    // Clean up: Remove legacy encryptedVault field to avoid confusion
+    // Clean up: Remove legacy fields to avoid confusion
     delete normalizedVault.encryptedVault;
+    delete normalizedVault.storageKeypairEncrypted;
 
     const startTime = Date.now();
     const dataSize = JSON.stringify(normalizedVault).length;
@@ -148,14 +155,28 @@ class VaultDB {
         request.onsuccess = () => {
           const result = request.result || null;
           if (result) {
+            // MIGRATION: Check for legacy field names and migrate on read
+            const resultData = result as any;
+            if (!resultData.xprivEncrypted || resultData.xprivEncrypted === '') {
+              if (resultData.encryptedVault) {
+                console.log('🔄 [DB getVault] Migrating encryptedVault → xprivEncrypted on read');
+                resultData.xprivEncrypted = resultData.encryptedVault;
+                delete resultData.encryptedVault;
+              } else if (resultData.storageKeypairEncrypted) {
+                console.log('🔄 [DB getVault] Migrating storageKeypairEncrypted → xprivEncrypted on read');
+                resultData.xprivEncrypted = resultData.storageKeypairEncrypted;
+                delete resultData.storageKeypairEncrypted;
+              }
+            }
+
             console.log('📤 Retrieved vault from IndexedDB:', {
-              username: result.username,
-              hasXprivEncrypted: !!(result as any).xprivEncrypted,
-              xprivEncryptedLength: (result as any).xprivEncrypted?.length,
-              hasPasswordSalt: !!(result as any).passwordSalt,
-              identitiesCount: result.identities?.length || 0,
-              identities: result.identities,
-              allKeys: Object.keys(result)
+              username: resultData.username,
+              hasXprivEncrypted: !!resultData.xprivEncrypted,
+              xprivEncryptedLength: resultData.xprivEncrypted?.length,
+              hasPasswordSalt: !!resultData.passwordSalt,
+              identitiesCount: resultData.identities?.length || 0,
+              identities: resultData.identities,
+              allKeys: Object.keys(resultData)
             });
           } else {
             console.log('❌ No vault found in IndexedDB for username:', username);

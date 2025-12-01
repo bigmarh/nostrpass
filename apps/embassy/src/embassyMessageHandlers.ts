@@ -15,6 +15,31 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
                 return { acknowledged: false, error: error instanceof Error ? error.message : 'Unknown error' };
             }
         },
+
+        OPEN_PERMISSION_PAGE: (data: any) => {
+            console.log('🔐 Open permission page signal received from vault iframe', data);
+            try {
+                const queryParams: Record<string, string> = {};
+                if (data.appOrigin) queryParams.appOrigin = data.appOrigin;
+                if (data.appName) queryParams.appName = data.appName;
+                if (data.action) queryParams.action = data.action;
+                if (data.requestId) queryParams.requestId = data.requestId;
+                if (data.eventKind !== undefined) queryParams.eventKind = String(data.eventKind);
+                if (data.identityIndex !== undefined) queryParams.identityIndex = String(data.identityIndex);
+                if (data.event) queryParams.event = JSON.stringify(data.event);
+                if (data.data) queryParams.data = data.data;
+                if (data.pubkey) queryParams.pubkey = data.pubkey;
+                if (data.plaintext) queryParams.plaintext = data.plaintext;
+                if (data.ciphertext) queryParams.ciphertext = data.ciphertext;
+
+                (embassyInstance as any).openPage('permission', { queryParams });
+                console.log('✅ Permission page opened successfully');
+                return { acknowledged: true };
+            } catch (error) {
+                console.error('❌ Failed to open permission page:', error);
+                return { acknowledged: false, error: error instanceof Error ? error.message : 'Unknown error' };
+            }
+        },
         SHOW_VAULT: (page: string = 'vault') => {
             console.log('Show vault signal received');
             embassyInstance.show(page);

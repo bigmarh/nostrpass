@@ -127,6 +127,11 @@ export const PermissionsDashboard: Component = () => {
           ...app.permissions,
           messaging: level
         };
+      } else if (permissionType === 'zaps') {
+        updates.permissions = {
+          ...app.permissions,
+          zaps: level
+        };
       } else if (permissionType === 'financial') {
         updates.permissions = {
           ...app.permissions,
@@ -224,6 +229,7 @@ export const PermissionsDashboard: Component = () => {
                 social: action,
                 messaging: action,
                 signData: action,
+                zaps: action,
                 financial: action
               }
             };
@@ -572,7 +578,7 @@ export const PermissionsDashboard: Component = () => {
                           <span>✍️</span>
                           <span class="text-sm font-medium">Sign Data</span>
                         </div>
-                        <Show 
+                        <Show
                           when={editingApp() === app.appId}
                           fallback={
                             <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.permissions?.signData)}`}>
@@ -592,13 +598,39 @@ export const PermissionsDashboard: Component = () => {
                         </Show>
                       </div>
 
+                      {/* Zaps Permission */}
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span>⚡</span>
+                          <span class="text-sm font-medium">Zaps</span>
+                        </div>
+                        <Show
+                          when={editingApp() === app.appId}
+                          fallback={
+                            <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.permissions?.zaps)}`}>
+                              {getPermissionLevelLabel(app.permissions?.zaps)}
+                            </span>
+                          }
+                        >
+                          <select
+                            value={app.permissions?.zaps || 'ASK_EVERYTIME'}
+                            onChange={(e) => updatePermissionLevel(app.appId, 'zaps', null, e.currentTarget.value as PermissionLevel)}
+                            class="text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                          >
+                            <For each={permissionLevels}>
+                              {(level) => <option value={level}>{getPermissionLevelLabel(level)}</option>}
+                            </For>
+                          </select>
+                        </Show>
+                      </div>
+
                       {/* Financial Permission */}
                       <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
                           <span>💰</span>
                           <span class="text-sm font-medium">Financial</span>
                         </div>
-                        <Show 
+                        <Show
                           when={editingApp() === app.appId}
                           fallback={
                             <span class={`px-2 py-1 text-xs rounded ${getPermissionLevelColor(app.permissions?.financial)}`}>

@@ -17,6 +17,7 @@ export const PermissionsSection: Component<PermissionsSectionProps> = (props) =>
     const [showSocialDetails, setShowSocialDetails] = createSignal(false);
     const [showMessagingDetails, setShowMessagingDetails] = createSignal(false);
     const [showSignDataDetails, setShowSignDataDetails] = createSignal(false);
+    const [showZapsDetails, setShowZapsDetails] = createSignal(false);
     const [showFinancialDetails, setShowFinancialDetails] = createSignal(false);
 
     return (
@@ -187,10 +188,50 @@ export const PermissionsSection: Component<PermissionsSectionProps> = (props) =>
                                         </Show>
                                     </div>
                                 </div>
-                                <select 
+                                <select
                                     class="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     value={props.appPermissions?.permissions?.signData || 'ASK_EVERYTIME'}
                                     onChange={(e) => props.onPermissionChange('signData', e.currentTarget.value as PermissionLevel)}
+                                    disabled={props.isSavingPermission}
+                                >
+                                    <option value="ALLOW">Always Allow</option>
+                                    <option value="ASK_EVERYTIME">Ask Each Time</option>
+                                    <option value="DENY">Always Deny</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Zaps & Tips */}
+                        <div class="bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg p-4 transition-colors">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center gap-3">
+                                    <svg class="w-5 h-5 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Zaps & Tips</span>
+                                            <button
+                                                onClick={() => setShowZapsDetails(!showZapsDetails())}
+                                                class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
+                                                title="Learn more"
+                                            >
+                                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                        <Show when={showZapsDetails()}>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                                                Lightning payments and tips to appreciate content
+                                            </p>
+                                        </Show>
+                                    </div>
+                                </div>
+                                <select
+                                    class="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    value={props.appPermissions?.permissions?.zaps || 'ASK_EVERYTIME'}
+                                    onChange={(e) => props.onPermissionChange('zaps', e.currentTarget.value as PermissionLevel)}
                                     disabled={props.isSavingPermission}
                                 >
                                     <option value="ALLOW">Always Allow</option>
@@ -209,7 +250,7 @@ export const PermissionsSection: Component<PermissionsSectionProps> = (props) =>
                                     </svg>
                                     <div>
                                         <div class="flex items-center gap-2">
-                                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Financial Operations</span>
+                                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Financial</span>
                                             <button
                                                 onClick={() => setShowFinancialDetails(!showFinancialDetails())}
                                                 class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
@@ -222,12 +263,12 @@ export const PermissionsSection: Component<PermissionsSectionProps> = (props) =>
                                         </div>
                                         <Show when={showFinancialDetails()}>
                                             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
-                                                Payments, zaps, and sensitive financial data
+                                                Wallet settings and financial metadata
                                             </p>
                                         </Show>
                                     </div>
                                 </div>
-                                <select 
+                                <select
                                     class="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     value={props.appPermissions?.permissions?.financial || 'ASK_EVERYTIME'}
                                     onChange={(e) => props.onPermissionChange('financial', e.currentTarget.value as PermissionLevel)}

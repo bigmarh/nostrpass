@@ -390,25 +390,30 @@ export const sessionManager = {
         // This allows PIN-only unlock without password
         console.log('💾 [WORKER login] Caching LoginObj to IndexedDB...');
 
-        // Store LoginObj data in a way that PIN unlock can access it
-        // We'll save the encrypted storage keypair along with basic vault metadata
-        await vaultDB.saveVault({
-          username: params.username,
-          publicKey: loginObj.storagePublicKey,
-          // Store the PIN-encrypted storage keypair for PIN unlock
-          storageKeypairEncrypted: loginObj.storageKeypairEncrypted,
-          // xprivEncrypted will be loaded from VaultObj during PIN unlock
-          xprivEncrypted: '', // Placeholder - will be populated during PIN unlock
-          salt: loginObj.pinSalt,
-          identities: [], // Will be loaded during PIN unlock
-          activeIdentityByApp: {},
-          passwordSalt: passwordSalt,
-          lastSyncedAt: Date.now(),
-          updatedAt: Date.now(),
-          createdAt: Date.now()
-        } as VaultData);
+        try {
+          // Store LoginObj data in a way that PIN unlock can access it
+          // We'll save the encrypted storage keypair along with basic vault metadata
+          await vaultDB.saveVault({
+            username: params.username,
+            publicKey: loginObj.storagePublicKey,
+            // Store the PIN-encrypted storage keypair for PIN unlock
+            storageKeypairEncrypted: loginObj.storageKeypairEncrypted,
+            // xprivEncrypted will be loaded from VaultObj during PIN unlock
+            xprivEncrypted: '', // Placeholder - will be populated during PIN unlock
+            salt: loginObj.pinSalt,
+            identities: [], // Will be loaded during PIN unlock
+            activeIdentityByApp: {},
+            passwordSalt: passwordSalt,
+            lastSyncedAt: Date.now(),
+            updatedAt: Date.now(),
+            createdAt: Date.now()
+          } as VaultData);
 
-        console.log('✅ [WORKER login] LoginObj cached - vault needs PIN unlock to access');
+          console.log('✅ [WORKER login] LoginObj cached - vault needs PIN unlock to access');
+        } catch (saveError) {
+          console.error('❌ [WORKER login] Failed to cache LoginObj:', saveError);
+          return { success: false, error: 'Failed to save account data locally' };
+        }
 
         // Return success - user will be prompted for PIN to unlock vault
         return {
@@ -439,9 +444,12 @@ export const sessionManager = {
         console.warn('⚠️ [WORKER login] Account missing security fields - migrating...');
 
         try {
+          console.log('🔧 [WORKER login] Starting security field migration...');
+
           // Generate new password salt
           const newPasswordSalt = await cryptoPrimitives.generateSalt();
           const passwordSalt = newPasswordSalt.salt || newPasswordSalt;
+          console.log('✅ Generated new password salt');
 
           // Derive key from password
           const passwordDeriveResult = await cryptoPrimitives.deriveKey({
@@ -449,25 +457,33 @@ export const sessionManager = {
             salt: passwordSalt
           });
           const passwordKey = passwordDeriveResult.key || passwordDeriveResult;
+          console.log('✅ Derived password key');
 
           // Create and encrypt verifier
           const passwordVerifier = await cryptoPrimitives.encryptData({
             data: 'NostrPass_Password_Verifier_v1',
             password: passwordKey
           });
+          console.log('✅ Created password verifier');
 
           // Update vault data with new security fields
           vaultData.passwordVerifier = passwordVerifier;
           vaultData.passwordSalt = passwordSalt;
           vaultData.updatedAt = Date.now();
 
-          // Save to IndexedDB
-          await vaultDB.updateVaultData(params.username, vaultData);
+          // Save to IndexedDB (saveVault will update if already exists)
+          await vaultDB.saveVault(vaultData);
+          console.log('✅ Saved security fields to IndexedDB');
 
           console.log('✅ [WORKER login] Account migrated with security fields');
         } catch (migrationError) {
-          console.error('❌ [WORKER login] Migration failed:', migrationError);
-          return { success: false, error: 'Failed to upgrade account security' };
+          console.error('❌ [WORKER login] Migration failed at step:', migrationError);
+          console.error('Migration error details:', {
+            name: migrationError instanceof Error ? migrationError.name : 'unknown',
+            message: migrationError instanceof Error ? migrationError.message : String(migrationError),
+            stack: migrationError instanceof Error ? migrationError.stack : undefined
+          });
+          return { success: false, error: `Failed to upgrade account security: ${migrationError instanceof Error ? migrationError.message : 'unknown error'}` };
         }
       }
 
@@ -1159,7 +1175,7 @@ export const sessionManager = {
    * Back-compat alias: unlockSession behaves like unlockVault but accepts { username, privateKey, xpriv }
    * Used for programmatic unlocking without PIN
    */
-  unlockSession: async (params: { username: string; privateKey?: string; xpriv?: string }, handlers: any): Promise<{ success: boolean }> => {
+  unlockSession: async (params: { username: string; privateKey?: string; xpriv?: string; storagePrivateKey?: string; storagePublicKey?: string }, handlers: any): Promise<{ success: boolean }> => {
     const v = await vaultDB.getVault(params.username);
     const session = activeSessions.get(params.username) || {
       username: params.username,
@@ -1171,10 +1187,15 @@ export const sessionManager = {
     ensureNotLocked(params.username);
     if (params.privateKey) session.privateKey = params.privateKey;
     if (params.xpriv) session.xpriv = params.xpriv;
-    session.isUnlocked = !!(session.privateKey || session.xpriv);
+
+    // Allow direct setting of storage keypair (from LoginObj)
+    if (params.storagePrivateKey) session.storagePrivateKey = params.storagePrivateKey;
+    if (params.storagePublicKey) session.storagePublicKey = params.storagePublicKey;
+
+    session.isUnlocked = !!(session.privateKey || session.xpriv || session.storagePrivateKey);
     session.unlockedAt = Date.now();
 
-    // Derive and cache storage keypair if available
+    // Derive and cache storage keypair if available from xpriv
     if (session.xpriv && !session.storagePrivateKey) {
       try {
         const { STORAGE_INDEX } = await import('@nostrpass/types');
@@ -1186,10 +1207,12 @@ export const sessionManager = {
           session.storagePrivateKey = derived.privateKey;
           session.storagePublicKey = derived.publicKey;
         }
-        console.log('[UnlockSession] Storage keypair derived and cached');
+        console.log('[UnlockSession] Storage keypair derived from xpriv and cached');
       } catch (e) {
-        console.warn('[UnlockSession] Failed to derive storage keypair:', e);
+        console.warn('[UnlockSession] Failed to derive storage keypair from xpriv:', e);
       }
+    } else if (params.storagePrivateKey) {
+      console.log('[UnlockSession] Storage keypair provided directly');
     }
 
     console.log('[UnlockSession] Setting session in activeSessions for:', params.username);
@@ -1494,7 +1517,15 @@ export const sessionManager = {
         const entries = Object.entries(PERMISSION_KINDS) as Array<[keyof typeof PERMISSION_KINDS, readonly number[]]>;
         for (const [category, kinds] of entries) {
           if (kinds.includes(kindNumber)) {
-            const level = appPerms.permissions?.[category] as PermissionLevel | undefined;
+            let level = appPerms.permissions?.[category] as PermissionLevel | undefined;
+
+            // MIGRATION: For existing accounts without 'zaps' permission, fall back to 'financial'
+            // This provides seamless migration for users who had financial permissions set
+            if (!level && category === 'zaps') {
+              level = appPerms.permissions?.financial as PermissionLevel | undefined;
+              console.log('[WORKER] Zap permission migration: using financial permission as fallback:', level);
+            }
+
             if (level) {
               return resolveLevel(level);
             }
@@ -1541,10 +1572,17 @@ export const sessionManager = {
         break;
       case 'signEvent':
         {
-          const normalizedKind = eventKind !== undefined ? Number(eventKind) : undefined;
-          level = determineCategoryLevel(
-            normalizedKind !== undefined && !Number.isNaN(normalizedKind) ? normalizedKind : undefined
-          );
+          // Check for top-level signEvent permission first (for backward compatibility and explicit grants)
+          const rootSignEvent = appPerms.signEvent as PermissionLevel | undefined;
+          if (rootSignEvent && (rootSignEvent === 'ALLOW' || rootSignEvent === 'DENY' || rootSignEvent === 'ASK_EVERYTIME')) {
+            level = rootSignEvent;
+          } else {
+            // Fall back to event kind-specific and category-based permissions
+            const normalizedKind = eventKind !== undefined ? Number(eventKind) : undefined;
+            level = determineCategoryLevel(
+              normalizedKind !== undefined && !Number.isNaN(normalizedKind) ? normalizedKind : undefined
+            );
+          }
         }
         break;
       default:
@@ -1634,6 +1672,7 @@ export const sessionManager = {
         social: 'ASK_EVERYTIME',
         messaging: 'ASK_EVERYTIME',
         signData: 'ASK_EVERYTIME',
+        zaps: 'ASK_EVERYTIME',
         financial: 'ASK_EVERYTIME',
       },
       getPublicKey: 'ALLOW',
@@ -1644,6 +1683,7 @@ export const sessionManager = {
       social: (existing.permissions && existing.permissions.social) || 'ASK_EVERYTIME',
       messaging: (existing.permissions && existing.permissions.messaging) || 'ASK_EVERYTIME',
       signData: (existing.permissions && existing.permissions.signData) || 'ASK_EVERYTIME',
+      zaps: (existing.permissions && existing.permissions.zaps) || 'ASK_EVERYTIME',
       financial: (existing.permissions && existing.permissions.financial) || 'ASK_EVERYTIME',
     };
 
@@ -1653,6 +1693,7 @@ export const sessionManager = {
     if (permissions.social) basePermissions.social = permissions.social;
     if (permissions.messaging) basePermissions.messaging = permissions.messaging;
     if (permissions.signData) basePermissions.signData = permissions.signData;
+    if (permissions.zaps) basePermissions.zaps = permissions.zaps;
     if (permissions.financial) basePermissions.financial = permissions.financial;
     if (permissions.nip04) basePermissions.messaging = permissions.nip04;
     if (permissions.getRelays) basePermissions.financial = permissions.getRelays;

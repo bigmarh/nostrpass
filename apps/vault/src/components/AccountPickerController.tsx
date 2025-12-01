@@ -44,7 +44,77 @@ export const AccountPickerController: Component = () => {
         }));
 
         setIdentities(allIdentities);
-        // Only update detail if we're opening the picker (not refreshing)
+
+        // If there's only one identity, auto-select it instead of showing the picker
+        if (allIdentities.length === 1 && currentDetail) {
+          console.log('🔵 [AccountPicker] Only one identity - auto-selecting index 0');
+
+          // Update activeIdentityByApp
+          await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
+            activeIdentityByApp: {
+              ...(current.activeIdentityByApp || {}),
+              [appKey]: 0
+            }
+          }));
+
+          const isAuthorized = allIdentities[0].isAuthorized;
+
+          if (isAuthorized) {
+            // Already authorized - just dispatch success
+            if (currentDetail.requestId) {
+              window.dispatchEvent(new CustomEvent('account-picker-selected', {
+                detail: { requestId: currentDetail.requestId, identityIndex: 0 }
+              }));
+            }
+          } else {
+            // Not authorized - show simple auth prompt
+            const authRequestId = `simple-auth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+            const handleApproved = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === authRequestId) {
+                cleanup();
+                if (currentDetail.requestId) {
+                  window.dispatchEvent(new CustomEvent('account-picker-selected', {
+                    detail: { requestId: currentDetail.requestId, identityIndex: 0 }
+                  }));
+                }
+              }
+            };
+
+            const handleRejected = (e: Event) => {
+              const ce = e as CustomEvent;
+              if (ce.detail.requestId === authRequestId) {
+                cleanup();
+                if (currentDetail.requestId) {
+                  window.dispatchEvent(new CustomEvent('account-picker-rejected', {
+                    detail: { requestId: currentDetail.requestId, error: ce.detail.error }
+                  }));
+                }
+              }
+            };
+
+            const cleanup = () => {
+              window.removeEventListener('simple-auth-approved', handleApproved as EventListener);
+              window.removeEventListener('simple-auth-rejected', handleRejected as EventListener);
+            };
+
+            window.addEventListener('simple-auth-approved', handleApproved as EventListener);
+            window.addEventListener('simple-auth-rejected', handleRejected as EventListener);
+
+            window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
+              detail: {
+                appOrigin: currentDetail.appOrigin,
+                appName: currentDetail.appName,
+                identityIndex: 0,
+                requestId: authRequestId
+              }
+            }));
+          }
+          return; // Don't show the picker
+        }
+
+        // Multiple identities - show picker
         if (currentDetail) {
           setDetail(currentDetail);
           setVisible(true);

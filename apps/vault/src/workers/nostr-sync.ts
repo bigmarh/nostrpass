@@ -273,18 +273,26 @@ export const nostrSync = {
   }): Promise<{ identities: any[]; perms: Record<string, string[]> }> => {
     await ensureCryptoReady();
     const { username, relays } = params;
+    console.log('🔍 [assembleStateFromAuthor] Starting for username:', username);
+
     const session = activeSessions.get(username);
+    console.log('🔍 [assembleStateFromAuthor] Session found:', !!session);
+    console.log('🔍 [assembleStateFromAuthor] Has storagePrivateKey:', !!session?.storagePrivateKey);
+
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
 
     const storagePriv = session.storagePrivateKey;
     const vault = await vaultDB.getVault(username);
     if (!vault) throw new Error('Vault not found');
     const storagePublicKey = (vault as any).storagePublicKey || (vault as any).publicKey;
+    console.log('🔍 [assembleStateFromAuthor] Storage public key:', storagePublicKey);
 
     // All PRE events are signed by storage key (deterministic from xpriv)
     const pool = new SimplePool();
     const filter: Filter = { kinds: [30078], authors: [storagePublicKey], limit: 500 };
+    console.log('🔍 [assembleStateFromAuthor] Querying relays with filter:', filter);
     const events = await pool.querySync(relays, filter);
+    console.log('🔍 [assembleStateFromAuthor] Found events:', events.length);
     pool.close(relays);
 
     // Group latest by d-tag

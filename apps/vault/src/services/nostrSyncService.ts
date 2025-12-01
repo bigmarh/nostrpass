@@ -251,11 +251,38 @@ class NostrSyncService {
 
     status.lastError = error instanceof Error ? error.message : String(error);
 
-    // Exponential backoff: 5s, 15s, 45s, 2m, 5m, 15m
-    const delays = [5000, 15000, 45000, 120000, 300000, 900000];
-    const delay = delays[Math.min(status.attemptCount - 1, delays.length - 1)];
+    // Check if this is first sync (more aggressive retry schedule)
+    const isFirstSync = status.attemptCount <= 6;
 
-    console.log(`⏰ [NostrSync] Retrying in ${delay / 1000}s (attempt ${status.attemptCount})`);
+    // Aggressive retry for first sync: 2s, 5s, 10s, 20s, 40s, 60s
+    // Then fall back to: 5s, 15s, 45s, 2m, 5m, 15m
+    const firstSyncDelays = [2000, 5000, 10000, 20000, 40000, 60000];
+    const regularDelays = [5000, 15000, 45000, 120000, 300000, 900000];
+
+    const delays = isFirstSync ? firstSyncDelays : regularDelays;
+    const delayIndex = isFirstSync
+      ? Math.min(status.attemptCount - 1, firstSyncDelays.length - 1)
+      : Math.min(status.attemptCount - firstSyncDelays.length - 1, regularDelays.length - 1);
+    const delay = delays[delayIndex];
+
+    console.log(`⏰ [NostrSync] Retrying in ${delay / 1000}s (attempt ${status.attemptCount}, ${isFirstSync ? 'first sync' : 'regular sync'})`);
+
+    // Max attempts check
+    const MAX_ATTEMPTS = 10;
+    if (status.attemptCount >= MAX_ATTEMPTS) {
+      console.error(`❌ [NostrSync] Max sync attempts (${MAX_ATTEMPTS}) reached for ${username}`);
+      status.lastError = 'Max sync attempts exceeded';
+
+      window.dispatchEvent(new CustomEvent('nostr-sync-failed', {
+        detail: {
+          username,
+          error: 'Max sync attempts exceeded. Please try manually from settings.',
+          attemptCount: status.attemptCount,
+          requiresManualRetry: true
+        }
+      }));
+      return;
+    }
 
     // Clear existing timeout
     const existing = this.retryTimeouts.get(username);

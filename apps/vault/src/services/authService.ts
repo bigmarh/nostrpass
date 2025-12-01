@@ -1,6 +1,6 @@
 /**
  * Auth Service
- * 
+ *
  * Provides worker queries for authentication status.
  * Worker session is the single source of truth.
  */
@@ -20,8 +20,8 @@ export interface AuthStatus {
 }
 
 /**
- * Get authentication status from worker
- * This is the single source of truth for auth state
+ * Get authentication status from worker (atomic version)
+ * This uses the new atomic handlers for single-call auth state
  */
 export async function getAuthStatus(cryptoWorker: any): Promise<AuthStatus> {
   if (!cryptoWorker) {
@@ -35,12 +35,38 @@ export async function getAuthStatus(cryptoWorker: any): Promise<AuthStatus> {
   }
 
   try {
-    // First, try to get session status (logged in state)
+    // Try atomic API first
+    if (typeof cryptoWorker.getAuthState === 'function') {
+      const state = await cryptoWorker.getAuthState({});
+
+      if (!state.isAuthenticated) {
+        return {
+          isAuthenticated: false,
+          isLocked: true,
+          user: null,
+          sessionId: null,
+          timestamp: Date.now()
+        };
+      }
+
+      return {
+        isAuthenticated: state.isAuthenticated,
+        isLocked: state.isLocked,
+        user: {
+          username: state.username,
+          publicKey: state.publicKey,
+          storagePublicKey: state.storagePublicKey
+        },
+        sessionId: state.sessionId,
+        timestamp: Date.now()
+      };
+    }
+
+    // Fallback to old multi-call approach
     const { VaultDataService } = await import('./vaultDataService');
     const vaultDataService = VaultDataService.getInstance();
     const sessionStatus = await vaultDataService.getSessionStatus();
 
-    // If no session, user is not authenticated
     if (!sessionStatus.sessionId || !sessionStatus.username) {
       return {
         isAuthenticated: false,
@@ -51,14 +77,12 @@ export async function getAuthStatus(cryptoWorker: any): Promise<AuthStatus> {
       };
     }
 
-    // Check if session has keys (unlocked state)
     const keyStatus = await cryptoWorker.hasKeysInSession({
       username: sessionStatus.username
     });
 
     const isUnlocked = !!(keyStatus?.hasPrivateKey || keyStatus?.hasXpriv);
 
-    // Get vault data for user info
     const vaultData = await cryptoWorker.getVaultData({
       username: sessionStatus.username
     });
@@ -112,7 +136,7 @@ export function triggerAuthStatusRefresh(): void {
  */
 export async function getCurrentUser(cryptoWorker: any): Promise<User | null> {
   const status = await getAuthStatus(cryptoWorker);
-  
+
   if (!status.isAuthenticated || !status.user) {
     return null;
   }
@@ -147,4 +171,3 @@ export async function getCurrentUser(cryptoWorker: any): Promise<User | null> {
     }
   };
 }
-

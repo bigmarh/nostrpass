@@ -2,6 +2,7 @@ import { Component, createSignal, Show } from 'solid-js';
 import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady, useCryptoWorker, useEnvironment } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
 import PinSetup from './PinSetup';
+import PinVerification from './PinVerification';
 import { permissionService } from '../services/permissionService';
 import { DEFAULT_PERMISSIONS, DEFAULT_GET_PUBLIC_KEY } from '@nostrpass/types';
 
@@ -18,12 +19,13 @@ export const Login: Component = () => {
     const [error, setError] = createSignal('');
     const [loadingStatus, setLoadingStatus] = createSignal('');
     const [showPinSetup, setShowPinSetup] = createSignal(false);
+    const [showPinUnlock, setShowPinUnlock] = createSignal(false);
     const [tempAccountData, setTempAccountData] = createSignal<{username: string, password: string, publicKey: string} | null>(null);
 
     const params = useParams();
     const navigate = useNavigate();
     const { send } = useMessenger();
-    const { login, createAccount, hasPinVault } = useAuth();
+    const { login, createAccount, hasPinVault, unlockVault, user } = useAuth();
     const { checkUsernameAvailable, registerUsername, isConnected } = useNostrComms();
     
     const cryptoReady = useCryptoWorkerReady();
@@ -137,16 +139,17 @@ export const Login: Component = () => {
         if (!isConnected()) {
             throw new Error('Not connected to Nostr relays. Please try again.');
         }
-        
+
         // Login with password (new flow uses LoginObj lookup)
         setLoadingStatus('Verifying credentials...');
         await login(password(), username().trim().toLowerCase());
 
         setLoadingStatus('Loading your vault...');
 
-        // Login successful - close vault and return to app
-        // Note: AuthProvider will automatically notify embassy via centralized auth listener
-        send('HIDE_VAULT');
+        // Show PIN unlock prompt instead of closing immediately
+        // This ensures the account is fully unlocked before closing
+        setIsLoading(false);
+        setShowPinUnlock(true);
     };
 
     const toggleMode = () => {
@@ -215,12 +218,12 @@ export const Login: Component = () => {
     const handlePinSetWithRecovery = async (pin: string, questions: string[], answers: string[]) => {
         const accountData = tempAccountData();
         if (!accountData) return;
-        
+
         try {
             setIsLoading(true);
             setShowPinSetup(false);
             setLoadingStatus('Securing your vault with PIN and recovery questions...');
-            
+
             const { publicKey } = await createAccount(
                 accountData.username,
                 accountData.password,
@@ -267,6 +270,37 @@ export const Login: Component = () => {
             setIsLoading(false);
             setLoadingStatus('');
         }
+    };
+
+    const handlePinUnlockSuccess = async (pin: string) => {
+        try {
+            setIsLoading(true);
+            setLoadingStatus('Unlocking vault and fetching identities from Nostr...');
+
+            // Unlock the vault with the PIN - this will fetch VaultObj from Nostr if needed
+            const success = await unlockVault(pin);
+
+            if (success) {
+                setLoadingStatus('Vault unlocked successfully!');
+
+                // After login+unlock, navigate to account picker so user can select identity
+                const appOrigin = params.app ? desanitizeDomain(params.app) : 'unknown';
+                navigate(`/${params.app || 'vault'}/account-picker?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&afterLogin=true`);
+            } else {
+                throw new Error('Failed to unlock vault. Please try again.');
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to unlock vault');
+            setShowPinUnlock(false);
+            setIsLoading(false);
+            setLoadingStatus('');
+        }
+    };
+
+    const handlePinUnlockFailed = () => {
+        // Too many failed attempts
+        setShowPinUnlock(false);
+        setError('Too many failed PIN attempts. Please log in again.');
     };
 
     return (
@@ -419,6 +453,54 @@ export const Login: Component = () => {
                                 setError('PIN setup cancelled. Please try again.');
                             }}
                         />
+                    </div>
+                </div>
+            </Show>
+
+            {/* PIN Unlock Modal (shown after successful login) */}
+            <Show when={showPinUnlock()}>
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div class="bg-white dark:bg-gray-800 w-full max-w-md md:rounded-lg md:shadow-xl md:border-2 md:border-black p-8">
+                        <div class="text-center mb-6">
+                            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Enter Your PIN</h2>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                                Unlock your vault to complete login
+                            </p>
+                        </div>
+
+                        <Show when={error() && showPinUnlock()}>
+                            <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4">
+                                {error()}
+                            </div>
+                        </Show>
+
+                        <Show when={isLoading() && loadingStatus()}>
+                            <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-400 px-4 py-2 rounded-md text-sm mb-4 flex items-center gap-2">
+                                <svg class="animate-spin h-4 w-4 text-blue-700 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                {loadingStatus()}
+                            </div>
+                        </Show>
+
+                        <PinVerification
+                            onSuccess={handlePinUnlockSuccess}
+                            onFailed={handlePinUnlockFailed}
+                            expectedPinHash={user()?.vaultPinHash}
+                        />
+
+                        <div class="mt-4 text-center">
+                            <button
+                                onClick={() => {
+                                    setShowPinUnlock(false);
+                                    setError('Login cancelled');
+                                }}
+                                class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
                     </div>
                 </div>
             </Show>

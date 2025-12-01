@@ -22,6 +22,18 @@ import { vaultOperations, setActiveSessions, setLogSessionState } from './vault-
 import { sessionManager, activeSessions, logSessionState } from './session-manager';
 import { nostrSync } from './nostr-sync';
 
+// Import atomic auth handlers (new simplified API)
+import {
+  handleGetAuthState,
+  handleAtomicLogin,
+  handleAtomicUnlock,
+  handleAtomicLogout,
+  handleLockSession,
+  handleGetVaultDataFromSession,
+  handleUpdateVaultMetadata,
+  handleHasValidSession
+} from './auth-handlers-atomic';
+
 // Wire up dependencies to avoid circular imports
 // vault-operations needs access to activeSessions for deleteVault
 setActiveSessions(activeSessions);
@@ -43,6 +55,16 @@ export const handlers = {
 
   // Nostr synchronization (relay interactions, PRE events)
   ...nostrSync,
+
+  // Atomic auth handlers (new simplified API - can be used alongside old API)
+  getAuthState: handleGetAuthState,
+  atomicLogin: handleAtomicLogin,
+  atomicUnlock: handleAtomicUnlock,
+  atomicLogout: handleAtomicLogout,
+  lockSession: handleLockSession,
+  getVaultDataFromSession: handleGetVaultDataFromSession,
+  updateVaultMetadata: handleUpdateVaultMetadata,
+  hasValidSession: handleHasValidSession,
 };
 
 /**

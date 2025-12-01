@@ -1,2 +1,2 @@
-export { NostrPassEmbassy, initNostrPass } from '@nostrpass/embassy/src/embassy';
+export { NostrPassEmbassy, initNostrPass } from '../../apps/embassy/src/embassy';
 //# sourceMappingURL=index.js.map

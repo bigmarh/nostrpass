@@ -7,6 +7,8 @@ export var Msg;
     Msg["AUTH_STATUS"] = "AUTH_STATUS";
     Msg["SHOW_VAULT"] = "SHOW_VAULT";
     Msg["HIDE_VAULT"] = "HIDE_VAULT";
+    Msg["NAVIGATE"] = "NAVIGATE";
+    Msg["LOGOUT"] = "LOGOUT";
     Msg["CHECK_PERMISSION"] = "CHECK_PERMISSION";
     Msg["GET_RELAYS"] = "GET_RELAYS";
     Msg["GET_PUBLIC_KEY"] = "GET_PUBLIC_KEY";
@@ -17,6 +19,8 @@ export var Msg;
     Msg["GOT_ERROR"] = "GOT_ERROR";
     Msg["PROMPT_REQUIRED"] = "PROMPT_REQUIRED";
     Msg["MANAGE_ACCOUNTS"] = "MANAGE_ACCOUNTS";
+    Msg["GET_ALL_IDENTITIES"] = "GET_ALL_IDENTITIES";
+    Msg["SWITCH_IDENTITY"] = "SWITCH_IDENTITY";
 })(Msg || (Msg = {}));
 export var ErrorCode;
 (function (ErrorCode) {
