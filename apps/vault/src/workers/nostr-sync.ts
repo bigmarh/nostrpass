@@ -389,7 +389,17 @@ export const nostrSync = {
       const onEvent = async (ev: NostrEvent) => {
         try {
           const d = ev.tags.find((t) => t[0] === 'd')?.[1] || '';
-          if (!d) return;
+          console.log('📨 [Worker] Received Nostr event:', {
+            kind: ev.kind,
+            d: d ? d.slice(0, 50) : '(no d-tag)',
+            created_at: new Date(ev.created_at * 1000).toISOString(),
+            eventId: ev.id.slice(0, 12)
+          });
+
+          if (!d) {
+            console.warn('⚠️ [Worker] Event missing d-tag, ignoring');
+            return;
+          }
 
           // Identity PRE stream
           if (d.startsWith('np/identity/')) {
@@ -457,6 +467,11 @@ export const nostrSync = {
 
           // Legacy/full-vault stream (initial snapshot or older clients)
           if (d.startsWith(`nostrpass.com_vault_`)) {
+            console.log('📥 [Worker] Received full VaultObj event:', {
+              d: d.slice(0, 40),
+              eventId: ev.id.slice(0, 12),
+            });
+
             let remote: VaultData | null = null;
             try {
               const plaintext = await nip04DecryptJS(
@@ -465,13 +480,26 @@ export const nostrSync = {
                 ev.content
               );
               remote = JSON.parse(plaintext) as VaultData;
-            } catch {
+              console.log('✅ [Worker] Decrypted VaultObj successfully');
+            } catch (decryptErr) {
+              console.error('❌ [Worker] Failed to decrypt VaultObj:', decryptErr);
               remote = null;
             }
+
             if (!remote) return;
+
             const local = await vaultDB.getVault(username);
             const remoteVersion = (remote as any).version || 0;
             const localVersion = (local as any)?.version || 0;
+
+            console.log('📊 [Worker] VaultObj version comparison:', {
+              remoteVersion,
+              localVersion,
+              remoteIdentities: remote.identities?.length || 0,
+              localIdentities: local?.identities?.length || 0,
+              willUpdate: remoteVersion > localVersion
+            });
+
             if (remoteVersion > localVersion) {
               console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', {
                 remoteVersion,
@@ -482,6 +510,9 @@ export const nostrSync = {
                 vaultData: remote,
                 skipVersionIncrement: true,
               });
+              console.log('✅ [Worker] Vault updated successfully from realtime event');
+            } else {
+              console.log('ℹ️ [Worker] Remote version not newer, skipping update');
             }
           }
         } catch (e) {
