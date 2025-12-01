@@ -512,44 +512,8 @@ export class UsernameRegistry {
         console.log('Publish results:', publishResults);
         console.log(`Successfully published to ${publishResults.length} relays`);
 
-        // Give relays more time to process and propagate
-        console.log('⏳ Waiting for relay propagation...');
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds
-        
-        // Verify the event was stored
-        const verifyFilter = {
-          kinds: [30078],
-          '#d': [`nostrpass.com_login_${hash}_${getEnvironment()}`],
-          limit: 1
-        };
-        let verifyEvents: NostrEvent[] = [];
-        try {
-          verifyEvents = await this.pool.querySync(this.relays, verifyFilter);
-        } catch (error: any) {
-          console.warn('Error during verification query:', error);
-          // Try each relay individually
-          for (const relay of this.relays) {
-            try {
-              const relayEvents = await this.pool.querySync([relay], verifyFilter);
-              verifyEvents = [...verifyEvents, ...relayEvents];
-              console.log(`✅ Verified on ${relay}`);
-            } catch (relayError: any) {
-              if (relayError.message?.includes('pow:')) {
-                const powMatch = relayError.message.match(/pow:\s*(\d+)\s*bits/);
-                const bits = powMatch ? powMatch[1] : 'unknown';
-                console.warn(`⚠️ Relay ${relay} requires Proof of Work (${bits} bits) for verification`);
-              } else {
-                console.error(`❌ Failed to verify on ${relay}:`, relayError.message);
-              }
-            }
-          }
-        }
-        console.log('Verification query found:', verifyEvents.length, 'events');
-        
-        if (verifyEvents.length === 0) {
-          console.warn('⚠️ Registration event not found after publishing. Relays may be slow.');
-          // Still return true as the event was published successfully
-        }
+        // No need to wait for propagation or verify - publish confirmations are enough
+        // The registration will be available immediately when needed for login
       } catch (error: any) {
         console.error('Error during username registration publish:', error);
         // Check if all relays require PoW
