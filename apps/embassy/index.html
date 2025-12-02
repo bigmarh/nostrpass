@@ -712,6 +712,11 @@
                 </div>
               </div>
               <div class="btn-group">
+                <button id="btn-test-encrypt-decrypt" class="btn btn-success btn-block">
+                  🔄 Test Encrypt + Decrypt
+                </button>
+              </div>
+              <div class="btn-group">
                 <button id="btn-encrypt" class="btn btn-primary">
                   🔒 Encrypt
                 </button>
@@ -1178,6 +1183,51 @@
           log('success', 'Data signature verified', { ok: true });
         } catch (e) {
           log('error', 'Data signature verification failed', { error: String(e) });
+        }
+      });
+
+      $('btn-test-encrypt-decrypt').addEventListener('click', async () => {
+        try {
+          ensureProvider();
+          const testMessage = $('nip04-plain').value || `Test message @ ${new Date().toISOString()}`;
+
+          if (!window.nostr?.nip04?.encrypt || !window.nostr?.nip04?.decrypt) {
+            throw new Error('NIP-04 encryption not available');
+          }
+
+          const identityIndex = Number($('identity-index').value) || 0;
+
+          // Step 1: Get public key (this will be the "recipient")
+          const myPubkey = await window.nostr.getPublicKey({ identityIndex });
+          log('info', 'Step 1: Got public key', { publicKey: myPubkey });
+
+          // Step 2: Encrypt message to ourselves
+          log('info', 'Step 2: Encrypting message...', { message: testMessage });
+          const cipher = await window.nostr.nip04.encrypt(myPubkey, testMessage, { identityIndex });
+          $('nip04-cipher').value = cipher;
+          log('success', 'Message encrypted', { ciphertext: cipher.substring(0, 50) + '...' });
+
+          // Step 3: Decrypt the message
+          log('info', 'Step 3: Decrypting message...');
+          const decrypted = await window.nostr.nip04.decrypt(myPubkey, cipher, { identityIndex });
+          $('nip04-plain').value = decrypted;
+
+          // Step 4: Verify round-trip
+          if (decrypted === testMessage) {
+            log('success', '✅ Encrypt/Decrypt test PASSED!', {
+              original: testMessage,
+              decrypted: decrypted,
+              match: true
+            });
+          } else {
+            log('error', '❌ Encrypt/Decrypt test FAILED - messages do not match', {
+              original: testMessage,
+              decrypted: decrypted,
+              match: false
+            });
+          }
+        } catch (e) {
+          log('error', 'Encrypt/Decrypt test failed', { error: String(e) });
         }
       });
 
