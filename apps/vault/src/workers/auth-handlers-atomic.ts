@@ -3,10 +3,50 @@
  *
  * Simple, atomic auth operations using SessionStateManager.
  * Replaces the complex multi-source auth logic.
+ *
+ * Broadcasts AUTH_STATE_CHANGED event after state changes.
  */
 
 import { getSessionStateManager, type CompleteSessionState } from './session-state-manager';
 import { cryptoPrimitives } from './crypto-primitives';
+
+/**
+ * Broadcast auth state change to main thread and all tabs
+ */
+function broadcastAuthStateChanged(state: CompleteSessionState | null) {
+  const message = {
+    type: 'AUTH_STATE_CHANGED',
+    state: state ? {
+      isAuthenticated: state.isAuthenticated,
+      isLocked: !state.isUnlocked,
+      user: state.username ? {
+        username: state.username,
+        publicKey: state.publicKey,
+        storagePublicKey: state.storagePublicKey
+      } : null,
+      sessionId: state.sessionId,
+      vaultVersion: state.vaultVersion,
+      identityCount: state.identityCount
+    } : {
+      isAuthenticated: false,
+      isLocked: true,
+      user: null,
+      sessionId: null
+    }
+  };
+
+  // Send to main thread
+  self.postMessage(message);
+
+  // Send to all tabs via BroadcastChannel
+  try {
+    const channel = new BroadcastChannel('nostrpass-vault');
+    channel.postMessage(message);
+    channel.close();
+  } catch (error) {
+    console.error('[auth-handlers-atomic] Failed to broadcast:', error);
+  }
+}
 
 /**
  * Get current auth state
@@ -60,6 +100,9 @@ export async function handleAtomicLogin(params: {
     environment: params.environment
   });
 
+  // Broadcast state change
+  broadcastAuthStateChanged(session);
+
   return {
     success: true,
     session: {
@@ -87,6 +130,9 @@ export async function handleAtomicUnlock(params: {
     cryptoPrimitives
   });
 
+  // Broadcast state change
+  broadcastAuthStateChanged(session);
+
   return {
     success: true,
     session: {
@@ -107,6 +153,9 @@ export async function handleAtomicLogout(params: { username: string }) {
   const manager = getSessionStateManager();
   await manager.logout(params.username);
 
+  // Broadcast state change (logged out)
+  broadcastAuthStateChanged(null);
+
   return {
     success: true
   };
@@ -118,6 +167,10 @@ export async function handleAtomicLogout(params: { username: string }) {
 export async function handleLockSession(params: { username: string }) {
   const manager = getSessionStateManager();
   manager.lockSession(params.username);
+
+  // Broadcast state change (locked)
+  const state = manager.getAuthState(params.username);
+  broadcastAuthStateChanged(state);
 
   return {
     success: true
