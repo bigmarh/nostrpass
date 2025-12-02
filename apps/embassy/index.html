@@ -677,9 +677,9 @@
           
           <div id="encryption-tab" class="tab-content">
             <div class="form-section">
-              <div class="form-section-title">🔄 Quick Test - NIP-04 Encryption</div>
+              <div class="form-section-title">🔐 Quick Test - NIP-04 Encryption</div>
               <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
-                Test encryption by encrypting and decrypting a message to yourself in one click.
+                Test encryption and decryption separately. Each button tests one operation.
               </p>
 
               <div class="form-group">
@@ -687,16 +687,19 @@
                 <textarea id="nip04-test-message" placeholder="Enter a test message or leave empty for auto-generated" rows="3"></textarea>
               </div>
 
-              <button id="btn-test-encrypt-decrypt" class="btn btn-success btn-block" style="font-size: 1rem; padding: 0.75rem;">
-                🔄 Run Encrypt/Decrypt Test
-              </button>
-
-              <div class="divider"></div>
+              <div class="btn-group" style="margin-bottom: 1rem;">
+                <button id="btn-test-encrypt" class="btn btn-primary" style="flex: 1; font-size: 1rem; padding: 0.75rem;">
+                  🔒 Test Encrypt
+                </button>
+                <button id="btn-test-decrypt" class="btn btn-secondary" style="flex: 1; font-size: 1rem; padding: 0.75rem;">
+                  🔓 Test Decrypt
+                </button>
+              </div>
 
               <div class="form-section">
                 <div class="form-section-title">Test Results</div>
                 <div id="encryption-test-results" style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-tertiary); padding: 1rem; border-radius: var(--radius); min-height: 100px;">
-                  <p style="color: var(--text-muted);">Run a test to see results here</p>
+                  <p style="color: var(--text-muted);">Click a test button to see results here</p>
                 </div>
               </div>
             </div>
@@ -1194,76 +1197,118 @@
         }
       });
 
-      $('btn-test-encrypt-decrypt').addEventListener('click', async () => {
+      // Store test data between encrypt and decrypt operations
+      let testEncryptedData = { message: null, ciphertext: null, pubkey: null };
+
+      $('btn-test-encrypt').addEventListener('click', async () => {
         const resultsEl = $('encryption-test-results');
         try {
-          resultsEl.innerHTML = '<p style="color: var(--info);">⏳ Running test...</p>';
+          resultsEl.innerHTML = '<p style="color: var(--info);">⏳ Encrypting...</p>';
 
           ensureProvider();
           const testMessage = $('nip04-test-message').value || `Test message @ ${new Date().toISOString()}`;
 
-          if (!window.nostr?.nip04?.encrypt || !window.nostr?.nip04?.decrypt) {
+          if (!window.nostr?.nip04?.encrypt) {
             throw new Error('NIP-04 encryption not available');
           }
 
-          const identityIndex = Number($('identity-index').value) || 0;
+          const identityIndex = Number($('identity-index')?.value) || 0;
 
-          // Step 1: Get public key (this will be the "recipient")
-          log('info', 'Step 1: Getting public key...');
+          // Get public key (encrypt to ourselves)
+          log('info', 'Getting public key...');
           const myPubkey = await window.nostr.getPublicKey({ identityIndex });
           log('success', 'Got public key', { publicKey: myPubkey.substring(0, 16) + '...' });
 
-          // Step 2: Encrypt message to ourselves
-          log('info', 'Step 2: Encrypting message...', { message: testMessage });
+          // Encrypt message
+          log('info', 'Encrypting message...', { message: testMessage });
           const cipher = await window.nostr.nip04.encrypt(myPubkey, testMessage, { identityIndex });
           log('success', 'Message encrypted', { ciphertextLength: cipher.length });
 
-          // Step 3: Decrypt the message
-          log('info', 'Step 3: Decrypting message...');
-          const decrypted = await window.nostr.nip04.decrypt(myPubkey, cipher, { identityIndex });
+          // Store for decrypt test
+          testEncryptedData = { message: testMessage, ciphertext: cipher, pubkey: myPubkey };
+
+          resultsEl.innerHTML = `
+            <div style="color: var(--secondary);">
+              <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">✅ Encryption Successful</p>
+              <p style="margin-bottom: 0.5rem;"><strong>Message:</strong> ${testMessage}</p>
+              <p style="margin-bottom: 0.5rem;"><strong>Encrypted to:</strong> ${cipher.substring(0, 50)}...</p>
+              <p style="margin-top: 0.75rem; color: var(--text-muted);">✓ Click "Test Decrypt" to verify decryption works</p>
+            </div>
+          `;
+        } catch (e) {
+          resultsEl.innerHTML = `
+            <div style="color: var(--danger);">
+              <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">❌ Encryption Error</p>
+              <p>${String(e)}</p>
+            </div>
+          `;
+          log('error', 'Encryption test failed', { error: String(e) });
+        }
+      });
+
+      $('btn-test-decrypt').addEventListener('click', async () => {
+        const resultsEl = $('encryption-test-results');
+        try {
+          resultsEl.innerHTML = '<p style="color: var(--info);">⏳ Decrypting...</p>';
+
+          ensureProvider();
+
+          if (!testEncryptedData.ciphertext) {
+            throw new Error('No encrypted data available. Run "Test Encrypt" first.');
+          }
+
+          if (!window.nostr?.nip04?.decrypt) {
+            throw new Error('NIP-04 decryption not available');
+          }
+
+          const identityIndex = Number($('identity-index')?.value) || 0;
+
+          // Decrypt message
+          log('info', 'Decrypting message...');
+          const decrypted = await window.nostr.nip04.decrypt(
+            testEncryptedData.pubkey,
+            testEncryptedData.ciphertext,
+            { identityIndex }
+          );
           log('success', 'Message decrypted');
 
-          // Step 4: Verify round-trip
-          const passed = decrypted === testMessage;
+          // Verify match
+          const passed = decrypted === testEncryptedData.message;
 
           if (passed) {
             resultsEl.innerHTML = `
               <div style="color: var(--secondary);">
-                <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">✅ Test PASSED</p>
-                <p style="margin-bottom: 0.5rem;"><strong>Original:</strong> ${testMessage}</p>
-                <p style="margin-bottom: 0.5rem;"><strong>Encrypted:</strong> ${cipher.substring(0, 40)}...</p>
-                <p><strong>Decrypted:</strong> ${decrypted}</p>
-                <p style="margin-top: 0.75rem; color: var(--text-muted);">✓ Messages match - encryption working correctly!</p>
+                <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">✅ Decryption Successful</p>
+                <p style="margin-bottom: 0.5rem;"><strong>Decrypted:</strong> ${decrypted}</p>
+                <p style="margin-top: 0.75rem; color: var(--text-muted);">✓ Message matches original - encryption working correctly!</p>
               </div>
             `;
-            log('success', '✅ Encrypt/Decrypt test PASSED!', {
-              original: testMessage,
+            log('success', '✅ Decrypt test PASSED!', {
+              original: testEncryptedData.message,
               decrypted: decrypted,
               match: true
             });
           } else {
             resultsEl.innerHTML = `
               <div style="color: var(--danger);">
-                <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">❌ Test FAILED</p>
-                <p style="margin-bottom: 0.5rem;"><strong>Original:</strong> ${testMessage}</p>
-                <p><strong>Decrypted:</strong> ${decrypted}</p>
-                <p style="margin-top: 0.75rem;">Messages do not match!</p>
+                <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">❌ Decryption Mismatch</p>
+                <p style="margin-bottom: 0.5rem;"><strong>Expected:</strong> ${testEncryptedData.message}</p>
+                <p><strong>Got:</strong> ${decrypted}</p>
               </div>
             `;
-            log('error', '❌ Encrypt/Decrypt test FAILED - messages do not match', {
-              original: testMessage,
-              decrypted: decrypted,
-              match: false
+            log('error', 'Decrypt test FAILED - messages do not match', {
+              original: testEncryptedData.message,
+              decrypted: decrypted
             });
           }
         } catch (e) {
           resultsEl.innerHTML = `
             <div style="color: var(--danger);">
-              <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">❌ Test Error</p>
+              <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">❌ Decryption Error</p>
               <p>${String(e)}</p>
             </div>
           `;
-          log('error', 'Encrypt/Decrypt test failed', { error: String(e) });
+          log('error', 'Decryption test failed', { error: String(e) });
         }
       });
 
