@@ -87,6 +87,11 @@ export const authHandlers: MessageHandler[] = [
       // Now check permissions (may trigger async prompt)
       const permissionResult = await deps.checkPermission('getPublicKey', origin, undefined, requestedIndex);
 
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult.allowed) {
         // Request permission with async wait for user response
         try {
@@ -200,6 +205,19 @@ export const authHandlers: MessageHandler[] = [
         username: currentUser.profile.username,
         event: data.event,
         identityIndex
+      });
+
+      showSuccessToast('Event Signed', `Event signed for ${data?.appName || 'app'}`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Event Signed',
+        details: `Kind ${eventKind} event signed for ${data?.appName || 'app'} (${origin})`,
+        appName: data?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
       });
 
       // NIP-07: signEvent() returns the signed event object directly

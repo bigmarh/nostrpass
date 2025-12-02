@@ -2,8 +2,29 @@ import { MessageHandler, MessageHandlerDependencies } from './index';
 import { Msg } from '@nostrpass/types';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { nip19 } from 'nostr-tools';
+import { showSuccessToast } from '../components/Toast';
+import { addAuditEvent } from '../components/AuditLog';
+import { vaultError, ErrorCode } from './errors';
+import { permissionPromptManager } from '../utils/permissionPromptManager';
 
-const BYPASS_GATES = true; // temporary for wiring ops
+function originToAppKey(origin: string): string {
+  try {
+    // Try parsing as URL
+    let url: URL;
+    if (origin.startsWith('http://') || origin.startsWith('https://')) {
+      url = new URL(origin);
+    } else {
+      // Add protocol if missing (for localhost:3200 format)
+      url = new URL(`http://${origin}`);
+    }
+    return sanitizeDomain(url.host);
+  } catch (e) {
+    // Final fallback: sanitize the raw string
+    return sanitizeDomain(origin);
+  }
+}
+
+const BYPASS_GATES = false; // Permissions enforced
 
 export const vaultHandlers: MessageHandler[] = [
   {
@@ -43,29 +64,66 @@ export const vaultHandlers: MessageHandler[] = [
 
   {
     route: Msg.GET_RELAYS,
-    handler: async (_data: any, context: any, deps: MessageHandlerDependencies) => {
+    handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
       if (!currentUser) {
-        throw new Error('User not authenticated');
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated');
       }
 
-      // Get origin from context
-      const origin = context?.origin || 'unknown';
-      
-      if (!BYPASS_GATES) {
-        const permission = await deps.checkPermission('getRelays', origin);
-        if (!permission.allowed) {
-          throw new Error('Permission denied');
+      // Get origin - prefer appDomain from data (embassy), fall back to context.origin (direct vault)
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin); // Sanitize to match stored permission keys
+
+      const identityIndex = data?.identityIndex ?? 0;
+
+      // Check permissions (may trigger async prompt)
+      const permissionResult = await deps.checkPermission('getRelays', origin, undefined, identityIndex);
+
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
+      if (!permissionResult.allowed) {
+        // Request permission with async wait for user response
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: data?.appName,
+            action: 'getRelays',
+            identityIndex
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
         }
       }
 
       // Return user's configured relays from vault data
       // For now, return default relays - customRelays can be added to vault settings
-      return {
+      const relays = {
         'wss://relay.damus.io': { read: true, write: true },
         'wss://nos.lol': { read: true, write: true },
         'wss://relay.nostr.band': { read: true, write: true }
       };
+
+      showSuccessToast('Relays Retrieved', `Relay list provided to ${data?.appName || 'app'}`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'permission',
+        action: 'Relays Retrieved',
+        details: `Relay list provided to ${data?.appName || 'app'} (${origin})`,
+        appName: data?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'low'
+      });
+
+      return relays;
     }
   },
 
