@@ -34,6 +34,9 @@ import {
   handleHasValidSession
 } from './auth-handlers-atomic';
 
+// Import atomic signup handler
+import { handleAtomicCreateAccount } from './signup-handler-atomic';
+
 // Wire up dependencies to avoid circular imports
 // vault-operations needs access to activeSessions for deleteVault
 setActiveSessions(activeSessions);
@@ -61,6 +64,7 @@ export const handlers = {
   atomicLogin: handleAtomicLogin,
   atomicUnlock: handleAtomicUnlock,
   atomicLogout: handleAtomicLogout,
+  atomicCreateAccount: handleAtomicCreateAccount,
   lockSession: handleLockSession,
   getVaultDataFromSession: handleGetVaultDataFromSession,
   updateVaultMetadata: handleUpdateVaultMetadata,
