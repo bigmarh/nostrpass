@@ -233,41 +233,12 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       console.log('🏁 Clearing saving state...');
       setIsSavingPermission(false);
 
-      // Sync to Nostr in background (don't await)
-      console.log('🔄 Starting Nostr sync in background...');
-      const sync = async () => {
-        try {
-          const status: any = await props.cryptoWorker!.hasKeysInSession({ username: props.username });
-          const hasStorageSigning = !!(status?.hasXpriv || status?.hasStorageKeypair);
-          if (!hasStorageSigning) {
-            setPermissionSaveError('Unlock required to sync to Nostr');
-            props.onShowPinUnlock();
-            return;
-          }
-          await props.onSyncToNostr();
-          console.log('✅ Nostr sync completed successfully');
-          setPermissionSaveError('✅ Settings saved');
-          setTimeout(() => setPermissionSaveError(null), 3000);
-        } catch (error: any) {
-          throw error;
-        }
-      };
-      sync().catch((error: any) => {
-        console.error('❌ Nostr sync failed:', error);
-        if (error.message?.includes('Vault is locked')) {
-          setPermissionSaveError('Please unlock your vault with PIN first');
-          props.onShowPinUnlock();
-        } else if (error.message?.includes('no xpriv') || error.message?.includes('No xpriv access')) {
-          setPermissionSaveError('Session expired - please unlock with PIN');
-          props.onShowPinUnlock();
-        } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
-          setPermissionSaveError('Nostr sync timed out - settings saved locally but may not be synced to all relays');
-        } else if (error.message?.includes('Failed to publish to any relay')) {
-          setPermissionSaveError('Failed to sync to Nostr relays - settings saved locally');
-        } else {
-          setPermissionSaveError(error.message || 'Failed to save to Nostr');
-        }
-      });
+      // Note: Nostr sync happens automatically via streamlined vault-operations path
+      // saveAppPermissions already calls vaultOperations.updateVaultData with syncToNostr: true
+      // No need for manual sync call here - it would cause duplicate sync and "replaced" errors
+      console.log('✅ Permissions saved - automatic Nostr sync in progress via streamlined path');
+      setPermissionSaveError('✅ Settings saved');
+      setTimeout(() => setPermissionSaveError(null), 3000);
 
     } catch (error) {
       console.error('❌ Permission save failed:', error);
