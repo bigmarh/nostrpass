@@ -24,6 +24,7 @@ import { getEnvironment } from '@nostrpass/nostrHelpers';
 import { PERMISSION_KINDS, type PermissionLevel, type VaultObj } from '@nostrpass/types';
 import { cryptoPrimitives } from './crypto-primitives';
 import { nostrSync } from './nostr-sync';
+import { getSessionStateManager } from './session-state-manager';
 
 // Singleton crypto instance for session manager operations
 const crypto = new NostrCrypto();
@@ -851,7 +852,9 @@ export const sessionManager = {
    * Requires unlocked session with xpriv
    */
   deriveIdentityFromSession: async (params: { username: string; index: number }): Promise<{ publicKey: string; path: string }> => {
-    const session = activeSessions.get(params.username);
+    const sessionManager = getSessionStateManager();
+    const session = sessionManager.getAuthState(params.username);
+
     if (!session || !session.xpriv) {
       throw new Error('No xpriv in session - please unlock with PIN first');
     }

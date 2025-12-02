@@ -110,10 +110,18 @@ export async function reloadVaultData() {
 
 /**
  * Update vault data (saves to worker and triggers broadcast)
+ * ALWAYS syncs to Nostr - this is the streamlined approach
+ *
+ * This function is the SINGLE SOURCE OF TRUTH for all vault updates.
+ * Every vault change MUST go through here to ensure:
+ * 1. IndexedDB persistence
+ * 2. Nostr relay sync
+ * 3. BroadcastChannel notification to other tabs
+ * 4. UI reactivity via SolidJS signals
  */
 export async function updateVaultData(
   updates: Partial<VaultData> | ((current: VaultData) => Partial<VaultData>),
-  options: { syncToNostr?: boolean; updateTimestamp?: boolean } = {}
+  options: { updateTimestamp?: boolean } = {}
 ) {
   const username = currentUsername();
   if (!username) {
@@ -140,25 +148,26 @@ export async function updateVaultData(
       ...(options.updateTimestamp !== false ? { updatedAt: Date.now() } : {})
     };
 
-    console.log('🏪 [VaultStore] Updating vault data:', {
+    console.log('🏪 [VaultStore] Updating vault data (auto-sync enabled):', {
       username,
-      options,
-      identitiesCount: updatedData.identities?.length
+      identitiesCount: updatedData.identities?.length,
+      version: updatedData.version
     });
 
-    // Save via worker (worker will broadcast VAULT_DATA_UPDATED)
+    // Save via worker - ALWAYS syncs to Nostr
+    // This ensures every vault change is persisted across devices
     await worker.updateVaultData({
       username,
       vaultData: updatedData,
-      options: { syncToNostr: options.syncToNostr ?? true }
+      options: { syncToNostr: true }  // Always true - streamlined approach
     });
 
     // Optimistically update local state (broadcast will confirm)
     setVaultData(updatedData);
 
-    console.log('🏪 [VaultStore] Vault data updated successfully');
+    console.log('✅ [VaultStore] Vault updated and synced to Nostr');
   } catch (err) {
-    console.error('🏪 [VaultStore] Failed to update vault data:', err);
+    console.error('❌ [VaultStore] Failed to update vault data:', err);
     throw err;
   } finally {
     setIsLoading(false);

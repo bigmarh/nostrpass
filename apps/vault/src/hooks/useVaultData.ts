@@ -44,9 +44,9 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
 
   const updateVaultData = async (
     updates: Partial<VaultData> | ((current: VaultData) => Partial<VaultData>),
-    options: { syncToNostr?: boolean; updateTimestamp?: boolean } = {}
+    options: { updateTimestamp?: boolean } = {}
   ) => {
-    console.log('[useVaultData] 🚀 updateVaultData called, delegating to store.update()');
+    console.log('[useVaultData] 🚀 updateVaultData called, delegating to store.update() - auto-syncing to Nostr');
     setError(null);
 
     try {

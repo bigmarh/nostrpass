@@ -62,6 +62,28 @@ const nostrSubscriptions = new Map<
  */
 const nostrPollers = new Map<string, number>();
 
+/**
+ * Track vault version history subscriptions
+ * Maps username to subscription details
+ */
+const vaultVersionSubscriptions = new Map<
+  string,
+  { pool: SimplePool; relays: string[]; sub: any }
+>();
+
+/**
+ * Broadcast channel for vault version updates
+ * Used to notify UI about new vault versions
+ */
+let vaultVersionBroadcast: BroadcastChannel | null = null;
+
+function getVersionBroadcast(): BroadcastChannel {
+  if (!vaultVersionBroadcast) {
+    vaultVersionBroadcast = new BroadcastChannel('nostrpass-vault-versions');
+  }
+  return vaultVersionBroadcast;
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -172,7 +194,7 @@ export const nostrSync = {
     await ensureCryptoReady();
     const { username, nickname, path } = params;
     const sessionManager = getSessionStateManager();
-    const session = sessionManager.getSession(username);
+    const session = sessionManager.getAuthState(username);
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
 
     const storagePriv = session.storagePrivateKey;
@@ -234,7 +256,7 @@ export const nostrSync = {
     await ensureCryptoReady();
     const { username, path, appDomain, permissions } = params;
     const sessionManager = getSessionStateManager();
-    const session = sessionManager.getSession(username);
+    const session = sessionManager.getAuthState(username);
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
     const storagePriv = session.storagePrivateKey;
     const vault = await vaultDB.getVault(username);
@@ -367,7 +389,7 @@ export const nostrSync = {
 
     // Get session from SessionStateManager (atomic auth uses this)
     const sessionManager = getSessionStateManager();
-    const session = sessionManager.getSession(username);
+    const session = sessionManager.getAuthState(username);
 
     const vault = await vaultDB.getVault(username);
     if (!vault) throw new Error('Vault not found');
@@ -1111,13 +1133,14 @@ export const nostrSync = {
     version: number;
     identitiesCount: number;
     updatedAt: number;
+    vaultData: any; // Full decrypted VaultData JSON
   }>> => {
     await ensureCryptoReady();
     const { username, limit = 5 } = params;
 
     // Get session for decryption
     const sessionManager = getSessionStateManager();
-    const session = sessionManager.getSession(username);
+    const session = sessionManager.getAuthState(username);
     if (!session?.storagePrivateKey) {
       throw new Error('Storage key not available. Unlock required.');
     }
@@ -1148,9 +1171,23 @@ export const nostrSync = {
       'ws://localhost:8080',
     ];
 
-    console.log('📜 [getVaultVersionHistory] Querying relays for vault history...');
+    console.log('📜 [getVaultVersionHistory] Querying relays for vault history...', {
+      filter,
+      relays: relays.length,
+      pubkey: pubkey.substring(0, 16),
+      dTag: dTag.substring(0, 50)
+    });
     const events = await pool.querySync(relays, filter);
     pool.close(relays);
+
+    console.log('📜 [getVaultVersionHistory] Query returned:', {
+      eventsCount: events?.length || 0,
+      events: events?.map(e => ({
+        id: e.id.substring(0, 12),
+        created_at: e.created_at,
+        kind: e.kind
+      }))
+    });
 
     if (!events || events.length === 0) {
       console.log('📜 [getVaultVersionHistory] No vault versions found');
@@ -1173,6 +1210,7 @@ export const nostrSync = {
           version: vaultData.version || 0,
           identitiesCount: vaultData.identities?.length || 0,
           updatedAt: vaultData.updatedAt || (ev.created_at * 1000),
+          vaultData: vaultData, // Include full decrypted JSON
         });
       } catch (err) {
         console.warn('⚠️ [getVaultVersionHistory] Failed to decrypt vault event:', ev.id, err);
@@ -1181,5 +1219,124 @@ export const nostrSync = {
 
     console.log(`📜 [getVaultVersionHistory] Found ${versions.length} vault versions`);
     return versions;
+  },
+
+  /**
+   * Start real-time subscription to vault version updates
+   * Broadcasts new versions via BroadcastChannel to UI
+   *
+   * @param params - Object containing username and optional relays
+   */
+  startVaultVersionSubscription: async (params: {
+    username: string;
+    relays?: string[];
+  }): Promise<{ started: boolean }> => {
+    await ensureCryptoReady();
+    const { username } = params;
+
+    // Check if already subscribed
+    if (vaultVersionSubscriptions.has(username)) {
+      console.log('📡 [startVaultVersionSubscription] Already subscribed for:', username);
+      return { started: true };
+    }
+
+    // Get session for decryption
+    const sessionManager = getSessionStateManager();
+    const session = sessionManager.getAuthState(username);
+    if (!session?.storagePrivateKey) {
+      throw new Error('Storage key not available. Unlock required.');
+    }
+
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+
+    const pubkey = vault.storagePublicKey || vault.publicKey;
+    const storagePriv = session.storagePrivateKey;
+    const storagePub = session.storagePublicKey || pubkey;
+    const env = getEnvironment();
+
+    const relays = params.relays || [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080',
+    ];
+
+    const pool = new SimplePool();
+    const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
+    const filter: Filter = {
+      kinds: [30078],
+      authors: [pubkey],
+      '#d': [dTag],
+    };
+
+    console.log('📡 [startVaultVersionSubscription] Starting subscription...', {
+      username,
+      pubkey: pubkey.substring(0, 16),
+      dTag: dTag.substring(0, 50),
+      relays: relays.length
+    });
+
+    const broadcast = getVersionBroadcast();
+
+    const sub = pool.subscribeMany(relays, [filter], {
+      onevent: async (ev: any) => {
+        try {
+          console.log('📡 [startVaultVersionSubscription] New vault event:', ev.id.substring(0, 12));
+          const plaintext = await nip04DecryptJS(storagePriv, storagePub, ev.content);
+          const vaultData = JSON.parse(plaintext);
+
+          const versionUpdate = {
+            username,
+            eventId: ev.id,
+            timestamp: ev.created_at * 1000,
+            version: vaultData.version || 0,
+            identitiesCount: vaultData.identities?.length || 0,
+            updatedAt: vaultData.updatedAt || (ev.created_at * 1000),
+            vaultData: vaultData,
+          };
+
+          // Broadcast to UI
+          broadcast.postMessage({
+            type: 'NEW_VAULT_VERSION',
+            data: versionUpdate
+          });
+
+          console.log('📡 [startVaultVersionSubscription] Broadcasted version:', vaultData.version);
+        } catch (err) {
+          console.warn('⚠️ [startVaultVersionSubscription] Failed to decrypt event:', ev.id, err);
+        }
+      },
+      oneose: () => {
+        console.log('📡 [startVaultVersionSubscription] Initial sync complete');
+      },
+    });
+
+    vaultVersionSubscriptions.set(username, { pool, relays, sub });
+    console.log('✅ [startVaultVersionSubscription] Subscription active for:', username);
+
+    return { started: true };
+  },
+
+  /**
+   * Stop vault version subscription for a user
+   */
+  stopVaultVersionSubscription: async (params: {
+    username: string;
+  }): Promise<{ stopped: boolean }> => {
+    const { username } = params;
+    const subscription = vaultVersionSubscriptions.get(username);
+
+    if (!subscription) {
+      return { stopped: false };
+    }
+
+    console.log('📡 [stopVaultVersionSubscription] Stopping subscription for:', username);
+    subscription.sub.close();
+    subscription.pool.close(subscription.relays);
+    vaultVersionSubscriptions.delete(username);
+
+    return { stopped: true };
   },
 };
