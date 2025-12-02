@@ -435,11 +435,12 @@ export const nostrSync = {
         poolKeys: Object.keys(pool).slice(0, 10)
       });
 
-      // Define event handler first
+      // Simplified event handler - only handles full vault snapshots
+      // PRE events removed in streamlined architecture for simplicity
       const onEvent = async (ev: NostrEvent) => {
         try {
           const d = ev.tags.find((t) => t[0] === 'd')?.[1] || '';
-          console.log('📨 [Worker] Received Nostr event:', {
+          console.log('📨 [Worker] Received Nostr vault event:', {
             kind: ev.kind,
             d: d ? d.slice(0, 50) : '(no d-tag)',
             created_at: new Date(ev.created_at * 1000).toISOString(),
@@ -451,77 +452,14 @@ export const nostrSync = {
             return;
           }
 
-          // Identity PRE stream
-          if (d.startsWith('np/identity/')) {
-            console.log('📥 [Worker] Received identity PRE event:', {
-              d: d.slice(0, 30),
-              eventId: ev.id.slice(0, 8),
-            });
-            try {
-              const plaintext = await nip04DecryptJS(
-                storagePriv as string,
-                storagePub as string,
-                ev.content
-              );
-              const env = JSON.parse(plaintext);
-              if (!verifyEnvelope(env)) {
-                console.warn('⚠️ [Worker] Identity envelope verification failed');
-                return;
-              }
-              const { identityId, nickname, path } = env.data || {};
-              if (!path) {
-                console.warn('⚠️ [Worker] Identity event missing path');
-                return;
-              }
-              const local = await vaultDB.getVault(username);
-              const identities = [...(local?.identities || [])];
-              const existingIdx = identities.findIndex((i: any) => i?.path === path);
-              if (existingIdx >= 0) {
-                // Update nickname if changed
-                if (nickname && identities[existingIdx]?.nickname !== nickname) {
-                  console.log('📝 [Worker] Updating identity nickname:', {
-                    path,
-                    oldNickname: identities[existingIdx].nickname,
-                    newNickname: nickname,
-                  });
-                  identities[existingIdx] = { ...identities[existingIdx], nickname };
-                  await vaultOperations.updateVaultData({
-                    username,
-                    vaultData: { ...local, identities },
-                    skipVersionIncrement: true,
-                  });
-                  console.log('✅ [Worker] Identity updated');
-                } else {
-                  console.log('ℹ️ [Worker] Identity already exists with same nickname, skipping');
-                }
-              } else {
-                console.log('📝 [Worker] Adding new identity:', { nickname, path });
-                identities.push({
-                  nickname,
-                  path,
-                  index: identities.length,
-                  createdAt: Date.now(),
-                });
-                await vaultOperations.updateVaultData({
-                  username,
-                  vaultData: { ...local, identities },
-                  skipVersionIncrement: true,
-                });
-                console.log('✅ [Worker] New identity added');
-              }
-            } catch (e) {
-              console.error('❌ [Worker] Failed to process identity PRE event:', e);
-            }
-            return;
-          }
-
-          // Legacy/full-vault stream (initial snapshot or older clients)
+          // Only handle full vault snapshots (streamlined approach)
           if (d.startsWith(`nostrpass.com_vault_`)) {
-            console.log('📥 [Worker] Received full VaultObj event:', {
+            console.log('📥 [Worker] Processing full vault snapshot:', {
               d: d.slice(0, 40),
               eventId: ev.id.slice(0, 12),
             });
 
+            // Decrypt vault data
             let remote: VaultData | null = null;
             try {
               const plaintext = await nip04DecryptJS(
@@ -530,32 +468,33 @@ export const nostrSync = {
                 ev.content
               );
               remote = JSON.parse(plaintext) as VaultData;
-              console.log('✅ [Worker] Decrypted VaultObj successfully');
+              console.log('✅ [Worker] Decrypted vault successfully');
             } catch (decryptErr) {
-              console.error('❌ [Worker] Failed to decrypt VaultObj:', decryptErr);
-              remote = null;
+              console.error('❌ [Worker] Failed to decrypt vault:', decryptErr);
+              return;
             }
 
             if (!remote) return;
 
             const local = await vaultDB.getVault(username);
 
-            // Use timestamp-based comparison like DMs (simpler and more reliable)
-            const remoteTimestamp = ev.created_at || 0; // Nostr event timestamp
+            // Timestamp-based conflict resolution (simpler and more reliable)
+            const remoteTimestamp = ev.created_at || 0; // Nostr event timestamp in seconds
             const localTimestamp = (local as any)?.updatedAt ? Math.floor((local as any).updatedAt / 1000) : 0; // Convert ms to seconds
 
-            console.log('📊 [Worker] VaultObj timestamp comparison:', {
+            console.log('📊 [Worker] Vault timestamp comparison:', {
               remoteTimestamp,
               localTimestamp,
               remoteDate: new Date(remoteTimestamp * 1000).toISOString(),
               localDate: local?.updatedAt ? new Date(local.updatedAt).toISOString() : 'never',
               remoteIdentities: remote.identities?.length || 0,
               localIdentities: local?.identities?.length || 0,
-              willUpdate: remoteTimestamp > localTimestamp
+              willApply: remoteTimestamp > localTimestamp
             });
 
+            // Apply remote vault if it's newer
             if (remoteTimestamp > localTimestamp) {
-              console.log('📥 [Worker] Applying newer vault from Nostr (realtime):', {
+              console.log('📥 [Worker] Applying newer vault from Nostr:', {
                 remoteTimestamp,
                 localTimestamp,
                 remoteIdentities: remote.identities?.length || 0,
@@ -564,15 +503,18 @@ export const nostrSync = {
               await vaultOperations.updateVaultData({
                 username,
                 vaultData: remote,
-                skipVersionIncrement: true,
+                skipVersionIncrement: true, // Don't increment version for Nostr downloads
               });
-              console.log('✅ [Worker] Vault updated successfully from realtime event');
+              console.log('✅ [Worker] Vault synced successfully from Nostr');
             } else {
-              console.log('ℹ️ [Worker] Remote timestamp not newer, skipping update');
+              console.log('ℹ️ [Worker] Local vault is newer or equal, skipping update');
             }
+          } else {
+            // Ignore PRE events and other event types
+            console.log('ℹ️ [Worker] Ignoring non-vault event:', d.slice(0, 20));
           }
         } catch (e) {
-          console.warn('⚠️ [Worker] Failed to process realtime event:', e);
+          console.warn('⚠️ [Worker] Failed to process Nostr event:', e);
         }
       };
 

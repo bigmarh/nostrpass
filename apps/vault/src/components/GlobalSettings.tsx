@@ -131,9 +131,9 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
 
       await props.onUpdateVaultData({
         identities: updatedIdentities
-      }, { syncToNostr: true });
+      });
 
-      console.log('✅ [Restore Identity] Identity restored');
+      console.log('✅ [Restore Identity] Identity restored and auto-synced');
       setIdentityToRestore(null);
     } catch (e) {
       console.error('Failed to restore identity:', e);
