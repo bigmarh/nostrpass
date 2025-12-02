@@ -1568,11 +1568,14 @@
         }
       }
       
-      // Refresh account info button
-      $('btn-refresh-account').addEventListener('click', async () => {
-        await updateAccountInfo();
-        log('info', 'Account info refreshed');
-      });
+      // Refresh account info button (if it exists)
+      const refreshAccountBtn = $('btn-refresh-account');
+      if (refreshAccountBtn) {
+        refreshAccountBtn.addEventListener('click', async () => {
+          await updateAccountInfo();
+          log('info', 'Account info refreshed');
+        });
+      }
 
       // Auto-initialize NostrPass on page load
       function initializeNostrPass() {
