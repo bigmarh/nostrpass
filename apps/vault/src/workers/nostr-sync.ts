@@ -41,6 +41,7 @@ import {
 import { cryptoPrimitives, ensureCryptoReady } from './crypto-primitives';
 import { getSessionStateManager } from './session-state-manager';
 import { vaultOperations } from './vault-operations';
+import { activeSessions } from './session-manager';
 
 // ============================================================================
 // STATE MANAGEMENT
