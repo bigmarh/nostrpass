@@ -47,6 +47,7 @@ export class NostrPassButton {
   private isDropdownOpen: boolean = false;
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private isCheckingAuth: boolean = true; // Track if we're still checking auth status
+  private authPollingInterval: number | null = null;
 
   constructor(embassy: any, config: NostrPassButtonConfig = {}) {
     this.embassy = embassy;
@@ -61,16 +62,16 @@ export class NostrPassButton {
     // Create container
     this.container = document.createElement('div');
     this.container.className = `nostrpass-button-container ${config.className || ''}`;
-    
+
     // Apply theme
     this.updateTheme();
-    
+
     // Inject styles
     this.injectStyles();
-    
+
     // Render initial state
     this.render();
-    
+
     // Append to DOM if specified
     if (config.appendTo) {
       const target = typeof config.appendTo === 'string'
@@ -89,15 +90,38 @@ export class NostrPassButton {
     this.restoreSession().catch(error => {
       console.warn('[NostrPassButton] Failed to restore session on init:', error);
     });
+
+    // Start polling auth status every 30 seconds
+    this.startAuthPolling();
   }
 
   private setupEventListeners() {
     // Listen for logout events to clear the button
     window.addEventListener('nostrpass:logout', () => {
-      console.log('[NostrPassButton] 🚪 Logout event received');
-      this.currentUser = null;
-      this.clearSession();
-      this.render();
+      console.log('[NostrPassButton] 🚪 Logout event received from window');
+      this.handleLogoutEvent();
+    });
+
+    // Listen for logout events from other tabs via BroadcastChannel
+    try {
+      const logoutChannel = new BroadcastChannel('nostrpass-logout');
+      logoutChannel.addEventListener('message', (event) => {
+        if (event.data?.type === 'LOGOUT') {
+          console.log('[NostrPassButton] 🚪 Logout event received from BroadcastChannel');
+          this.handleLogoutEvent();
+        }
+      });
+    } catch (error) {
+      console.warn('[NostrPassButton] BroadcastChannel not supported:', error);
+    }
+
+    // Listen for storage events (when another tab clears session)
+    window.addEventListener('storage', (event) => {
+      // When nostrpass_session is removed in another tab, log out this tab too
+      if (event.key === 'nostrpass_session' && event.newValue === null) {
+        console.log('[NostrPassButton] 🚪 Session cleared in another tab - logging out');
+        this.handleLogoutEvent();
+      }
     });
 
     // Listen for vault-data-refresh events to update the button and dropdown
@@ -891,11 +915,17 @@ export class NostrPassButton {
               </svg>
               <span>Manage account</span>
             </button>
+            <button class="nostrpass-dropdown-item" data-action="disconnect-app">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 2v12M12 6l-4 4-4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Disconnect this app</span>
+            </button>
             <button class="nostrpass-dropdown-item" data-action="sign-out">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M6 14H3.333A1.333 1.333 0 012 12.667V3.333A1.333 1.333 0 013.333 2H6M10.667 11.333L14 8m0 0l-3.333-3.333M14 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              <span>Sign out</span>
+              <span>Sign out of NostrPass</span>
             </button>
           </div>
           <div class="nostrpass-dropdown-footer">
@@ -949,6 +979,12 @@ export class NostrPassButton {
     manageBtn?.addEventListener('click', () => {
       this.closeDropdown();
       this.handleManageAccount();
+    });
+
+    const disconnectAppBtn = this.container.querySelector('[data-action="disconnect-app"]') as HTMLButtonElement;
+    disconnectAppBtn?.addEventListener('click', () => {
+      this.closeDropdown();
+      this.handleDisconnectApp();
     });
 
     const signOutBtn = this.container.querySelector('[data-action="sign-out"]') as HTMLButtonElement;
@@ -1297,21 +1333,65 @@ export class NostrPassButton {
     }
   }
 
-  private async handleSignOut() {
+  private async handleDisconnectApp() {
     try {
-      // Call embassy logout to clear vault session
-      console.log('[NostrPassButton] Calling embassy.logout()');
+      if (!this.currentUser) return;
+
+      // Just clear local session - don't call embassy.logout()
+      // This only disconnects the current app
+      console.log('[NostrPassButton] Disconnecting app (local only)');
+
+      this.currentUser = null;
+      this.clearSession();
+      this.render();
+      this.config.onSignOut?.();
+    } catch (error) {
+      console.error('[NostrPassButton] Failed to disconnect app:', error);
+    }
+  }
+
+  private handleLogoutEvent() {
+    console.log('[NostrPassButton] Handling logout event');
+    this.currentUser = null;
+    this.clearSession();
+    this.render();
+    this.config.onSignOut?.();
+  }
+
+  private async handleSignOut() {
+    // Confirm full logout with user
+    const confirmed = confirm(
+      'Sign out of NostrPass?\n\n' +
+      'This will log you out across all apps and browser tabs. ' +
+      'You\'ll need to sign in again to use NostrPass.\n\n' +
+      'Tip: Use "Disconnect this app" to just disconnect the current app.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      // Call embassy logout to clear vault session (affects all tabs/apps)
+      console.log('[NostrPassButton] Calling embassy.logout() - full NostrPass logout');
       await this.embassy.logout();
       console.log('[NostrPassButton] Embassy logout successful');
+
+      // Broadcast logout to all tabs via BroadcastChannel
+      try {
+        const logoutChannel = new BroadcastChannel('nostrpass-logout');
+        logoutChannel.postMessage({ type: 'LOGOUT' });
+        logoutChannel.close();
+        console.log('[NostrPassButton] Logout broadcasted to all tabs');
+      } catch (error) {
+        console.warn('[NostrPassButton] Failed to broadcast logout:', error);
+      }
     } catch (error) {
       console.error('[NostrPassButton] Embassy logout failed:', error);
     }
 
     // Clear local session
-    this.currentUser = null;
-    this.clearSession();
-    this.render();
-    this.config.onSignOut?.();
+    this.handleLogoutEvent();
   }
 
   private saveSession(user: UserInfo) {
@@ -1385,6 +1465,38 @@ export class NostrPassButton {
     }
   }
 
+  private startAuthPolling() {
+    // Poll auth status every 30 seconds to catch:
+    // - Session expiration
+    // - Logout from other devices
+    // - Any edge cases
+    this.authPollingInterval = window.setInterval(async () => {
+      // Only poll if we think we have a user
+      if (!this.currentUser) {
+        return;
+      }
+
+      try {
+        const authStatus = await this.embassy.getAuthStatus();
+
+        // If worker says not authenticated but we have a user, log out
+        if (!authStatus?.isAuthenticated) {
+          console.log('[NostrPassButton] 🚨 Auth polling detected session lost - logging out');
+          this.handleLogoutEvent();
+        }
+      } catch (error) {
+        console.warn('[NostrPassButton] Auth polling failed:', error);
+      }
+    }, 30000); // 30 seconds
+  }
+
+  private stopAuthPolling() {
+    if (this.authPollingInterval !== null) {
+      window.clearInterval(this.authPollingInterval);
+      this.authPollingInterval = null;
+    }
+  }
+
   public getUser(): UserInfo | null {
     return this.currentUser;
   }
@@ -1394,6 +1506,7 @@ export class NostrPassButton {
   }
 
   public destroy() {
+    this.stopAuthPolling();
     this.container.remove();
   }
 }

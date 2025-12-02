@@ -13,24 +13,26 @@ const isSharedWorker = typeof (globalThis as any).SharedWorkerGlobalScope !== 'u
 
 console.log('[CryptoWorker] Starting as', isSharedWorker ? 'SharedWorker' : 'DedicatedWorker');
 
+// Store ports globally for access by broadcast functions
+(globalThis as any).__SHARED_WORKER_PORTS__ = new Set<MessagePort>();
+
 if (isSharedWorker) {
   // Initialize a single host; it will attach per-port listeners internally
   createWorkerHost(handlers as any);
-  
-  const ports: Set<MessagePort> = new Set();
+
   console.log('[SharedWorker] Ready to accept connections');
   (self as any).addEventListener('connect', (event: MessageEvent) => {
     const port = (event as any).ports[0] as MessagePort;
-    ports.add(port);
+    (globalThis as any).__SHARED_WORKER_PORTS__.add(port);
     try { port.start(); } catch {}
     port.postMessage({ type: 'WORKER_READY' });
     port.addEventListener('close', () => {
-      ports.delete(port);
-      console.log('[SharedWorker] Port closed, remaining connections:', ports.size);
+      (globalThis as any).__SHARED_WORKER_PORTS__.delete(port);
+      console.log('[SharedWorker] Port closed, remaining connections:', (globalThis as any).__SHARED_WORKER_PORTS__.size);
     });
-    console.log('[SharedWorker] Active connections:', ports.size);
+    console.log('[SharedWorker] Active connections:', (globalThis as any).__SHARED_WORKER_PORTS__.size);
   });
-} else {
+} else{
   // Regular Worker context - use the global scope directly
   const host = createWorkerHost(handlers as any);
   console.log('[DedicatedWorker] Host created and ready');

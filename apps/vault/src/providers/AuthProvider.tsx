@@ -177,10 +177,13 @@ export const AuthProvider: ParentComponent = (props) => {
           localStorage.removeItem('last-username');
 
           if (messenger.isReady()) {
+            console.log('[AuthProvider] Sending logout notification to embassy');
             messenger.send('AUTH_STATUS', {
               isAuthenticated: false,
               publicKey: null
             });
+            // Also send explicit LOGOUT message to trigger button updates
+            messenger.send('LOGOUT', {});
           }
         }
       }

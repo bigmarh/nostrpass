@@ -592,7 +592,9 @@ export const authHandlers: MessageHandler[] = [
       }
 
       try {
-        const vaultData = await cryptoWorker?.getVaultDataFromSession({ username: currentUser.profile?.username });
+        // Use getVaultData instead of getVaultDataFromSession to get fresh data
+        // getVaultDataFromSession uses cached data which may be stale after permission changes
+        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
 
         if (!vaultData?.identities || vaultData.identities.length === 0) {
           return { identities: [], activeIdentityIndex: null };
@@ -746,15 +748,15 @@ export const authHandlers: MessageHandler[] = [
       try {
         const cryptoWorker = deps.getCryptoWorker();
         if (cryptoWorker) {
-          console.log('[LOGOUT] Calling worker logout for user:', currentUser.profile.username);
-          await cryptoWorker.logout({
-            username: currentUser.profile.username,
-            deleteVault: false
+          console.log('[LOGOUT] Calling atomic logout for user:', currentUser.profile.username);
+          // Use the new atomic logout which broadcasts to all tabs
+          await cryptoWorker.atomicLogout({
+            username: currentUser.profile.username
           });
         }
 
-        // Broadcast logout event to notify UI components
-        console.log('[LOGOUT] Broadcasting logout event');
+        // Broadcast logout event to notify UI components within this tab
+        console.log('[LOGOUT] Broadcasting logout event to window');
         window.dispatchEvent(new CustomEvent('nostrpass:logout', {
           detail: { username: currentUser.profile.username }
         }));

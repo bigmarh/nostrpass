@@ -36,13 +36,30 @@ function broadcastAuthStateChanged(state: CompleteSessionState | null) {
     }
   };
 
-  // Send to all tabs via BroadcastChannel (works in both Worker types)
+  // Send to all tabs via BroadcastChannel (for vault iframes)
   try {
     const channel = new BroadcastChannel('nostrpass-vault');
     channel.postMessage(message);
     channel.close();
   } catch (error) {
-    console.error('[auth-handlers-atomic] Failed to broadcast:', error);
+    console.error('[auth-handlers-atomic] Failed to broadcast via BroadcastChannel:', error);
+  }
+
+  // Also send to all SharedWorker ports (for direct worker connections)
+  try {
+    const ports = (globalThis as any).__SHARED_WORKER_PORTS__;
+    if (ports && ports.size > 0) {
+      console.log(`[auth-handlers-atomic] Broadcasting AUTH_STATE_CHANGED to ${ports.size} SharedWorker ports`);
+      ports.forEach((port: MessagePort) => {
+        try {
+          port.postMessage(message);
+        } catch (error) {
+          console.error('[auth-handlers-atomic] Failed to post to port:', error);
+        }
+      });
+    }
+  } catch (error) {
+    console.error('[auth-handlers-atomic] Failed to broadcast to SharedWorker ports:', error);
   }
 }
 

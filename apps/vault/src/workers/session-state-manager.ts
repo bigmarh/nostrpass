@@ -328,24 +328,22 @@ export class SessionStateManager {
   async logout(username: string): Promise<void> {
     console.log('[SessionStateManager] Logging out:', username);
 
-    // Remove from memory
-    this.sessions.delete(username);
+    // Clear ALL sessions from memory (logout should clear everything)
+    this.sessions.clear();
+    this.activeUsername = null;
 
-    if (this.activeUsername === username) {
-      this.activeUsername = null;
-    }
-
-    // Clear persisted session from IndexedDB
+    // Clear ALL persisted sessions from IndexedDB
+    // This prevents other tabs from restoring the session
     try {
       const { vaultDB } = await import('./db');
       await vaultDB.init();
-      await vaultDB.clearSession(username);
-      console.log('[SessionStateManager] Persisted session cleared');
+      await vaultDB.clearAllSessions();
+      console.log('[SessionStateManager] All persisted sessions cleared');
     } catch (error) {
-      console.error('[SessionStateManager] Failed to clear persisted session:', error);
+      console.error('[SessionStateManager] Failed to clear persisted sessions:', error);
     }
 
-    console.log('[SessionStateManager] Logout complete');
+    console.log('[SessionStateManager] Logout complete - all sessions cleared');
   }
 
   /**
