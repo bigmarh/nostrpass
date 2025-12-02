@@ -1744,6 +1744,14 @@ export const sessionManager = {
       permissions: merged
     });
 
+    // Sync to Nostr for real-time cross-browser updates
+    try {
+      await nostrSync.saveVaultToNostr({ username });
+      console.log('✅ [saveAppPermissions] Vault synced to Nostr after permission change');
+    } catch (err) {
+      console.warn('⚠️ [saveAppPermissions] Failed to sync vault to Nostr (non-critical):', err);
+    }
+
     return { success: true };
   },
 
