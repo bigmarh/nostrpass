@@ -8,6 +8,7 @@
  */
 
 import type { VaultData } from './db';
+import type { LoginObj } from '@nostrpass/types';
 import { getLoginObj, getVaultFromNostr } from '@nostrpass/nostrHelpers';
 
 /**
@@ -32,6 +33,10 @@ export interface CompleteSessionState {
   createdAt: number;
   unlockedAt: number;
   expiresAt: number;
+  relays?: string[];  // Relays for Nostr operations
+
+  // LoginObj (cached from login, needed for unlock)
+  loginObj?: LoginObj;
 
   // Sensitive data (only when unlocked)
   xpriv?: string;
@@ -109,30 +114,12 @@ export class SessionStateManager {
         throw new Error('Account not found or wrong password');
       }
 
-      const { loginObj, passwordKey } = loginResult;
+      const { loginObj, passwordSalt } = loginResult;
 
-      // Step 2: Fetch VaultObj from Nostr and cache to IndexedDB
-      console.log('[SessionStateManager] Fetching VaultObj from Nostr...');
-      try {
-        const vaultData = await getVaultFromNostr(
-          loginObj.storagePublicKey,
-          password, // Used to derive storage keys for decryption
-          relays
-        );
-
-        if (vaultData) {
-          console.log('[SessionStateManager] VaultObj fetched, caching to IndexedDB...');
-          const { vaultDB } = await import('./db');
-          await vaultDB.init();
-          await vaultDB.saveVault(username, vaultData);
-          console.log('[SessionStateManager] VaultObj cached successfully');
-        } else {
-          console.warn('[SessionStateManager] No VaultObj found on Nostr (new account or migration needed)');
-        }
-      } catch (error) {
-        console.warn('[SessionStateManager] Failed to fetch VaultObj from Nostr, will use local cache if available:', error);
-        // Don't fail login if Nostr fetch fails - local cache may be sufficient
-      }
+      // Step 2: Store LoginObj in session for later use during unlock
+      // We can't fetch VaultObj yet because it's encrypted with storage key
+      // And storage key is encrypted with PIN (which we don't have until unlock)
+      console.log('[SessionStateManager] LoginObj retrieved, deferring VaultObj fetch to unlock');
 
       // Step 3: Create authenticated (but locked) session
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -150,7 +137,9 @@ export class SessionStateManager {
         sessionId,
         createdAt: now,
         unlockedAt: 0,
-        expiresAt: now + this.SESSION_TIMEOUT
+        expiresAt: now + this.SESSION_TIMEOUT,
+        relays, // Store for later use during unlock
+        loginObj // Store for decrypting storage keys during unlock
       };
 
       // Store complete state in ONE place
@@ -189,26 +178,68 @@ export class SessionStateManager {
     }
 
     try {
-      // Import modules needed for decryption
-      const { VaultDB } = await import('./db');
-      const vaultDB = new VaultDB();
-      await vaultDB.init();
-
-      // Get cached vault data
-      const vaultData = await vaultDB.getVault(params.username);
-
-      if (!vaultData) {
-        throw new Error('Vault data not found');
+      // Step 1: Decrypt storage keypair from LoginObj with PIN
+      if (!session.loginObj) {
+        throw new Error('LoginObj not found in session - please login first');
       }
 
-      // Decrypt xpriv with PIN
+      console.log('[SessionStateManager] Decrypting storage keypair with PIN...');
+      const storageKeypairJson = await params.cryptoPrimitives.decryptDataWithSalt({
+        encryptedData: session.loginObj.storageKeypairEncrypted,
+        password: params.pin,
+        salt: session.loginObj.pinSalt
+      });
+
+      const storageKeypair = JSON.parse(storageKeypairJson);
+      const storagePrivateKey = storageKeypair.privateKey;
+      const storagePublicKey = storageKeypair.publicKey;
+
+      console.log('[SessionStateManager] Storage keypair decrypted successfully');
+
+      // Step 2: Try to fetch VaultObj from Nostr (with fallback to local cache)
+      let vaultData: VaultData | null = null;
+
+      try {
+        console.log('[SessionStateManager] Fetching latest VaultObj from Nostr...');
+        vaultData = await getVaultFromNostr(
+          storagePublicKey,
+          session.relays || [],
+          storagePrivateKey
+        );
+
+        if (vaultData) {
+          console.log('[SessionStateManager] VaultObj fetched from Nostr, caching to IndexedDB...');
+          const { vaultDB } = await import('./db');
+          await vaultDB.init();
+          await vaultDB.saveVault(params.username, vaultData);
+          console.log('[SessionStateManager] VaultObj cached successfully');
+        }
+      } catch (error) {
+        console.warn('[SessionStateManager] Failed to fetch VaultObj from Nostr, falling back to local cache:', error);
+      }
+
+      // Step 3: If Nostr fetch failed, try local cache
+      if (!vaultData) {
+        console.log('[SessionStateManager] Loading VaultObj from IndexedDB cache...');
+        const { vaultDB } = await import('./db');
+        await vaultDB.init();
+        vaultData = await vaultDB.getVault(params.username);
+
+        if (!vaultData) {
+          throw new Error('Vault data not found (neither on Nostr nor in local cache)');
+        }
+        console.log('[SessionStateManager] Loaded VaultObj from local cache');
+      }
+
+      // Step 4: Decrypt xpriv with PIN
+      console.log('[SessionStateManager] Decrypting xpriv with PIN...');
       const xpriv = await params.cryptoPrimitives.decryptDataWithSalt({
         encryptedData: vaultData.xprivEncrypted,
         password: params.pin,
         salt: vaultData.salt
       });
 
-      // Derive main keypair (index 0)
+      // Step 5: Derive main keypair (index 0)
       const mainKeypair = await params.cryptoPrimitives.deriveKeypairFromXpriv({
         xpriv,
         index: 0
@@ -216,15 +247,24 @@ export class SessionStateManager {
       const privateKey = mainKeypair.privateKey || mainKeypair.get?.('privateKey');
       const publicKey = mainKeypair.publicKey || mainKeypair.get?.('publicKey');
 
-      // Derive storage keypair (index 1337)
+      // Step 6: Verify storage keys match (checks and balances)
       const STORAGE_INDEX = 1337;
-      const storageKeypair = await params.cryptoPrimitives.deriveKeypairFromXpriv({
+      const derivedStorageKeypair = await params.cryptoPrimitives.deriveKeypairFromXpriv({
         xpriv,
         index: STORAGE_INDEX
       });
-      const storagePrivateKey = storageKeypair.privateKey || storageKeypair.get?.('privateKey');
+      const derivedStoragePublicKey = derivedStorageKeypair.publicKey || derivedStorageKeypair.get?.('publicKey');
 
-      // Update session atomically
+      if (derivedStoragePublicKey !== storagePublicKey) {
+        console.error('[SessionStateManager] Storage key mismatch!');
+        console.error('Derived from xpriv:', derivedStoragePublicKey);
+        console.error('From LoginObj:', storagePublicKey);
+        throw new Error('Storage key verification failed - PIN may be incorrect or data corrupted');
+      }
+
+      console.log('[SessionStateManager] ✅ Storage key verification passed');
+
+      // Step 7: Update session atomically
       const now = Date.now();
       session.isUnlocked = true;
       session.xpriv = xpriv;

@@ -329,7 +329,7 @@ async function publishToNostrBackground(params: {
   username: string;
   loginObj: LoginObj;
   vaultObj: VaultObj;
-  passwordKey: string;
+  passwordKey: string;  // Used for LoginObj encryption only
   storagePublicKey: string;
   storagePrivateKey: string;
   relays: string[];
@@ -339,7 +339,7 @@ async function publishToNostrBackground(params: {
     username,
     loginObj,
     vaultObj,
-    passwordKey,
+    passwordKey,  // Used for LoginObj encryption only
     storagePublicKey,
     storagePrivateKey,
     relays,
@@ -369,14 +369,12 @@ async function publishToNostrBackground(params: {
     );
     console.log(`[signup-atomic-nostr] LoginObj published to ${loginPublished.length} relays`);
 
-    // Publish VaultObj
+    // Publish VaultObj (encrypted with storage key, not password!)
     const vaultPublished = await saveVaultObj(
-      username,
       vaultObj,
       storagePublicKey,
       storagePrivateKey,
-      relays,
-      passwordKey
+      relays
     );
     console.log(`[signup-atomic-nostr] VaultObj published to ${vaultPublished.length} relays`);
 
