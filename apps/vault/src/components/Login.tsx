@@ -173,9 +173,16 @@ export const Login: Component = () => {
             // Create account with PIN encryption
             const { publicKey } = await createAccount(accountData.username, accountData.password, pin, undefined);
 
+            // Double-check username availability before registering (in case it was taken during PIN setup)
+            setLoadingStatus('Verifying username availability...');
+            const stillAvailable = await checkUsernameAvailable(accountData.username);
+
+            if (!stillAvailable) {
+                throw new Error('Username was taken while you were setting up. Please try a different username.');
+            }
+
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
-
 
             // Get the user's relays from environment config
             const userRelays = getRelays();
@@ -229,6 +236,14 @@ export const Login: Component = () => {
                 pin,
                 { questions, answers }
             );
+
+            // Double-check username availability before registering (in case it was taken during PIN setup)
+            setLoadingStatus('Verifying username availability...');
+            const stillAvailable = await checkUsernameAvailable(accountData.username);
+
+            if (!stillAvailable) {
+                throw new Error('Username was taken while you were setting up. Please try a different username.');
+            }
 
             // Register username on Nostr with user's relay preferences
             setLoadingStatus('Registering username on Nostr network...');
