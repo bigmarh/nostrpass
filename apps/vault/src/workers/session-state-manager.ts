@@ -109,10 +109,32 @@ export class SessionStateManager {
         throw new Error('Account not found or wrong password');
       }
 
-      const { loginObj } = loginResult;
+      const { loginObj, passwordKey } = loginResult;
 
-      // Step 2: Get storage keypair (we'll need this but keep it for unlock)
-      // For now, just create the authenticated (but locked) session
+      // Step 2: Fetch VaultObj from Nostr and cache to IndexedDB
+      console.log('[SessionStateManager] Fetching VaultObj from Nostr...');
+      try {
+        const vaultData = await getVaultFromNostr(
+          loginObj.storagePublicKey,
+          password, // Used to derive storage keys for decryption
+          relays
+        );
+
+        if (vaultData) {
+          console.log('[SessionStateManager] VaultObj fetched, caching to IndexedDB...');
+          const { vaultDB } = await import('./db');
+          await vaultDB.init();
+          await vaultDB.saveVault(username, vaultData);
+          console.log('[SessionStateManager] VaultObj cached successfully');
+        } else {
+          console.warn('[SessionStateManager] No VaultObj found on Nostr (new account or migration needed)');
+        }
+      } catch (error) {
+        console.warn('[SessionStateManager] Failed to fetch VaultObj from Nostr, will use local cache if available:', error);
+        // Don't fail login if Nostr fetch fails - local cache may be sufficient
+      }
+
+      // Step 3: Create authenticated (but locked) session
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const now = Date.now();
 

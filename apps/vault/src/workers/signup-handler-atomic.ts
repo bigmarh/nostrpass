@@ -350,7 +350,7 @@ async function publishToNostrBackground(params: {
     console.log('[signup-atomic-nostr] Publishing to Nostr...');
 
     // Dynamically import to avoid bloating main bundle
-    const { saveLoginObj, publishVaultObj } = await import('@nostrpass/nostrHelpers');
+    const { saveLoginObj, saveVaultObj } = await import('@nostrpass/nostrHelpers');
 
     // Generate random keypair for LoginObj encryption
     const randomKeypair = await cryptoPrimitives.generateKeypair();
@@ -370,7 +370,7 @@ async function publishToNostrBackground(params: {
     console.log(`[signup-atomic-nostr] LoginObj published to ${loginPublished.length} relays`);
 
     // Publish VaultObj
-    const vaultPublished = await publishVaultObj(
+    const vaultPublished = await saveVaultObj(
       username,
       vaultObj,
       storagePublicKey,
