@@ -171,7 +171,8 @@ export const nostrSync = {
   }): Promise<{ eventId: string }> => {
     await ensureCryptoReady();
     const { username, nickname, path } = params;
-    const session = activeSessions.get(username);
+    const sessionManager = getSessionStateManager();
+    const session = sessionManager.getSession(username);
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
 
     const storagePriv = session.storagePrivateKey;
@@ -232,7 +233,8 @@ export const nostrSync = {
   }): Promise<{ eventId: string }> => {
     await ensureCryptoReady();
     const { username, path, appDomain, permissions } = params;
-    const session = activeSessions.get(username);
+    const sessionManager = getSessionStateManager();
+    const session = sessionManager.getSession(username);
     if (!session?.storagePrivateKey) throw new Error('Storage key not available');
     const storagePriv = session.storagePrivateKey;
     const vault = await vaultDB.getVault(username);
@@ -362,7 +364,11 @@ export const nostrSync = {
     await ensureCryptoReady();
     console.log('🚀 [Worker.startNostrSubscription] Crypto ready');
     const { username, relays } = params;
-    const session = activeSessions.get(username);
+
+    // Get session from SessionStateManager (atomic auth uses this)
+    const sessionManager = getSessionStateManager();
+    const session = sessionManager.getSession(username);
+
     const vault = await vaultDB.getVault(username);
     if (!vault) throw new Error('Vault not found');
 
