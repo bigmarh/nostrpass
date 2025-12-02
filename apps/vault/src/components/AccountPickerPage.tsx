@@ -4,6 +4,7 @@ import { AccountPicker } from './AccountPicker';
 import { useAuth, useMessenger } from '../providers';
 import { vaultDataService } from '../services/vaultDataService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { setActiveIdentity } from '../utils/activeIdentityManager';
 
 /**
  * AccountPickerPage - Dedicated page for account/identity selection
@@ -150,13 +151,8 @@ export const AccountPickerPage: Component = () => {
     const isAuthorized = selectedIdentityData?.isAuthorized || false;
 
     try {
-      // Update activeIdentityByApp in vault data
-      await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
-        activeIdentityByApp: {
-          ...(current.activeIdentityByApp || {}),
-          [appKey]: identityIndex
-        }
-      }));
+      // Update active identity in localStorage (per-browser, not synced)
+      setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
 
       if (isAuthorized) {
         // Identity is already authorized - send message to parent and close

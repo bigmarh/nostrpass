@@ -5,6 +5,7 @@ import { vaultError, ErrorCode } from './errors';
 import { showErrorToast, showSuccessToast } from '../components/Toast';
 import { addAuditEvent } from '../components/AuditLog';
 import { permissionPromptManager } from '../utils/permissionPromptManager';
+import { getActiveIdentity, setActiveIdentity } from '../utils/activeIdentityManager';
 
 function originToAppKey(origin: string): string {
   try {
@@ -522,7 +523,11 @@ export const authHandlers: MessageHandler[] = [
         const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
         const appOrigin = context?.origin;
 
-        // Get app key
+        // Get the active identity index for this app from localStorage, default to 0
+        const activeIdentityIndex = getActiveIdentity(currentUser.profile?.username, appOrigin) ?? 0;
+        const activeIdentity = vaultData?.identities?.[activeIdentityIndex];
+
+        // Get app key for permission check
         let appKey = appOrigin;
         try {
           const sanitizeDomain = (await import('@nostrpass/nostrHelpers')).sanitizeDomain;
@@ -530,10 +535,6 @@ export const authHandlers: MessageHandler[] = [
         } catch {
           // appKey already set to appOrigin
         }
-
-        // Get the active identity index for this app, default to 0
-        const activeIdentityIndex = vaultData?.activeIdentityByApp?.[appKey] ?? 0;
-        const activeIdentity = vaultData?.identities?.[activeIdentityIndex];
 
         // Check if this identity is authorized for the app
         const isAuthorized = !!(activeIdentity?.appPermissions && activeIdentity.appPermissions[appKey]);
@@ -609,7 +610,8 @@ export const authHandlers: MessageHandler[] = [
           // appKey already set to appOrigin
         }
 
-        const activeIdentityIndex = vaultData.activeIdentityByApp?.[appKey] ?? null;
+        // Get active identity from localStorage, not from vaultData
+        const activeIdentityIndex = getActiveIdentity(currentUser.profile?.username, appOrigin);
 
         // Return all identities with their authorization status
         const identities = vaultData.identities
@@ -688,32 +690,23 @@ export const authHandlers: MessageHandler[] = [
           throw new Error('Requested identity not authorized for this application');
         }
 
-        // Update active identity for this app
-        const vaultDataService = (await import('../services/vaultDataService')).vaultDataService;
-        await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
-          activeIdentityByApp: {
-            ...(current.activeIdentityByApp || {}),
-            [appKey]: identityIndex
-          }
-        }), { syncToNostr: false });
+        // Update active identity in localStorage (per-browser, per-origin)
+        setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
 
-        // Trigger vault data refresh event
-        window.dispatchEvent(new CustomEvent('vault-data-refresh', {
-          detail: { username: currentUser.profile.username }
-        }));
-
-        // Notify parent window about vault data update
+        // Notify parent window about identity switch (NOT vault data update)
         try {
           const { getMessenger } = await import('../providers/MessengerProvider');
           const messenger = getMessenger();
           if (messenger?.isReady()) {
-            messenger.send('VAULT_DATA_UPDATED', {
+            messenger.send('IDENTITY_SWITCHED', {
               username: currentUser.profile.username,
+              appOrigin,
+              identityIndex,
               timestamp: Date.now()
             });
           }
         } catch (err) {
-          console.warn('Failed to notify parent of vault data update:', err);
+          console.warn('Failed to notify parent of identity switch:', err);
         }
 
         // Return the new active identity

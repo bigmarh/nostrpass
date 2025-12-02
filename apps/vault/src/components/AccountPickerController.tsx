@@ -3,6 +3,7 @@ import { AccountPicker } from './AccountPicker';
 import { useAuth } from '../providers/AuthProvider';
 import { vaultDataService } from '../services/vaultDataService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { setActiveIdentity } from '../utils/activeIdentityManager';
 
 interface AccountPickerEventDetail {
   appOrigin: string;
@@ -49,13 +50,8 @@ export const AccountPickerController: Component = () => {
         if (allIdentities.length === 1 && currentDetail) {
           console.log('🔵 [AccountPicker] Only one identity - auto-selecting index 0');
 
-          // Update activeIdentityByApp
-          await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
-            activeIdentityByApp: {
-              ...(current.activeIdentityByApp || {}),
-              [appKey]: 0
-            }
-          }));
+          // Update active identity in localStorage (per-browser, not synced)
+          setActiveIdentity(currentUser.profile.username, appOrigin, 0);
 
           const isAuthorized = allIdentities[0].isAuthorized;
 
@@ -200,13 +196,8 @@ export const AccountPickerController: Component = () => {
     const isAuthorized = selectedIdentityData?.isAuthorized || false;
 
     try {
-      // Update activeIdentityByApp in vault data to switch to the selected identity
-      await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
-        activeIdentityByApp: {
-          ...(current.activeIdentityByApp || {}),
-          [appKey]: identityIndex
-        }
-      }));
+      // Update active identity in localStorage (per-browser, not synced)
+      setActiveIdentity(currentUser.profile.username, d.appOrigin, identityIndex);
 
       if (isAuthorized) {
         // Identity is already authorized - just dispatch success

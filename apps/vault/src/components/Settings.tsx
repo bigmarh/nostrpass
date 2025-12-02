@@ -6,7 +6,8 @@ import RelaysSection from './RelaysSection';
 import SessionsSection from './SessionsSection';
 import { AuditLog } from './AuditLog';
 import type { Identity } from '@nostrpass/types';
-import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { sanitizeDomain, desanitizeDomain } from '@nostrpass/nostrHelpers';
+import { getActiveIdentity, setActiveIdentity } from '../utils/activeIdentityManager';
 
 type SettingsTab = 'identity' | 'permissions' | 'security' | 'audit';
 
@@ -67,7 +68,19 @@ export const Settings: Component = () => {
           setIdentityPublicKey(identityPubkey);
           try {
             const appKey = sanitizeDomain(params.app);
-            const ai = (vaultData as any).activeIdentityByApp?.[appKey];
+            // Get active identity from localStorage (per-browser, not synced)
+            const appOrigin = (() => {
+              try {
+                const domain = desanitizeDomain(appKey);
+                if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
+                  return `http://${domain}`;
+                }
+                return `https://${domain}`;
+              } catch {
+                return appKey.startsWith('http') ? appKey : `https://${appKey}`;
+              }
+            })();
+            const ai = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (vaultData as any).activeIdentityByApp?.[appKey];
             setActiveIndexForApp(typeof ai === 'number' ? ai : null);
           } catch {}
         } else {
@@ -123,6 +136,20 @@ export const Settings: Component = () => {
     if (!currentUser || !cryptoWorker) return;
     try {
       const appKey = sanitizeDomain(params.app);
+      // Set active identity in localStorage (per-browser, not synced)
+      const appOrigin = (() => {
+        try {
+          const domain = desanitizeDomain(appKey);
+          if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
+            return `http://${domain}`;
+          }
+          return `https://${domain}`;
+        } catch {
+          return appKey.startsWith('http') ? appKey : `https://${appKey}`;
+        }
+      })();
+      setActiveIdentity(currentUser.profile.username, appOrigin, index);
+      
       const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
       (vaultData as any).activeIdentityByApp = (vaultData as any).activeIdentityByApp || {};
       (vaultData as any).activeIdentityByApp[appKey] = index;
