@@ -341,6 +341,12 @@ export const authHandlers: MessageHandler[] = [
 
       // Now check permissions (may trigger async prompt)
       const permissionResult3 = await deps.checkPermission('nip04', origin, undefined, identityIndex);
+
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult3.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult3.allowed) {
         // Request permission with async wait for user response
         try {
@@ -371,7 +377,19 @@ export const authHandlers: MessageHandler[] = [
         identityIndex
       });
 
-      showSuccessToast('Message Encrypted', `Message encrypted for ${data?.appName || 'app'}`);
+      showSuccessToast('Message Encrypted', `Message encrypted for ${(data as any)?.appName || 'app'}`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Message Encrypted',
+        details: `NIP-04 message encrypted for ${(data as any)?.appName || 'app'} (${origin})`,
+        appName: (data as any)?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
+      });
+
       return encrypted;
     }
   },
@@ -408,6 +426,12 @@ export const authHandlers: MessageHandler[] = [
 
       // Now check permissions (may trigger async prompt)
       const permissionResult4 = await deps.checkPermission('nip04', origin, undefined, identityIndex);
+
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult4.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult4.allowed) {
         // Request permission with async wait for user response
         try {
@@ -436,6 +460,19 @@ export const authHandlers: MessageHandler[] = [
         ciphertext: data.ciphertext,
         senderPubkey: data.senderPubkey,
         identityIndex
+      });
+
+      showSuccessToast('Message Decrypted', `Message decrypted from ${(data as any)?.appName || 'app'}`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Message Decrypted',
+        details: `NIP-04 message decrypted from ${(data as any)?.appName || 'app'} (${origin})`,
+        appName: (data as any)?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
       });
 
       return decrypted;
