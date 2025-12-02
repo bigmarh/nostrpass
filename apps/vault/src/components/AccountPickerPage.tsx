@@ -250,16 +250,16 @@ export const AccountPickerPage: Component = () => {
   return (
     <>
       <Show when={loading()}>
-        <div class="flex items-center justify-center w-full h-full p-8">
+        <div class="flex items-center justify-center w-full h-full p-8 bg-white dark:bg-gray-900">
           <div class="text-center">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
             <p class="text-gray-600 dark:text-gray-400">Loading identities...</p>
           </div>
         </div>
       </Show>
 
       <Show when={error()}>
-        <div class="flex items-center justify-center w-full h-full p-8">
+        <div class="flex items-center justify-center w-full h-full p-8 bg-white dark:bg-gray-900">
           <div class="text-center max-w-md">
             <div class="text-5xl mb-4">⚠️</div>
             <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">Error</h2>

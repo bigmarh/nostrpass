@@ -85,11 +85,11 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
   const recovery = props.vaultData.recovery;
   if (!recovery) {
     return (
-      <div class="p-6 text-center">
-        <p class="text-red-600">No recovery questions set up for this account.</p>
+      <div class="p-6 text-center bg-white dark:bg-gray-900">
+        <p class="text-red-600 dark:text-red-400">No recovery questions set up for this account.</p>
         <button
           onClick={props.onCancel}
-          class="mt-4 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+          class="mt-4 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors"
         >
           Go Back
         </button>
@@ -98,25 +98,25 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
   }
 
   return (
-    <div class="max-w-md mx-auto p-6">
+    <div class="max-w-md mx-auto p-6 bg-white dark:bg-gray-900">
       <div class="mb-6">
-        <h2 class="text-2xl font-bold mb-2">Recover PIN Access</h2>
-        <p class="text-gray-600">
+        <h2 class="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">Recover PIN Access</h2>
+        <p class="text-gray-600 dark:text-gray-400">
           Answer your security questions to reset your PIN.
         </p>
-        <p class="text-sm text-gray-500 mt-2">
+        <p class="text-sm text-gray-500 dark:text-gray-500 mt-2">
           Answers are case-insensitive.
         </p>
       </div>
 
       <Show when={error()}>
-        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-md text-sm mb-4">
+        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4">
           {error()}
         </div>
       </Show>
 
       <Show when={attempts() > 0 && attempts() < maxAttempts}>
-        <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-2 rounded-md text-sm mb-4">
+        <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-400 px-4 py-2 rounded-md text-sm mb-4">
           Attempt {attempts()} of {maxAttempts}
         </div>
       </Show>
@@ -125,7 +125,7 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
         <For each={recovery.questions}>
           {(question, index) => (
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {question}
               </label>
               <input
@@ -133,7 +133,7 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
                 value={answers()[index()] || ''}
                 onInput={(e) => updateAnswer(index(), e.currentTarget.value)}
                 placeholder="Your answer"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                 autocomplete="off"
                 disabled={isLoading() || attempts() >= maxAttempts}
               />
@@ -146,14 +146,14 @@ const PINRecovery: Component<PINRecoveryProps> = (props) => {
         <button
           onClick={handleRecover}
           disabled={isLoading() || attempts() >= maxAttempts}
-          class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
+          class="flex-1 px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-md hover:bg-gray-800 dark:hover:bg-gray-100 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors font-medium"
         >
           {isLoading() ? 'Recovering...' : 'Recover Access'}
         </button>
         <button
           onClick={props.onCancel}
           disabled={isLoading()}
-          class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+          class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 disabled:opacity-50 transition-colors"
         >
           Cancel
         </button>

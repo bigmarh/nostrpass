@@ -78,10 +78,10 @@ const UnlockVaultOperation: Component = () => {
   return (
     <Show when={!isLoading()}
       fallback={
-        <div class="min-h-screen flex items-center justify-center">
+        <div class="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900">
           <div class="text-center">
-            <div class="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin mx-auto mb-4"></div>
-            <p class="text-gray-600">Loading...</p>
+            <div class="w-8 h-8 border-2 border-gray-300 dark:border-gray-600 border-t-gray-600 dark:border-t-gray-400 rounded-full animate-spin mx-auto mb-4"></div>
+            <p class="text-gray-600 dark:text-gray-400">Loading...</p>
           </div>
         </div>
       }

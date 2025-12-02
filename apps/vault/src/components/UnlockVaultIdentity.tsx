@@ -74,30 +74,30 @@ const UnlockVaultIdentity: Component = () => {
   return (
     <Show when={!loading()}
       fallback={
-        <div class="min-h-screen flex items-center justify-center">
+        <div class="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900">
           <div class="text-center">
-            <div class="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin mx-auto mb-4"></div>
-            <p class="text-gray-600">Loading...</p>
+            <div class="w-8 h-8 border-2 border-gray-300 dark:border-gray-600 border-t-gray-600 dark:border-t-gray-400 rounded-full animate-spin mx-auto mb-4"></div>
+            <p class="text-gray-600 dark:text-gray-400">Loading...</p>
           </div>
         </div>
       }
     >
 
-      <div class="flex justify-center w-full p-4 text-base">
+      <div class="flex justify-center w-full p-4 text-base bg-white dark:bg-gray-900">
         
-        <div class="bg-white black-outline box-shadow rounded-lg w-full shadow-default p-4 text-center relative">
+        <div class="bg-white dark:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 rounded-lg w-full shadow-lg p-4 text-center relative">
          {/* Navigation buttons - only show after successful unlock */}
          {success() && (
-            <div class="flex gap-2 text-md mt-6 pt-6 border-t border-gray-200">
+            <div class="flex gap-2 text-md mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
               <button
                 onClick={backToApp}
-                class="flex-1 px-2 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                class="flex-1 px-2 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 Back to App
               </button>
               <button
                 onClick={() => navigate('/passport')}
-                class="flex-1 px-2 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                class="flex-1 px-2 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors font-medium"
               >
                 To Passport
               </button>
@@ -115,13 +115,13 @@ const UnlockVaultIdentity: Component = () => {
 
           {/* Messages */}
           {error() && (
-            <div class="status-message error text-sm text-center mb-4">
+            <div class="status-message error text-sm text-center mb-4 text-red-600 dark:text-red-400">
               {error()}
             </div>
           )}
 
           {success() && (
-            <div class="status-message success text-sm text-center mb-4 text-green-600">
+            <div class="status-message success text-sm text-center mb-4 text-green-600 dark:text-green-400">
               {success()}
             </div>
           )}
@@ -129,10 +129,10 @@ const UnlockVaultIdentity: Component = () => {
          
           {/* Logout button - shown only when not successfully unlocked */}
           {!success() && (
-            <div class="mt-6 pt-4 border-t border-gray-200">
+            <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
               <button
                 onClick={handleLogout}
-                class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                 disabled={isUnlocking()}
               >
                 Can't remember your PIN? Logout

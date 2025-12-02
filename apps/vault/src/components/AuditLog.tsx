@@ -231,13 +231,13 @@ export const AuditLog: Component = () => {
             </button>
             <button
               onClick={exportAuditLog}
-              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              class="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
             >
               Export
             </button>
             <button
               onClick={clearAuditLog}
-              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              class="px-4 py-2 bg-red-600 dark:bg-red-500 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-600 transition-colors"
             >
               Clear
             </button>
@@ -301,7 +301,7 @@ export const AuditLog: Component = () => {
         {/* Events List */}
         <Show when={isLoading()}>
           <div class="text-center py-8">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400 mx-auto"></div>
             <p class="mt-4 text-gray-600 dark:text-gray-400">Loading audit events...</p>
           </div>
         </Show>

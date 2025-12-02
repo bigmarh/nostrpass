@@ -150,8 +150,8 @@ export const PinManager: Component<PinManagerProps> = (props) => {
             <Show when={!showRecovery() && !showPinReset()}>
               {/* Header */}
               <div class="text-center mb-7">
-                <h2 class="text-lg font-semibold mb-1.5">Unlock Vault</h2>
-                <p class="text-gray-600">Enter your PIN to unlock your vault</p>
+                <h2 class="text-lg font-semibold mb-1.5 text-gray-900 dark:text-gray-100">Unlock Vault</h2>
+                <p class="text-gray-600 dark:text-gray-400">Enter your PIN to unlock your vault</p>
               </div>
 
               {/* PIN Entry */}
@@ -164,7 +164,7 @@ export const PinManager: Component<PinManagerProps> = (props) => {
 
               {/* Error Message */}
               <Show when={pinUnlockError()}>
-                <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-md text-sm mb-4">
+                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4">
                   {pinUnlockError()}
                 </div>
               </Show>
@@ -173,14 +173,14 @@ export const PinManager: Component<PinManagerProps> = (props) => {
               <div class="space-y-2 text-center">
                 <button
                   onClick={() => setShowRecovery(true)}
-                  class="text-sm text-blue-600 hover:text-blue-800 transition-colors block w-full"
+                  class="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors block w-full"
                   disabled={isUnlocking()}
                 >
                   Forgot PIN?
                 </button>
                 <button
                   onClick={handleCancel}
-                  class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                  class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                   disabled={isUnlocking()}
                 >
                   Cancel
@@ -215,9 +215,9 @@ export const PinManager: Component<PinManagerProps> = (props) => {
                 />
 
                 <Show when={showPasswordPrompt()}>
-                  <div class="mt-4 p-4 border-t">
-                    <h3 class="text-lg font-semibold mb-2">Verify Your Password</h3>
-                    <p class="text-sm text-gray-600 mb-4">
+                  <div class="mt-4 p-4 border-t border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Verify Your Password</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
                       Please enter your password to complete the PIN reset.
                     </p>
                     <input
@@ -225,7 +225,7 @@ export const PinManager: Component<PinManagerProps> = (props) => {
                       placeholder="Password"
                       value={passwordForReset()}
                       onInput={(e) => setPasswordForReset(e.currentTarget.value)}
-                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
+                      class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 mb-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                       onKeyPress={(e) => {
                         if (e.key === 'Enter') handlePasswordVerification();
                       }}
@@ -234,7 +234,7 @@ export const PinManager: Component<PinManagerProps> = (props) => {
                       <button
                         onClick={handlePasswordVerification}
                         disabled={!passwordForReset() || isUnlocking()}
-                        class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 disabled:bg-gray-400"
+                        class="flex-1 px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-md hover:bg-gray-800 dark:hover:bg-gray-100 disabled:bg-gray-400 dark:disabled:bg-gray-600 transition-colors font-medium"
                       >
                         {isUnlocking() ? 'Resetting PIN...' : 'Complete Reset'}
                       </button>
@@ -243,7 +243,7 @@ export const PinManager: Component<PinManagerProps> = (props) => {
                           setShowPasswordPrompt(false);
                           setPasswordForReset('');
                         }}
-                        class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                        class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition-colors"
                       >
                         Cancel
                       </button>
