@@ -14,8 +14,8 @@ export function getCryptoWorker(): any {
     try {
       const workerUrl = new URL('../workers/crypto.worker.ts', import.meta.url);
       // NOTE: Adding version param to force reload after code changes
-      workerUrl.searchParams.set('v', '12'); // Increment this to force worker reload
-      const shared = new SharedWorker(workerUrl, { type: 'module', name: 'nostrpass-crypto-v12' });
+      workerUrl.searchParams.set('v', '14'); // Increment this to force worker reload
+      const shared = new SharedWorker(workerUrl, { type: 'module', name: 'nostrpass-crypto-v14' });
       sharedPort = shared.port as MessagePort;
       sharedPort.start();
       console.log('[NostrPass] Crypto: using Module SharedWorker (crypto.worker.ts)');

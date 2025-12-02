@@ -42,8 +42,7 @@ export interface VaultObj {
   version: number;
   updatedAt: number;
   createdAt?: number;
-  // Password verification fields (optional, for migration/verification)
-  passwordVerifier?: string;
+  // Password salt (optional, for migration/verification)
   passwordSalt?: string;
 }
 

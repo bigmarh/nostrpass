@@ -39,7 +39,7 @@ import {
   deriveAppId,
 } from './pre.helpers';
 import { cryptoPrimitives, ensureCryptoReady } from './crypto-primitives';
-import { activeSessions } from './session-manager';
+import { getSessionStateManager } from './session-state-manager';
 import { vaultOperations } from './vault-operations';
 
 // ============================================================================
@@ -850,7 +850,9 @@ export const nostrSync = {
       updatedAt: new Date(vault.updatedAt || Date.now()).toISOString(),
     });
 
-    const session = (activeSessions as any).get(params.username);
+    // Use SessionStateManager to get session (atomic auth uses this)
+    const manager = getSessionStateManager();
+    const session = (manager as any).sessions?.get(params.username);
 
     // CRITICAL: Always use the vault's storage public key
     // During account creation, storage keypair is derived at m/44'/1237'/0'/0/8907 (STORAGE_INDEX)

@@ -22,7 +22,8 @@ import { vaultDB, type VaultData } from './db';
 import type { Identity, LoginObj, VaultObj } from '@nostrpass/types';
 
 /**
- * Broadcast auth state change to main thread and all tabs
+ * Broadcast auth state change to all tabs via BroadcastChannel
+ * Note: In SharedWorker context, we can't use self.postMessage
  */
 function broadcastAuthStateChanged(state: CompleteSessionState | null) {
   const message = {
@@ -46,10 +47,7 @@ function broadcastAuthStateChanged(state: CompleteSessionState | null) {
     }
   };
 
-  // Send to main thread
-  self.postMessage(message);
-
-  // Send to all tabs via BroadcastChannel
+  // Send to all tabs via BroadcastChannel (works in both Worker types)
   try {
     const channel = new BroadcastChannel('nostrpass-vault');
     channel.postMessage(message);
@@ -65,12 +63,10 @@ function broadcastAuthStateChanged(state: CompleteSessionState | null) {
 async function generateMasterKey(): Promise<{
   xpriv: string;
   identities: Identity[];
+  personalPrivateKey: string;
 }> {
-  // Generate random seed
-  const seed = cryptoPrimitives.generateRandomBytes({ length: 32 });
-
-  // Derive master xpriv
-  const xpriv = await cryptoPrimitives.deriveXprivFromSeed({ seed });
+  // Generate master xpriv directly (no seed needed)
+  const { xpriv } = await cryptoPrimitives.generateXpriv();
 
   // Create Personal identity (index 0)
   const personalKeypair = await cryptoPrimitives.deriveKeypairFromXpriv({
@@ -82,14 +78,15 @@ async function generateMasterKey(): Promise<{
     index: 0,
     nickname: 'Personal',
     publicKey: personalKeypair.publicKey,
-    npub: await cryptoPrimitives.convertToNpub({ hex: personalKeypair.publicKey }),
+    npub: '', // Will be populated by UI if needed
     createdAt: Date.now(),
     appPermissions: {}
   };
 
   return {
     xpriv,
-    identities: [personalIdentity]
+    identities: [personalIdentity],
+    personalPrivateKey: personalKeypair.privateKey
   };
 }
 
@@ -127,7 +124,7 @@ export async function handleAtomicCreateAccount(params: {
   try {
     // ===== Step 1: Generate cryptographic material =====
     console.log('[signup-atomic] Generating master key...');
-    const { xpriv, identities } = await generateMasterKey();
+    const { xpriv, identities, personalPrivateKey } = await generateMasterKey();
     const personalIdentity = identities[0];
 
     // Derive storage keypair (index 1337)
@@ -170,12 +167,6 @@ export async function handleAtomicCreateAccount(params: {
       data: storageKeypairJson,
       password: pin,
       salt: pinSalt
-    });
-
-    // Create password verifier for login authentication
-    const passwordVerifier = await cryptoPrimitives.encryptData({
-      data: 'NostrPass_Password_Verifier_v1',
-      password: passwordKey
     });
 
     // ===== Step 4: Handle recovery (if provided) =====
@@ -247,14 +238,13 @@ export async function handleAtomicCreateAccount(params: {
       identities,
       updatedAt: Date.now(),
       version: 1,
-      recovery: recoveryData,
-      passwordVerifier
+      recovery: recoveryData
     };
 
     // ===== Step 6: Save to IndexedDB =====
     console.log('[signup-atomic] Saving to IndexedDB...');
     await vaultDB.init();
-    await vaultDB.saveVault(username, vaultData);
+    await vaultDB.saveVault(vaultData);
 
     // ===== Step 7: Create unlocked session =====
     console.log('[signup-atomic] Creating unlocked session...');
@@ -276,7 +266,7 @@ export async function handleAtomicCreateAccount(params: {
       unlockedAt: now,
       expiresAt: now + (30 * 60 * 1000), // 30 minutes
       xpriv,
-      privateKey: personalIdentity.publicKey, // TODO: derive private key properly
+      privateKey: personalPrivateKey,
       storagePrivateKey,
       vaultData
     };
@@ -368,6 +358,12 @@ async function publishToNostrBackground(params: {
       passwordKey
     );
     console.log(`[signup-atomic-nostr] LoginObj published to ${loginPublished.length} relays`);
+
+    // Cache LoginObj in IndexedDB for fast future logins
+    const { vaultDB } = await import('./db');
+    await vaultDB.init();
+    await vaultDB.saveLoginObj(username, loginObj, passwordSalt);
+    console.log('[signup-atomic-nostr] LoginObj cached in IndexedDB');
 
     // Publish VaultObj (encrypted with storage key, not password!)
     const vaultPublished = await saveVaultObj(

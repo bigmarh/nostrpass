@@ -60,7 +60,6 @@ async function handleAtomicCreateAccount() {
   // 3. Encrypt sensitive data
   const xprivEncrypted = encryptDataWithSalt(xpriv, pin, pinSalt);
   const storageKeypairEncrypted = encryptDataWithSalt(storageKeypair, pin, pinSalt);
-  const passwordVerifier = encryptData('NostrPass_Password_Verifier_v1', passwordKey);
 
   // 4. Create vault objects
   const loginObj: LoginObj = {
@@ -92,7 +91,6 @@ async function handleAtomicCreateAccount() {
     storagePublicKey,
     username,
     identities,
-    passwordVerifier,
     recovery,
     version: 1,
     updatedAt: Date.now()
@@ -220,7 +218,7 @@ async function handleAtomicLogin() {
   // vaultData contains:
   // - identities (all app identities)
   // - xprivEncrypted (PIN-encrypted master key)
-  // - recovery, passwordVerifier, etc.
+  // - recovery, etc.
 
   // 3. Cache to IndexedDB
   await vaultDB.saveVault(username, vaultData);

@@ -32,7 +32,7 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
                 if (data.plaintext) queryParams.plaintext = data.plaintext;
                 if (data.ciphertext) queryParams.ciphertext = data.ciphertext;
 
-                (embassyInstance as any).openPage('permission', { queryParams });
+                (embassyInstance as any).openPage('permission', { size: 'tall', queryParams });
                 console.log('✅ Permission page opened successfully');
                 return { acknowledged: true };
             } catch (error) {

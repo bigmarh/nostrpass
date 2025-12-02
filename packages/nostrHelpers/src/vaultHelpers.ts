@@ -45,7 +45,6 @@ export interface VaultData {
 
   // Security
   passwordSalt?: string; // Salt for password key derivation
-  passwordVerifier?: string; // Encrypted known string to verify password
 }
 
 // Alias for backward compatibility

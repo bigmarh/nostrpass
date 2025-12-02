@@ -18,7 +18,7 @@ export const NostrSyncIndicator = () => {
     // Check initial status
     const updateStatus = () => {
       const currentUser = user();
-      if (!currentUser) {
+      if (!currentUser || !currentUser.profile?.username) {
         setSyncStatus(null);
         return;
       }

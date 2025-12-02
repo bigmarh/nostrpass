@@ -537,7 +537,7 @@ export const authHandlers: MessageHandler[] = [
       }
 
       try {
-        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+        const vaultData = await cryptoWorker?.getVaultDataFromSession({ username: currentUser.profile?.username });
 
         if (!vaultData?.identities || vaultData.identities.length === 0) {
           return { identities: [], activeIdentityIndex: null };
@@ -554,7 +554,7 @@ export const authHandlers: MessageHandler[] = [
 
         const activeIdentityIndex = vaultData.activeIdentityByApp?.[appKey] ?? null;
 
-        // Return only identities that are authorized for this app
+        // Return all identities with their authorization status
         const identities = vaultData.identities
           .map((identity: any, index: number) => ({
             index,
@@ -564,8 +564,7 @@ export const authHandlers: MessageHandler[] = [
             createdAt: identity.createdAt,
             isActive: activeIdentityIndex === index,
             isAuthorized: !!(identity.appPermissions && identity.appPermissions[appKey])
-          }))
-          .filter((identity: any) => identity.isAuthorized); // Only return authorized identities
+          }));
 
         return {
           identities,

@@ -84,6 +84,11 @@ export class NostrPassButton {
 
     // Listen for vault data changes to refresh the button
     this.setupEventListeners();
+
+    // Try to restore session on page load
+    this.restoreSession().catch(error => {
+      console.warn('[NostrPassButton] Failed to restore session on init:', error);
+    });
   }
 
   private setupEventListeners() {
@@ -1307,7 +1312,7 @@ export class NostrPassButton {
 
   private saveSession(user: UserInfo) {
     try {
-      sessionStorage.setItem('nostrpass_session', JSON.stringify(user));
+      localStorage.setItem('nostrpass_session', JSON.stringify(user));
     } catch (e) {
       console.warn('Failed to save NostrPass session:', e);
     }
@@ -1315,7 +1320,7 @@ export class NostrPassButton {
 
   public clearSession() {
     try {
-      sessionStorage.removeItem('nostrpass_session');
+      localStorage.removeItem('nostrpass_session');
       this.currentUser = null;
       this.isCheckingAuth = false; // Reset checking auth state
       this.render();

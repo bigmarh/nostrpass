@@ -16,7 +16,7 @@ export interface UserSession {
 }
 
 const DB_NAME = 'NostrPassVault';
-const DB_VERSION = 2; // Keep at version 2 to avoid downgrade error
+const DB_VERSION = 3; // Increment for loginObjs store
 
 class VaultDB {
   private db: IDBDatabase | null = null;
@@ -59,6 +59,11 @@ class VaultDB {
           const xprivStore = db.createObjectStore('xprivs', { keyPath: 'username' });
           xprivStore.createIndex('updatedAt', 'updatedAt', { unique: false });
         }
+
+        // Store cached LoginObjs to avoid Nostr fetch + PBKDF2 on every login
+        if (!db.objectStoreNames.contains('loginObjs')) {
+          db.createObjectStore('loginObjs', { keyPath: 'username' });
+        }
       };
     });
   }
@@ -66,65 +71,14 @@ class VaultDB {
   async saveVault(vaultData: VaultData): Promise<void> {
     if (!this.db) await this.init();
 
-    // MIGRATION: Read from legacy encryptedVault field if xprivEncrypted is missing
-    // This ensures old vaults continue to work after standardizing on xprivEncrypted
-    const normalizedVault = { ...vaultData } as any;
-
-    // CRITICAL CHECK: Warn if xprivEncrypted is missing or empty
-    if (!normalizedVault.xprivEncrypted || normalizedVault.xprivEncrypted === '') {
-      console.error('🚨 [DB] WARNING: Attempting to save vault WITHOUT xprivEncrypted!', {
-        username: normalizedVault.username,
-        xprivEncryptedValue: normalizedVault.xprivEncrypted,
-        hasEncryptedVault: !!normalizedVault.encryptedVault,
-        hasStorageKeypairEncrypted: !!normalizedVault.storageKeypairEncrypted,
-        allKeys: Object.keys(normalizedVault),
-        stackTrace: new Error().stack
-      });
-
-      // Try migration as fallback - check multiple legacy field names
-      if (normalizedVault.encryptedVault) {
-        console.log('🔄 [DB Migration] Migrating encryptedVault → xprivEncrypted');
-        normalizedVault.xprivEncrypted = normalizedVault.encryptedVault;
-      } else if (normalizedVault.storageKeypairEncrypted) {
-        console.log('🔄 [DB Migration] Migrating storageKeypairEncrypted → xprivEncrypted');
-        normalizedVault.xprivEncrypted = normalizedVault.storageKeypairEncrypted;
-      } else {
-        console.error('❌ [DB] CRITICAL: No xprivEncrypted AND no legacy field to migrate from!');
-        // Keep the empty string if that's what was provided (for new logins that will populate later)
-      }
-    }
-
-    // Clean up: Remove legacy fields to avoid confusion
-    delete normalizedVault.encryptedVault;
-    delete normalizedVault.storageKeypairEncrypted;
-
-    const startTime = Date.now();
-    const dataSize = JSON.stringify(normalizedVault).length;
-
-    console.log('💾 Saving vault to IndexedDB:', {
-      username: normalizedVault.username,
-      dataSize: `${(dataSize / 1024).toFixed(2)} KB`,
-      identitiesCount: normalizedVault.identities?.length || 0,
-      hasXprivEncrypted: !!normalizedVault.xprivEncrypted,
-      xprivEncryptedLength: normalizedVault.xprivEncrypted?.length,
-      hasPasswordSalt: !!normalizedVault.passwordSalt,
-      allKeys: Object.keys(normalizedVault)
-    });
-
     const run = (): Promise<void> => new Promise((resolve, reject) => {
       try {
         const transaction = this.db!.transaction(['vaults'], 'readwrite');
         const store = transaction.objectStore('vaults');
-        const request = store.put(normalizedVault);
+        const request = store.put(vaultData);
 
-        request.onsuccess = () => {
-          console.log(`💾 Vault saved successfully in ${Date.now() - startTime}ms`);
-          resolve();
-        };
-        request.onerror = () => {
-          console.error('💾 Failed to save vault:', request.error);
-          reject(request.error);
-        };
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
       } catch (e: any) {
         reject(e);
       }
@@ -153,35 +107,7 @@ class VaultDB {
         const request = store.get(username);
 
         request.onsuccess = () => {
-          const result = request.result || null;
-          if (result) {
-            // MIGRATION: Check for legacy field names and migrate on read
-            const resultData = result as any;
-            if (!resultData.xprivEncrypted || resultData.xprivEncrypted === '') {
-              if (resultData.encryptedVault) {
-                console.log('🔄 [DB getVault] Migrating encryptedVault → xprivEncrypted on read');
-                resultData.xprivEncrypted = resultData.encryptedVault;
-                delete resultData.encryptedVault;
-              } else if (resultData.storageKeypairEncrypted) {
-                console.log('🔄 [DB getVault] Migrating storageKeypairEncrypted → xprivEncrypted on read');
-                resultData.xprivEncrypted = resultData.storageKeypairEncrypted;
-                delete resultData.storageKeypairEncrypted;
-              }
-            }
-
-            console.log('📤 Retrieved vault from IndexedDB:', {
-              username: resultData.username,
-              hasXprivEncrypted: !!resultData.xprivEncrypted,
-              xprivEncryptedLength: resultData.xprivEncrypted?.length,
-              hasPasswordSalt: !!resultData.passwordSalt,
-              identitiesCount: resultData.identities?.length || 0,
-              identities: resultData.identities,
-              allKeys: Object.keys(resultData)
-            });
-          } else {
-            console.log('❌ No vault found in IndexedDB for username:', username);
-          }
-          resolve(result);
+          resolve(request.result || null);
         };
         request.onerror = () => reject(request.error);
       } catch (e: any) {
@@ -301,6 +227,19 @@ class VaultDB {
     });
   }
 
+  async clearSession(username: string): Promise<void> {
+    if (!this.db) await this.init();
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(['sessions'], 'readwrite');
+      const store = transaction.objectStore('sessions');
+      const request = store.delete(username);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   async clearExpiredSessions(): Promise<void> {
     if (!this.db) await this.init();
 
@@ -388,6 +327,54 @@ class VaultDB {
         resolve({
           xprivEncrypted: row.encryptedXpriv,
           salt: row.pinSalt,
+          passwordSalt: row.passwordSalt
+        });
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveLoginObj(username: string, loginObj: any, passwordSalt: string): Promise<void> {
+    if (!this.db) await this.init();
+
+    // Check if loginObjs store exists (might be old DB version)
+    if (!this.db!.objectStoreNames.contains('loginObjs')) {
+      console.warn('[DB] loginObjs store not found - database needs upgrade');
+      return; // Gracefully skip caching on old DB versions
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['loginObjs'], 'readwrite');
+      const store = tx.objectStore('loginObjs');
+      const request = store.put({
+        username,
+        loginObj,
+        passwordSalt,
+        cachedAt: Date.now()
+      });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getLoginObj(username: string): Promise<{ loginObj: any; passwordSalt: string } | null> {
+    if (!this.db) await this.init();
+
+    // Check if loginObjs store exists (might be old DB version)
+    if (!this.db!.objectStoreNames.contains('loginObjs')) {
+      console.warn('[DB] loginObjs store not found - returning null (cache miss)');
+      return null; // Return null to trigger Nostr fetch
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction(['loginObjs'], 'readonly');
+      const store = tx.objectStore('loginObjs');
+      const request = store.get(username);
+      request.onsuccess = () => {
+        const row = request.result;
+        if (!row) return resolve(null);
+        resolve({
+          loginObj: row.loginObj,
           passwordSalt: row.passwordSalt
         });
       };

@@ -1254,12 +1254,26 @@ class NostrPassEmbassy {
         this.hide();
         return response.signedEvent || response;
       } catch (e: any) {
-        // If we JUST unlocked, there might be a tiny race. Retry once.
+        // If vault is locked or session needs keys, trigger unlock flow
         const msg = String(e?.message || e);
         if (msg.toLowerCase().includes('vault is locked') || msg.toLowerCase().includes('rehydrated')) {
-          await this.sleep(150);
+          console.log('🔒 Vault locked or session needs keys, triggering unlock...');
+
+          // Trigger unlock based on configuration
+          if (this.config.parentPinOverlay) {
+            const ok = await this.requestPinUnlock();
+            if (!ok) throw new Error('User canceled PIN prompt');
+          } else {
+            // Show unlock page and wait for unlock
+            const unlockPromise = this.waitForUnlock();
+            this.openPage('unlock', { size: 'compact' });
+            await unlockPromise;
+          }
+
+          // Retry after unlock
+          console.log('🔓 Vault unlocked, retrying operation...');
           const response = await send();
-          if (this.config.debug) console.log('Signed event received (retry):', response);
+          if (this.config.debug) console.log('Signed event received (after unlock):', response);
           this.hide();
           return response.signedEvent || response;
         }
@@ -1301,12 +1315,15 @@ class NostrPassEmbassy {
       let unlockPromise: Promise<void> | null = null;
       let permissionPromise: Promise<void> | null = null;
       try {
+        console.log('🔍 [signData] Calling CHECK_PERMISSION preflight...');
         const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
           action: 'signData',
           identityIndex
         });
+        console.log('🔍 [signData] CHECK_PERMISSION result:', pre);
         const needsPin = pre?.isLocked === true;
         const needsPrompt = pre?.needsPrompt === true;
+        console.log('🔍 [signData] needsPin:', needsPin, 'needsPrompt:', needsPrompt);
         if (needsPin && this.config.parentPinOverlay) {
           const ok = await this.requestPinUnlock();
           if (!ok) throw new Error('User canceled PIN prompt');
@@ -1331,34 +1348,43 @@ class NostrPassEmbassy {
             data: message
           });
 
+          console.log('📍 Navigating to permission-request page...');
           await this.messenger!.send('NAVIGATE', {
             path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
           });
 
           // Show the vault (iframe is already navigated to permission page, just make it visible)
           // Apply full-screen display styling
+          console.log('👁️ Making iframe visible for permission prompt...');
           if (this.iframe) {
+            console.log('👁️ Current iframe classes:', this.iframe.className);
             this.iframe.classList.remove('nostrpass-iframe-hidden');
             this.iframe.classList.remove('nostrpass-iframe-compact');
             this.iframe.classList.remove('nostrpass-iframe-tall');
             this.iframe.classList.remove('nostrpass-iframe-minimal');
             this.iframe.classList.add('nostrpass-iframe-visible');
+            console.log('👁️ New iframe classes:', this.iframe.className);
 
             // Show backdrop
             if (this.backdropEl) {
               this.backdropEl.classList.add('visible');
               this.backdropEl.style.background = 'transparent';
               this.backdropEl.style.backdropFilter = 'none';
+              console.log('👁️ Backdrop shown');
             }
 
             // Accessibility
             this.iframe.setAttribute('aria-hidden', 'false');
             this.iframe.removeAttribute('tabindex');
             document.body.style.overflow = 'hidden';
+            console.log('👁️ Iframe should now be visible!');
+          } else {
+            console.error('❌ No iframe element found!');
           }
         }
       } catch (error: any) {
         // If user is not authenticated at all, show full vault for login
+        console.error('❌ [signData] CHECK_PERMISSION preflight failed:', error);
         const errorMsg = String(error?.message || error);
         if (errorMsg.toLowerCase().includes('not authenticated')) {
           console.log('⚠️ User not authenticated, showing full vault for login');

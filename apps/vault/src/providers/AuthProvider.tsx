@@ -188,8 +188,15 @@ export const AuthProvider: ParentComponent = (props) => {
 
     workerInstance.addEventListener('message', handleWorkerMessage as EventListener);
 
+    // Also listen to BroadcastChannel for SharedWorker broadcasts
+    const channel = new BroadcastChannel('nostrpass-vault');
+    channel.onmessage = (event: MessageEvent) => {
+      handleWorkerMessage(event);
+    };
+
     return () => {
       workerInstance.removeEventListener('message', handleWorkerMessage as EventListener);
+      channel.close();
     };
   });
 
@@ -277,7 +284,7 @@ export const AuthProvider: ParentComponent = (props) => {
         username,
         password,
         relays: getRelays(),
-        environment: environmentName
+        environment: environmentName()
       });
 
       // State will be updated via AUTH_STATE_CHANGED event
@@ -400,7 +407,7 @@ export const AuthProvider: ParentComponent = (props) => {
         password,
         pin,
         relays: getRelays(),
-        environment: environmentName,
+        environment: environmentName(),
         recovery
       });
 
@@ -432,7 +439,24 @@ export const AuthProvider: ParentComponent = (props) => {
   const contextValue: AuthContextType = {
     authState,
     // Derived getters for backward compatibility
-    user: () => authState().user,
+    user: () => {
+      const state = authState();
+      return state.user ? {
+        publicKey: state.user.publicKey,
+        privateKey: '',
+        profile: {
+          username: state.user.username,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          preferences: {},
+          security: { sessionTimeout: 60 },
+          storagePublicKey: state.user.storagePublicKey
+        },
+        appPermissions: new Map(),
+        isAuthenticated: state.isAuthenticated,
+        session: { startedAt: Date.now(), lastActivityAt: Date.now() }
+      } : null;
+    },
     isAuthenticated: () => authState().isAuthenticated,
     isLoading: () => authState().isLoading,
     hasPinVault: () => authState().isAuthenticated, // Has vault if authenticated

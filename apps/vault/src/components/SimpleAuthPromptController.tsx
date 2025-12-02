@@ -11,6 +11,7 @@ interface SimpleAuthPromptEventDetail {
   appName?: string;
   identityIndex: number;
   requestId?: string;
+  afterSignup?: boolean;
   permissions?: {
     getPublicKey?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
     getRelays?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
@@ -56,6 +57,76 @@ export const SimpleAuthPromptController: Component = () => {
       if (identityData) {
         setIdentity(identityData);
         setDetail(ce.detail);
+
+        // Auto-approve if this is after signup and there's only one identity
+        if (ce.detail.afterSignup && vaultData?.identities?.length === 1) {
+          console.log('[SimpleAuthPromptController] Auto-approving single identity after signup');
+
+          // Automatically authorize without showing prompt
+          let appKey = ce.detail.appOrigin;
+          try {
+            appKey = sanitizeDomain(new URL(ce.detail.appOrigin).host || ce.detail.appOrigin);
+          } catch {
+            appKey = sanitizeDomain(ce.detail.appOrigin);
+          }
+
+          // Use app-requested permissions or fall back to safe defaults
+          const permissionsToGrant = {
+            getPublicKey: ce.detail.permissions?.getPublicKey || 'ALLOW',
+            getRelays: ce.detail.permissions?.getRelays || 'ALLOW',
+            signEvent: ce.detail.permissions?.signEvent || 'ASK_EVERYTIME',
+            nip04: ce.detail.permissions?.nip04 || 'ASK_EVERYTIME',
+            nip44: ce.detail.permissions?.nip44 || 'ASK_EVERYTIME',
+            signData: ce.detail.permissions?.signData || 'ASK_EVERYTIME'
+          };
+
+          await permissionService.saveAppPermissions(
+            currentUser.profile.username,
+            appKey,
+            permissionsToGrant,
+            ce.detail.appName,
+            ce.detail.identityIndex
+          );
+
+          // Set this identity as the active identity for this app
+          await vaultDataService.updateVaultData(currentUser.profile.username, (current) => ({
+            activeIdentityByApp: {
+              ...(current.activeIdentityByApp || {}),
+              [appKey]: ce.detail.identityIndex
+            }
+          }), { syncToNostr: true });
+
+          // Trigger vault data refresh event to notify embassy
+          console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');
+          send('VAULT_DATA_UPDATED', {
+            username: currentUser.profile.username,
+            timestamp: Date.now()
+          });
+
+          // Also dispatch window event for components within the vault iframe
+          window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+            detail: { username: currentUser.profile.username }
+          }));
+
+          // Notify success
+          if (ce.detail.requestId) {
+            window.dispatchEvent(new CustomEvent('simple-auth-approved', {
+              detail: {
+                requestId: ce.detail.requestId,
+                identityIndex: ce.detail.identityIndex,
+                appKey
+              }
+            }));
+          }
+
+          // Hide vault after auto-approval
+          console.log('[SimpleAuthPromptController] Hiding vault after auto-approval');
+          send('HIDE_VAULT');
+
+          return; // Don't show the prompt
+        }
+
+        // Show prompt for manual approval
         setVisible(true);
       } else {
         console.error('Identity not found');

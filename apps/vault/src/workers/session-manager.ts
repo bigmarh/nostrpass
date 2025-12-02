@@ -68,8 +68,11 @@ interface ExtendedSession extends UserSession {
 // ============================================================================
 
 /**
- * In-memory session storage (sensitive data)
- * Maps username to active session with decrypted keys
+ * DEPRECATED: Legacy in-memory session storage
+ * This is no longer used by the atomic auth flow.
+ * All new code should use SessionStateManager from session-state-manager.ts
+ * Kept only for backward compatibility with old session methods.
+ * @deprecated Use SessionStateManager instead
  */
 export const activeSessions = new Map<string, ExtendedSession>();
 
@@ -607,8 +610,12 @@ export const sessionManager = {
     identityIndex: number;
     origin?: string
   }): Promise<{ event: any }> => {
-    const session = activeSessions.get(params.username);
-    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+    // Use SessionStateManager instead of legacy activeSessions
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
+
+    if (!session || !session.isUnlocked) {
       throw new Error('Session expired or locked');
     }
 
@@ -685,8 +692,12 @@ export const sessionManager = {
     identityIndex: number;
     origin?: string
   }): Promise<{ signature: string }> => {
-    const session = activeSessions.get(params.username);
-    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+    // Use SessionStateManager instead of legacy activeSessions
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
+
+    if (!session || !session.isUnlocked) {
       throw new Error('Session expired or locked');
     }
 
@@ -736,8 +747,12 @@ export const sessionManager = {
     identityIndex: number;
     origin?: string
   }): Promise<string> => {
-    const session = activeSessions.get(params.username);
-    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+    // Use SessionStateManager instead of legacy activeSessions
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
+
+    if (!session || !session.isUnlocked) {
       throw new Error('Session expired or locked');
     }
 
@@ -787,8 +802,12 @@ export const sessionManager = {
     identityIndex: number;
     origin?: string
   }): Promise<string> => {
-    const session = activeSessions.get(params.username);
-    if (!session || !session.isUnlocked || isSessionExpired(session)) {
+    // Use SessionStateManager instead of legacy activeSessions
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
+
+    if (!session || !session.isUnlocked) {
       throw new Error('Session expired or locked');
     }
 
@@ -872,27 +891,23 @@ export const sessionManager = {
    */
   hasKeysInSession: async (params: { username: string }): Promise<{ hasPrivateKey: boolean; hasXpriv: boolean; hasStorageKeypair: boolean }> => {
     console.log('[hasKeysInSession] Checking for username:', params.username);
-    console.log('[hasKeysInSession] activeSessions size:', activeSessions.size);
-    console.log('[hasKeysInSession] activeSessions keys:', Array.from(activeSessions.keys()));
 
-    const session = activeSessions.get(params.username);
-    console.log('[hasKeysInSession] Found session:', session ? 'yes' : 'no');
+    // Use atomic SessionStateManager (unified session storage)
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
 
-    if (session) {
-      console.log('[hasKeysInSession] Session details:', {
-        hasPrivateKey: !!session.privateKey,
-        hasXpriv: !!session.xpriv,
-        hasStorageKeypair: !!(session.storagePrivateKey && session.storagePublicKey),
-        isUnlocked: session.isUnlocked,
-        unlockedAt: session.unlockedAt
-      });
+    if (!session || !session.isUnlocked) {
+      console.log('[hasKeysInSession] No unlocked session found');
+      return { hasPrivateKey: false, hasXpriv: false, hasStorageKeypair: false };
     }
 
-    const hasPrivateKey = !!(session && session.privateKey);
-    const hasXpriv = !!(session && session.xpriv);
-    const hasStorageKeypair = !!(session && session.storagePrivateKey && session.storagePublicKey);
-
-    const result = { hasPrivateKey, hasXpriv, hasStorageKeypair };
+    console.log('[hasKeysInSession] Found unlocked session in SessionStateManager');
+    const result = {
+      hasPrivateKey: !!session.privateKey,
+      hasXpriv: !!session.xpriv,
+      hasStorageKeypair: !!(session.storagePrivateKey && session.storagePublicKey)
+    };
     console.log('[hasKeysInSession] Returning:', result);
     return result;
   },

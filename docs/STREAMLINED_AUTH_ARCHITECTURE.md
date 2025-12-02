@@ -88,10 +88,9 @@ async function handleAtomicCreateAccount() {
   // 2. Encrypt sensitive data
   const xprivEncrypted = await encryptDataWithSalt(xpriv, pin, pinSalt);
   const storageKeypairEncrypted = await encryptDataWithSalt(storageKeypair, pin, pinSalt);
-  const passwordVerifier = await encryptData('NostrPass_Password_Verifier_v1', passwordKey);
 
   // 3. Create vault objects
-  const vaultData = { xprivEncrypted, identities, passwordVerifier, ... };
+  const vaultData = { xprivEncrypted, identities, ... };
   const loginObj = { storageKeypairEncrypted, storagePublicKey, ... };
   const vaultObj = { identities, xprivEncrypted, ... };
 
