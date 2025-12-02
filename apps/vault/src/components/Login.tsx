@@ -182,19 +182,18 @@ export const Login: Component = () => {
 
             await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
 
-            setLoadingStatus('Saving vault to Nostr...');
+            setLoadingStatus('Connecting to app...');
 
-            // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
-            setLoadingStatus('Finalizing registration...');
+            // Wait a moment for auth state to propagate from worker
+            await new Promise(resolve => setTimeout(resolve, 300));
 
-            // After signup, trigger simple-auth prompt overlay
+            // After signup, trigger simple-auth prompt which will auto-approve
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
 
-            console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
+            console.log('📱 [SIGNUP] Triggering auto-approval for app:', appOrigin);
 
-            // Dispatch event to trigger simple-auth prompt overlay
-            // The prompt will show on top of current page and handle vault closing after user action
+            // Dispatch event - SimpleAuthPromptController will auto-approve and close vault
             window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
                 detail: {
                     appOrigin: appOrigin,
@@ -204,7 +203,7 @@ export const Login: Component = () => {
                 }
             }));
 
-            // Clear loading state to show the prompt
+            // Clear loading state
             setIsLoading(false);
             setLoadingStatus('');
         } catch (error) {
@@ -239,19 +238,18 @@ export const Login: Component = () => {
 
             await registerUsername(accountData.username, publicKey, 'NostrPass Vault', userRelays);
 
-            setLoadingStatus('Saving vault to Nostr...');
+            setLoadingStatus('Connecting to app...');
 
-            // PRE model: initial snapshot is saved during account creation; operational updates are PRE streams
-            setLoadingStatus('Finalizing registration...');
+            // Wait a moment for auth state to propagate from worker
+            await new Promise(resolve => setTimeout(resolve, 300));
 
-            // After signup, trigger simple-auth prompt overlay
+            // After signup, trigger simple-auth prompt which will auto-approve
             const appId = params.app;
             const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
 
-            console.log('📱 [SIGNUP] Triggering simple auth for app:', appOrigin);
+            console.log('📱 [SIGNUP] Triggering auto-approval for app:', appOrigin);
 
-            // Dispatch event to trigger simple-auth prompt overlay
-            // The prompt will show on top of current page and handle vault closing after user action
+            // Dispatch event - SimpleAuthPromptController will auto-approve and close vault
             window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
                 detail: {
                     appOrigin: appOrigin,
@@ -261,7 +259,7 @@ export const Login: Component = () => {
                 }
             }));
 
-            // Clear loading state to show the prompt
+            // Clear loading state
             setIsLoading(false);
             setLoadingStatus('');
         } catch (error) {
