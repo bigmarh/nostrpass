@@ -677,72 +677,80 @@
           
           <div id="encryption-tab" class="tab-content">
             <div class="form-section">
-              <div class="form-section-title">NIP-04 Encryption</div>
+              <div class="form-section-title">🔄 Quick Test - NIP-04 Encryption</div>
+              <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Test encryption by encrypting and decrypting a message to yourself in one click.
+              </p>
+
               <div class="form-group">
-                <div class="form-row">
-                  <label for="nip04-pubkey">Peer Pubkey</label>
-                  <div class="input-group">
-                    <input id="nip04-pubkey" type="text" placeholder="Hex public key" />
-                    <button id="btn-copy-mypubkey" class="btn btn-sm btn-secondary" title="Copy my public key">
-                      📋 My Key
-                    </button>
-                  </div>
+                <label for="nip04-test-message" style="display: block; margin-bottom: 0.5rem;">Test Message</label>
+                <textarea id="nip04-test-message" placeholder="Enter a test message or leave empty for auto-generated" rows="3"></textarea>
+              </div>
+
+              <button id="btn-test-encrypt-decrypt" class="btn btn-success btn-block" style="font-size: 1rem; padding: 0.75rem;">
+                🔄 Run Encrypt/Decrypt Test
+              </button>
+
+              <div class="divider"></div>
+
+              <div class="form-section">
+                <div class="form-section-title">Test Results</div>
+                <div id="encryption-test-results" style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-tertiary); padding: 1rem; border-radius: var(--radius); min-height: 100px;">
+                  <p style="color: var(--text-muted);">Run a test to see results here</p>
                 </div>
-                <div class="form-row">
-                  <label for="identity-index">Identity Index</label>
-                  <input id="identity-index" type="number" min="0" value="0" />
-                </div>
-                <div class="form-row">
-                  <label for="nip04-plain">Plaintext</label>
-                  <textarea id="nip04-plain" placeholder="Message to encrypt"></textarea>
-                </div>
-                <div class="form-row">
-                  <label for="nip04-cipher">Ciphertext</label>
-                  <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                    <textarea id="nip04-cipher" placeholder="Encrypted message or paste to decrypt"></textarea>
-                    <div class="btn-group">
-                      <button id="btn-copy-cipher" class="btn btn-sm btn-secondary">
-                        📋 Copy
-                      </button>
-                      <button id="btn-clear-cipher" class="btn btn-sm btn-secondary">
-                        🗑️ Clear
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <details style="margin-bottom: 1rem;">
+              <summary style="cursor: pointer; font-weight: 600; color: var(--text-secondary); padding: 0.5rem 0;">
+                🔧 Advanced: Manual Encryption
+              </summary>
+              <div class="form-section" style="margin-top: 1rem;">
+                <div class="form-group">
+                  <div class="form-row">
+                    <label for="nip04-pubkey">Peer Pubkey</label>
+                    <div class="input-group">
+                      <input id="nip04-pubkey" type="text" placeholder="Hex public key" />
+                      <button id="btn-copy-mypubkey" class="btn btn-sm btn-secondary" title="Copy my public key">
+                        📋 My Key
                       </button>
                     </div>
                   </div>
+                  <div class="form-row">
+                    <label for="identity-index">Identity Index</label>
+                    <input id="identity-index" type="number" min="0" value="0" />
+                  </div>
+                  <div class="form-row">
+                    <label for="nip04-plain">Plaintext</label>
+                    <textarea id="nip04-plain" placeholder="Message to encrypt"></textarea>
+                  </div>
+                  <div class="form-row">
+                    <label for="nip04-cipher">Ciphertext</label>
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                      <textarea id="nip04-cipher" placeholder="Encrypted message or paste to decrypt"></textarea>
+                      <div class="btn-group">
+                        <button id="btn-copy-cipher" class="btn btn-sm btn-secondary">
+                          📋 Copy
+                        </button>
+                        <button id="btn-clear-cipher" class="btn btn-sm btn-secondary">
+                          🗑️ Clear
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="btn-group">
+                  <button id="btn-encrypt" class="btn btn-primary">
+                    🔒 Encrypt
+                  </button>
+                  <button id="btn-decrypt" class="btn btn-secondary">
+                    🔓 Decrypt
+                  </button>
                 </div>
               </div>
-              <div class="btn-group">
-                <button id="btn-test-encrypt-decrypt" class="btn btn-success btn-block">
-                  🔄 Test Encrypt + Decrypt
-                </button>
-              </div>
-              <div class="btn-group">
-                <button id="btn-encrypt" class="btn btn-primary">
-                  🔒 Encrypt
-                </button>
-                <button id="btn-decrypt" class="btn btn-secondary">
-                  🔓 Decrypt
-                </button>
-              </div>
-              <div class="divider"></div>
-              <div class="form-section">
-                <div class="form-section-title">Current Account Info</div>
-                <div id="current-account-info" style="font-size: 0.75rem; color: var(--text-secondary); word-break: break-all;">
-                  <p>Loading...</p>
-                </div>
-                <button id="btn-refresh-account" class="btn btn-sm btn-secondary">
-                  🔄 Refresh Account Info
-                </button>
-              </div>
-              <div class="divider"></div>
-              <div class="form-section-title">Cross-Tab Testing Instructions</div>
-              <ol style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
-                <li>In Tab A: Enter recipient's public key and message, click Encrypt</li>
-                <li>Copy the ciphertext and sender's public key from the console</li>
-                <li>In Tab B: Paste the ciphertext and enter sender's public key (from Tab A)</li>
-                <li>Click Decrypt to reveal the original message</li>
-              </ol>
-            </div>
+            </details>
           </div>
 
           <div id="financial-tab" class="tab-content">
@@ -1187,9 +1195,12 @@
       });
 
       $('btn-test-encrypt-decrypt').addEventListener('click', async () => {
+        const resultsEl = $('encryption-test-results');
         try {
+          resultsEl.innerHTML = '<p style="color: var(--info);">⏳ Running test...</p>';
+
           ensureProvider();
-          const testMessage = $('nip04-plain').value || `Test message @ ${new Date().toISOString()}`;
+          const testMessage = $('nip04-test-message').value || `Test message @ ${new Date().toISOString()}`;
 
           if (!window.nostr?.nip04?.encrypt || !window.nostr?.nip04?.decrypt) {
             throw new Error('NIP-04 encryption not available');
@@ -1198,28 +1209,47 @@
           const identityIndex = Number($('identity-index').value) || 0;
 
           // Step 1: Get public key (this will be the "recipient")
+          log('info', 'Step 1: Getting public key...');
           const myPubkey = await window.nostr.getPublicKey({ identityIndex });
-          log('info', 'Step 1: Got public key', { publicKey: myPubkey });
+          log('success', 'Got public key', { publicKey: myPubkey.substring(0, 16) + '...' });
 
           // Step 2: Encrypt message to ourselves
           log('info', 'Step 2: Encrypting message...', { message: testMessage });
           const cipher = await window.nostr.nip04.encrypt(myPubkey, testMessage, { identityIndex });
-          $('nip04-cipher').value = cipher;
-          log('success', 'Message encrypted', { ciphertext: cipher.substring(0, 50) + '...' });
+          log('success', 'Message encrypted', { ciphertextLength: cipher.length });
 
           // Step 3: Decrypt the message
           log('info', 'Step 3: Decrypting message...');
           const decrypted = await window.nostr.nip04.decrypt(myPubkey, cipher, { identityIndex });
-          $('nip04-plain').value = decrypted;
+          log('success', 'Message decrypted');
 
           // Step 4: Verify round-trip
-          if (decrypted === testMessage) {
+          const passed = decrypted === testMessage;
+
+          if (passed) {
+            resultsEl.innerHTML = `
+              <div style="color: var(--secondary);">
+                <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">✅ Test PASSED</p>
+                <p style="margin-bottom: 0.5rem;"><strong>Original:</strong> ${testMessage}</p>
+                <p style="margin-bottom: 0.5rem;"><strong>Encrypted:</strong> ${cipher.substring(0, 40)}...</p>
+                <p><strong>Decrypted:</strong> ${decrypted}</p>
+                <p style="margin-top: 0.75rem; color: var(--text-muted);">✓ Messages match - encryption working correctly!</p>
+              </div>
+            `;
             log('success', '✅ Encrypt/Decrypt test PASSED!', {
               original: testMessage,
               decrypted: decrypted,
               match: true
             });
           } else {
+            resultsEl.innerHTML = `
+              <div style="color: var(--danger);">
+                <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">❌ Test FAILED</p>
+                <p style="margin-bottom: 0.5rem;"><strong>Original:</strong> ${testMessage}</p>
+                <p><strong>Decrypted:</strong> ${decrypted}</p>
+                <p style="margin-top: 0.75rem;">Messages do not match!</p>
+              </div>
+            `;
             log('error', '❌ Encrypt/Decrypt test FAILED - messages do not match', {
               original: testMessage,
               decrypted: decrypted,
@@ -1227,6 +1257,12 @@
             });
           }
         } catch (e) {
+          resultsEl.innerHTML = `
+            <div style="color: var(--danger);">
+              <p style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0.75rem;">❌ Test Error</p>
+              <p>${String(e)}</p>
+            </div>
+          `;
           log('error', 'Encrypt/Decrypt test failed', { error: String(e) });
         }
       });
