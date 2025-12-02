@@ -130,7 +130,8 @@ async function pollOnceAndApply(params: {
         });
 
         if (remoteTimestamp > localTimestamp) {
-          console.log('📥 [Worker] Applying newer vault from Nostr (poll):', {
+          console.log('📥 [Worker POLLING FALLBACK] Applying newer vault from Nostr:', {
+            source: 'POLL',
             remoteTimestamp,
             localTimestamp,
             remoteIdentities: remote.identities?.length,
@@ -286,11 +287,18 @@ export const nostrSync = {
 
             // Apply remote vault if it's newer
             if (remoteTimestamp > localTimestamp) {
-              console.log('📥 [Worker] Applying newer vault from Nostr:', {
+              // Log permissions from first identity to debug cross-browser sync
+              const firstIdentity = remote.identities?.[0];
+              const appPerms = firstIdentity?.appPermissions || {};
+              const appIds = Object.keys(appPerms);
+              console.log('📥 [Worker REAL-TIME SUBSCRIPTION] Applying newer vault from Nostr:', {
+                source: 'SUBSCRIPTION',
                 remoteTimestamp,
                 localTimestamp,
                 remoteIdentities: remote.identities?.length || 0,
                 localIdentities: local?.identities?.length || 0,
+                firstIdentityApps: appIds,
+                permissionsPreview: appIds.length > 0 ? appPerms[appIds[0]]?.permissions : null
               });
               await vaultOperations.updateVaultData({
                 username,
@@ -298,7 +306,7 @@ export const nostrSync = {
                 skipVersionIncrement: true, // Don't increment version for Nostr downloads
                 options: { syncToNostr: false } // Don't sync back - we just received this from Nostr!
               });
-              console.log('✅ [Worker] Vault synced successfully from Nostr');
+              console.log('✅ [Worker SUBSCRIPTION] Vault synced successfully from Nostr');
             } else {
               console.log('ℹ️ [Worker] Local vault is newer or equal, skipping update');
             }
@@ -317,13 +325,16 @@ export const nostrSync = {
       console.log('📡 [Worker] Relays:', relays);
       console.log('📡 [Worker] Filter:', filter);
 
-      // Try the iterator-based approach which is more reliable in nostr-tools v2
-      const sub = pool.subscribeMany(relays, [filter], {
+      // subscribeMany takes a single filter object, not an array
+      const sub = pool.subscribeMany(relays, filter, {
         onevent(event: NostrEvent) {
-          console.log('🔔 [Worker] onevent callback FIRED!', {
+          const receivedAt = Date.now();
+          console.log('🔔 [Worker] onevent callback FIRED! Real-time event received:', {
             kind: event.kind,
             id: event.id.slice(0, 12),
-            created_at: new Date(event.created_at * 1000).toISOString()
+            created_at: new Date(event.created_at * 1000).toISOString(),
+            receivedAt: new Date(receivedAt).toISOString(),
+            lagMs: receivedAt - (event.created_at * 1000)
           });
           // Call the handler asynchronously
           onEvent(event).catch((err) => {
@@ -357,8 +368,8 @@ export const nostrSync = {
         },
       });
 
-      // Optional: Slow polling as backup (every 60 seconds)
-      // Realtime subscription should handle most updates now
+      // Polling as backup (every 60 seconds)
+      // This ensures updates arrive eventually even if real-time subscription has issues
       const key = `${username}`;
       const reconcile = setInterval(() => {
         console.log('🔄 [Worker] Running periodic vault poll (backup) for', username);
@@ -1015,7 +1026,8 @@ export const nostrSync = {
 
     const broadcast = getVersionBroadcast();
 
-    const sub = pool.subscribeMany(relays, [filter], {
+    // subscribeMany takes a single filter object, not an array
+    const sub = pool.subscribeMany(relays, filter, {
       onevent: async (ev: any) => {
         try {
           console.log('📡 [startVaultVersionSubscription] New vault event:', ev.id.substring(0, 12));
