@@ -164,9 +164,11 @@ export class NostrPassButton {
           console.log('[NostrPassButton] All identities count:', allIdentities.length);
 
           if (currentIdentity) {
-            // Identity is still authorized - update status
+            // Update all identity fields to reflect latest vault data
             const wasAuthorized = this.currentUser.authorized;
+            this.currentUser.nickname = currentIdentity.nickname;
             this.currentUser.authorized = currentIdentity.isAuthorized;
+            this.currentUser.npub = currentIdentity.npub;
 
             console.log('[NostrPassButton] Authorization status changed:', {
               before: wasAuthorized,

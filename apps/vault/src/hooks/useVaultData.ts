@@ -1,8 +1,9 @@
-import { createSignal, createEffect, createMemo, onMount } from 'solid-js';
+import { createSignal, createEffect, createMemo, onMount, onCleanup } from 'solid-js';
 import { useAuth } from '../providers';
 import { vaultDataService } from '../services/vaultDataService';
 import type { VaultData } from '../workers/db';
 import type { Identity } from '@nostrpass/types';
+import { useVaultStore, initVaultStore } from '../stores/vaultStore';
 
 export interface UseVaultDataOptions {
   autoLoad?: boolean;
@@ -12,38 +13,32 @@ export interface UseVaultDataOptions {
 export function useVaultData(options: UseVaultDataOptions = {}) {
   const { autoLoad = true, forceRefresh = false } = options;
   const { user } = useAuth();
-  
-  const [vaultData, setVaultData] = createSignal<VaultData | null>(null);
-  const [isLoading, setIsLoading] = createSignal(false);
+
+  // Use the global vault store instead of local state
+  const store = useVaultStore();
+
   const [error, setError] = createSignal<string | null>(null);
 
   const username = createMemo(() => user()?.profile?.username);
 
-  const loadVaultData = async (force = false) => {
+  // Initialize store when username becomes available
+  createEffect(() => {
     const currentUsername = username();
-    if (!currentUsername) return;
+    if (currentUsername && autoLoad) {
+      console.log('🔄 [useVaultData] Initializing vault store for:', currentUsername);
+      initVaultStore(currentUsername);
+    }
+  });
 
-    setIsLoading(true);
+  const loadVaultData = async (force = false) => {
+    console.log('🔄 [useVaultData] loadVaultData called, delegating to store.reload()');
     setError(null);
-
     try {
-      console.log('🔄 Loading vault data for:', currentUsername, 'force:', force || forceRefresh);
-      const data = await vaultDataService.getVaultData(currentUsername, { 
-        forceRefresh: force || forceRefresh 
-      });
-      console.log('📋 Loaded vault data:', JSON.stringify({
-        identities: data?.identities?.map(id => ({
-          nickname: id.nickname,
-          appPermissions: id.appPermissions ? Object.keys(id.appPermissions) : []
-        }))
-      }, null, 2));
-      setVaultData(data);
+      await store.reload();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load vault data';
       setError(errorMessage);
       console.error('useVaultData: Failed to load vault data:', err);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -51,77 +46,24 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     updates: Partial<VaultData> | ((current: VaultData) => Partial<VaultData>),
     options: { syncToNostr?: boolean; updateTimestamp?: boolean } = {}
   ) => {
-    console.log('[useVaultData] 🚀 updateVaultData called with:', {
-      updatesType: typeof updates,
-      options,
-      username: username()
-    });
-
-    // Enable Nostr sync by default for vault updates
-    const finalOptions = { syncToNostr: true, ...options };
-    const currentUsername = username();
-    if (!currentUsername) throw new Error('No user logged in');
-
-    setIsLoading(true);
+    console.log('[useVaultData] 🚀 updateVaultData called, delegating to store.update()');
     setError(null);
 
     try {
-      // Get current vault data for the update
-      const currentData = vaultData();
-      if (!currentData) {
-        throw new Error('No current vault data available');
-      }
+      await store.update(updates, options);
 
-      // Apply updates to get the new data
-      const updatedData: VaultData = {
-        ...currentData,
-        ...(typeof updates === 'function' ? updates(currentData) : updates),
-        ...(options.updateTimestamp !== false ? { updatedAt: Date.now() } : {})
-      };
-
-      // Update in the vault data service
-      await vaultDataService.updateVaultData(currentUsername, updatedData, finalOptions);
-      
-      // Directly update the signal with the new data
-      setVaultData(updatedData);
-      
-      // Dispatch refresh event for this tab and other components
-      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
-        detail: { username: currentUsername, source: 'local-update' }
-      }));
-
-      // Notify parent window about vault data update
+      // Notify parent window about vault data update (for embassy integration)
       try {
-        console.log('[useVaultData] 📍 Current location:', window.location.href);
-        console.log('[useVaultData] 📍 Is in iframe:', window !== window.parent);
-
+        const currentUsername = username();
         const { getMessenger } = await import('../providers/MessengerProvider');
         const messenger = getMessenger();
 
-        console.log('[useVaultData] 🔍 Messenger status:', {
-          exists: !!messenger,
-          isInitialized: (messenger as any)?.isInitialized,
-          isParent: (messenger as any)?.isParent
-        });
-
-        if (messenger) {
-          console.log('[useVaultData] 📤 Sending VAULT_DATA_UPDATED to embassy', {
-            username: currentUsername,
-            timestamp: Date.now(),
-            updatedData: {
-              identitiesCount: updatedData.identities?.length,
-              activeIdentityByApp: updatedData.activeIdentityByApp
-            }
-          });
-
+        if (messenger && currentUsername) {
           messenger.send('VAULT_DATA_UPDATED', {
             username: currentUsername,
             timestamp: Date.now()
           });
-
-          console.log('[useVaultData] ✅ VAULT_DATA_UPDATED message sent successfully');
-        } else {
-          console.warn('[useVaultData] ⚠️ Messenger not available, cannot notify embassy');
+          console.log('[useVaultData] ✅ VAULT_DATA_UPDATED message sent to embassy');
         }
       } catch (err) {
         console.error('[useVaultData] ❌ Failed to notify parent of vault data update:', err);
@@ -131,13 +73,11 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
       setError(errorMessage);
       console.error('useVaultData: Failed to update vault data:', err);
       throw err;
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const getCurrentIdentity = createMemo(() => {
-    const data = vaultData();
+    const data = store.vaultData();
     if (!data?.identities) return null;
 
     const index = data.currentIdentityIndex ?? 0;
@@ -145,7 +85,7 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
   });
 
   const getIdentity = (index: number): Identity | null => {
-    const data = vaultData();
+    const data = store.vaultData();
     if (!data?.identities) return null;
     return data.identities[index] || null;
   };
@@ -157,7 +97,7 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     try {
       // Identity switching should be local to this tab only
       // Update the local vault data signal without broadcasting
-      const currentData = vaultData();
+      const currentData = store.vaultData();
       if (!currentData) {
         throw new Error('No current vault data available');
       }
@@ -331,12 +271,12 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
   });
 
   return {
-    // Data
-    vaultData,
+    // Data - use store signals
+    vaultData: store.vaultData,
     currentIdentity: getCurrentIdentity,
-    isLoading,
+    isLoading: store.isLoading,
     error,
-    
+
     // Actions
     loadVaultData,
     updateVaultData,
@@ -348,7 +288,7 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     syncToNostr,
     getVaultFromNostr,
     clearCache,
-    
+
     // Utilities
     username
   };
