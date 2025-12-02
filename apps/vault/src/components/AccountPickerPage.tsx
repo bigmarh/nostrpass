@@ -175,7 +175,7 @@ export const AccountPickerPage: Component = () => {
         const authRequestId = `simple-auth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
         // Set up listeners for the auth prompt response
-        const handleApproved = (e: Event) => {
+        const handleApproved = async (e: Event) => {
           const ce = e as CustomEvent;
           if (ce.detail.requestId === authRequestId) {
             cleanup();
@@ -188,7 +188,13 @@ export const AccountPickerPage: Component = () => {
               // Send message to parent window (embassy/NostrPassButton)
               send('ACCOUNT_PICKER_SELECTED', { requestId, identityIndex });
             }
+
+            // Wait for button to update before closing (auth prompt already waited, this is extra safety)
+            console.log('[AccountPickerPage] Waiting for button to process authorization...');
+            await new Promise(resolve => setTimeout(resolve, 100));
+
             // Close the modal
+            console.log('[AccountPickerPage] Closing vault after authorization');
             send('HIDE_VAULT');
           }
         };
