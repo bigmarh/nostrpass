@@ -4,6 +4,8 @@ import { useAuth } from '../providers/AuthProvider';
 import { PermissionService } from '../services/permissionService';
 import { vaultDataService } from '../services/vaultDataService';
 import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
+import { getActiveIdentity } from '../utils/activeIdentityManager';
+import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 
 export const PermissionsDashboard: Component = () => {
   const { user } = useAuth();
@@ -18,6 +20,22 @@ export const PermissionsDashboard: Component = () => {
   const [sortBy, setSortBy] = createSignal<'name' | 'granted' | 'lastUsed'>('lastUsed');
   const [sortOrder, setSortOrder] = createSignal<'asc' | 'desc'>('desc');
   const permissionService = PermissionService.getInstance();
+
+  // Helper to get app origin from appId (sanitized domain)
+  const getAppOrigin = (appId: string): string => {
+    try {
+      // Try to reconstruct origin from sanitized domain
+      const domain = desanitizeDomain(appId);
+      // Default to https, but check if it's localhost
+      if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
+        return `http://${domain}`;
+      }
+      return `https://${domain}`;
+    } catch {
+      // Fallback: use appId as-is (it might already be an origin)
+      return appId.startsWith('http') ? appId : `https://${appId}`;
+    }
+  };
 
   onMount(async () => {
     await loadPermissions();
@@ -76,7 +94,9 @@ export const PermissionsDashboard: Component = () => {
         return;
       }
       // Load only this app's permissions for the active identity
-      const identityIndex = (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+      // Get active identity from localStorage (per-browser, not synced)
+      const appOrigin = getAppOrigin(appId);
+      const identityIndex = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
       const appPerm = await permissionService.getAppPermissions(
         currentUser.profile.username,
         appId,
@@ -139,7 +159,9 @@ export const PermissionsDashboard: Component = () => {
         };
       }
 
-      const identityIndex = (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+      // Get active identity from localStorage (per-browser, not synced)
+      const appOrigin = getAppOrigin(appId);
+      const identityIndex = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
       await permissionService.saveAppPermissions(
         currentUser.profile.username,
         appId,
@@ -233,7 +255,9 @@ export const PermissionsDashboard: Component = () => {
                 financial: action
               }
             };
-            const identityIndex = (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+            // Get active identity from localStorage (per-browser, not synced)
+            const appOrigin = getAppOrigin(appId);
+            const identityIndex = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
             await permissionService.saveAppPermissions(
               currentUser.profile.username,
               appId,

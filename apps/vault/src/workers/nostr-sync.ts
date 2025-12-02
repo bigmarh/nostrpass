@@ -143,6 +143,17 @@ async function pollOnceAndApply(params: {
             skipVersionIncrement: true,
             options: { syncToNostr: false } // Don't sync back - we just received this from Nostr!
           });
+
+          // Update worker session cache with new vault data
+          const sessionManager = getSessionStateManager();
+          const session = sessionManager.getAuthState(username);
+          if (session) {
+            console.log('🔄 [Worker POLL] Updating session cache with new vault data');
+            (session as any).vaultData = remote;
+            (session as any).vaultVersion = remote.version || 0;
+            (session as any).identityCount = remote.identities?.length || 0;
+          }
+
           break;
         } else {
           console.log('⏭️ [Worker Poll] Skipping older/same vault (local is newer or equal)');
@@ -306,7 +317,18 @@ export const nostrSync = {
                 skipVersionIncrement: true, // Don't increment version for Nostr downloads
                 options: { syncToNostr: false } // Don't sync back - we just received this from Nostr!
               });
-              console.log('✅ [Worker SUBSCRIPTION] Vault synced successfully from Nostr');
+
+              // Update worker session cache with new vault data
+              const sessionManager = getSessionStateManager();
+              const session = sessionManager.getAuthState(username);
+              if (session) {
+                console.log('🔄 [Worker SUBSCRIPTION] Updating session cache with new vault data');
+                (session as any).vaultData = remote;
+                (session as any).vaultVersion = remote.version || 0;
+                (session as any).identityCount = remote.identities?.length || 0;
+              }
+
+              console.log('✅ [Worker SUBSCRIPTION] Vault synced successfully from Nostr and session cache updated');
             } else {
               console.log('ℹ️ [Worker] Local vault is newer or equal, skipping update');
             }
