@@ -1094,4 +1094,92 @@ export const nostrSync = {
       timestamp: vaultData.updatedAt || Date.now(),
     };
   },
+
+  /**
+   * Get vault version history from Nostr relays
+   * Returns the last N vault events with metadata
+   *
+   * @param params - Object containing username and optional limit (default 5)
+   * @returns Array of vault versions with metadata
+   */
+  getVaultVersionHistory: async (params: {
+    username: string;
+    limit?: number;
+  }): Promise<Array<{
+    eventId: string;
+    timestamp: number;
+    version: number;
+    identitiesCount: number;
+    updatedAt: number;
+  }>> => {
+    await ensureCryptoReady();
+    const { username, limit = 5 } = params;
+
+    // Get session for decryption
+    const sessionManager = getSessionStateManager();
+    const session = sessionManager.getSession(username);
+    if (!session?.storagePrivateKey) {
+      throw new Error('Storage key not available. Unlock required.');
+    }
+
+    const vault = await vaultDB.getVault(username);
+    if (!vault) throw new Error('Vault not found');
+
+    const pubkey = vault.storagePublicKey || vault.publicKey;
+    const storagePriv = session.storagePrivateKey;
+    const storagePub = session.storagePublicKey || pubkey;
+    const env = getEnvironment();
+
+    // Query for vault events
+    const pool = new SimplePool();
+    const dTag = `nostrpass.com_vault_${pubkey}_${env}`;
+    const filter: Filter = {
+      kinds: [30078],
+      authors: [pubkey],
+      '#d': [dTag],
+      limit: limit
+    };
+
+    const relays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080',
+    ];
+
+    console.log('📜 [getVaultVersionHistory] Querying relays for vault history...');
+    const events = await pool.querySync(relays, filter);
+    pool.close(relays);
+
+    if (!events || events.length === 0) {
+      console.log('📜 [getVaultVersionHistory] No vault versions found');
+      return [];
+    }
+
+    // Sort newest first
+    events.sort((a: any, b: any) => (b.created_at || 0) - (a.created_at || 0));
+
+    // Decrypt and extract metadata from each version
+    const versions = [];
+    for (const ev of events.slice(0, limit)) {
+      try {
+        const plaintext = await nip04DecryptJS(storagePriv, storagePub, ev.content);
+        const vaultData = JSON.parse(plaintext);
+
+        versions.push({
+          eventId: ev.id,
+          timestamp: ev.created_at * 1000, // Convert to milliseconds
+          version: vaultData.version || 0,
+          identitiesCount: vaultData.identities?.length || 0,
+          updatedAt: vaultData.updatedAt || (ev.created_at * 1000),
+        });
+      } catch (err) {
+        console.warn('⚠️ [getVaultVersionHistory] Failed to decrypt vault event:', ev.id, err);
+      }
+    }
+
+    console.log(`📜 [getVaultVersionHistory] Found ${versions.length} vault versions`);
+    return versions;
+  },
 };

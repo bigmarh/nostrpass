@@ -1,7 +1,8 @@
-import { Component, Show, JSX, For, createSignal } from 'solid-js';
+import { Component, Show, JSX, For, createSignal, createResource } from 'solid-js';
 import { nip19 } from 'nostr-tools';
 import RelaySettings from './RelaySettings';
 import type { VaultData } from '../workers/db';
+import { getCryptoWorker } from '../services/cryptoWorkerSingleton';
 
 interface GlobalSettingsProps {
   username: string;
@@ -23,6 +24,27 @@ interface GlobalSettingsProps {
 const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
   const [showRestoreConfirm, setShowRestoreConfirm] = createSignal(false);
   const [identityToRestore, setIdentityToRestore] = createSignal<{index: number, nickname: string} | null>(null);
+  const [loadingVersions, setLoadingVersions] = createSignal(false);
+
+  // Fetch vault version history
+  const [vaultVersions, { refetch: refetchVersions }] = createResource(
+    () => props.isOpen && props.username,
+    async (username) => {
+      if (!username) return [];
+      try {
+        setLoadingVersions(true);
+        const worker = getCryptoWorker();
+        if (!worker) return [];
+        const versions = await worker.getVaultVersionHistory({ username, limit: 5 });
+        return versions;
+      } catch (err) {
+        console.error('Failed to fetch vault versions:', err);
+        return [];
+      } finally {
+        setLoadingVersions(false);
+      }
+    }
+  );
 
   const archivedIdentities = () => {
     if (!props.vaultData?.identities) return [];
@@ -118,6 +140,47 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
             {/* Relay Settings */}
             <div>
               <RelaySettings />
+            </div>
+
+            {/* Vault Version History */}
+            <div>
+              <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Vault Version History</h3>
+              <Show when={loadingVersions()}>
+                <div class="flex items-center justify-center p-4">
+                  <div class="text-sm text-gray-500 dark:text-gray-400">Loading versions...</div>
+                </div>
+              </Show>
+              <Show when={!loadingVersions() && vaultVersions()?.length === 0}>
+                <div class="text-sm text-gray-500 dark:text-gray-400 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  No version history available yet
+                </div>
+              </Show>
+              <Show when={!loadingVersions() && vaultVersions()?.length > 0}>
+                <div class="space-y-2">
+                  <For each={vaultVersions()}>
+                    {(version) => (
+                      <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                        <div class="flex items-center justify-between">
+                          <div>
+                            <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                              Version {version.version}
+                            </div>
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              {new Date(version.timestamp).toLocaleString()}
+                            </div>
+                          </div>
+                          <div class="text-sm text-gray-600 dark:text-gray-400">
+                            {version.identitiesCount} {version.identitiesCount === 1 ? 'identity' : 'identities'}
+                          </div>
+                        </div>
+                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-2 font-mono truncate">
+                          {version.eventId.substring(0, 16)}...
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </div>
 
             {/* Archived Identities */}
