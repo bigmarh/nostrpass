@@ -753,13 +753,11 @@ export const authHandlers: MessageHandler[] = [
           });
         }
 
-        // Import logout function dynamically to avoid circular dependencies
-        const { useAuth } = await import('../providers');
-        const auth = useAuth();
-        if (auth && auth.logout) {
-          console.log('[LOGOUT] Calling AuthProvider logout');
-          await auth.logout();
-        }
+        // Broadcast logout event to notify UI components
+        console.log('[LOGOUT] Broadcasting logout event');
+        window.dispatchEvent(new CustomEvent('nostrpass:logout', {
+          detail: { username: currentUser.profile.username }
+        }));
 
         console.log('[LOGOUT] Logout completed successfully');
         return { success: true };
