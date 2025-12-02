@@ -68,12 +68,13 @@ export class VaultDataService {
    * Update vault data for a user
    */
   async updateVaultData(
-    username: string, 
+    username: string,
     updates: Partial<VaultData> | VaultData | ((current: VaultData) => Partial<VaultData>),
     options: UpdateVaultDataOptions = {}
   ): Promise<void> {
-    const { syncToNostr = false, updateTimestamp = true } = options;
-    
+    // STREAMLINED: Always sync to Nostr (removed flag, always true)
+    const { updateTimestamp = true } = options;
+
     const cryptoWorker = getCryptoWorker();
     if (!cryptoWorker) {
       throw new Error('Crypto worker not ready');
@@ -113,8 +114,12 @@ export class VaultDataService {
         };
       }
 
-      // Update in crypto worker
-      await cryptoWorker.updateVaultData({ username, vaultData: updatedData });
+      // Update in crypto worker - ALWAYS syncs to Nostr (streamlined approach)
+      await cryptoWorker.updateVaultData({
+        username,
+        vaultData: updatedData,
+        options: { syncToNostr: true }  // Always true!
+      });
 
       // Update cache
       this.cache.set(username, { data: updatedData, timestamp: Date.now() });

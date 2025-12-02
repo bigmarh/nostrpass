@@ -588,13 +588,13 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         }
       });
 
-      // Save and sync to Nostr
+      // Save (automatically syncs to Nostr)
       await props.onUpdateVaultData({
         identities: updatedIdentities,
         activeIdentityByApp: updatedActiveIdentityByApp
-      }, { syncToNostr: true });
+      });
 
-      console.log('✅ [Archive Identity] Identity archived and synced to Nostr');
+      console.log('✅ [Archive Identity] Identity archived and auto-synced to Nostr');
       setShowSettingsPanel(false);
       setIdentityToArchive(null);
     } catch (e) {
@@ -647,16 +647,12 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         index: nextIndex,
         createdAt: Date.now()
       } as any;
-      // Save and sync to Nostr
-      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: true });
-      console.log('✅ [Add Identity] Saved locally and synced to Nostr');
+      // Save (automatically syncs to Nostr via full vault snapshot)
+      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }));
+      console.log('✅ [Add Identity] Saved and auto-synced to Nostr');
 
-      // Publish identity meta as PRE (non-blocking)
-      try {
-        await props.cryptoWorker.publishIdentityMeta({ username: props.username, nickname: identity.nickname, path: identity.path });
-      } catch (e) {
-        console.warn('⚠️ [Add Identity] Failed to publish identity PRE:', e);
-      }
+      // Note: PRE events removed in streamlined sync architecture
+      // Full vault snapshot is published automatically above
 
       setShowAddIdentityModal(false);
       setNewIdentityNickname('');

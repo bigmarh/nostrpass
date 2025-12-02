@@ -87,6 +87,11 @@ export const authHandlers: MessageHandler[] = [
       // Now check permissions (may trigger async prompt)
       const permissionResult = await deps.checkPermission('getPublicKey', origin, undefined, requestedIndex);
 
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult.allowed) {
         // Request permission with async wait for user response
         try {
@@ -200,6 +205,19 @@ export const authHandlers: MessageHandler[] = [
         username: currentUser.profile.username,
         event: data.event,
         identityIndex
+      });
+
+      showSuccessToast('Event Signed', `Event signed for ${data?.appName || 'app'}`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Event Signed',
+        details: `Kind ${eventKind} event signed for ${data?.appName || 'app'} (${origin})`,
+        appName: data?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
       });
 
       // NIP-07: signEvent() returns the signed event object directly
@@ -341,6 +359,12 @@ export const authHandlers: MessageHandler[] = [
 
       // Now check permissions (may trigger async prompt)
       const permissionResult3 = await deps.checkPermission('nip04', origin, undefined, identityIndex);
+
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult3.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult3.allowed) {
         // Request permission with async wait for user response
         try {
@@ -371,7 +395,19 @@ export const authHandlers: MessageHandler[] = [
         identityIndex
       });
 
-      showSuccessToast('Message Encrypted', `Message encrypted for ${data?.appName || 'app'}`);
+      showSuccessToast('Message Encrypted', `Message encrypted for ${(data as any)?.appName || 'app'}`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Message Encrypted',
+        details: `NIP-04 message encrypted for ${(data as any)?.appName || 'app'} (${origin})`,
+        appName: (data as any)?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
+      });
+
       return encrypted;
     }
   },
@@ -408,6 +444,12 @@ export const authHandlers: MessageHandler[] = [
 
       // Now check permissions (may trigger async prompt)
       const permissionResult4 = await deps.checkPermission('nip04', origin, undefined, identityIndex);
+
+      // Check if permission is explicitly DENIED - reject immediately without prompt
+      if (permissionResult4.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
       if (!permissionResult4.allowed) {
         // Request permission with async wait for user response
         try {
@@ -436,6 +478,19 @@ export const authHandlers: MessageHandler[] = [
         ciphertext: data.ciphertext,
         senderPubkey: data.senderPubkey,
         identityIndex
+      });
+
+      showSuccessToast('Message Decrypted', `Message decrypted from ${(data as any)?.appName || 'app'}`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Message Decrypted',
+        details: `NIP-04 message decrypted from ${(data as any)?.appName || 'app'} (${origin})`,
+        appName: (data as any)?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
       });
 
       return decrypted;
@@ -537,7 +592,7 @@ export const authHandlers: MessageHandler[] = [
       }
 
       try {
-        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+        const vaultData = await cryptoWorker?.getVaultDataFromSession({ username: currentUser.profile?.username });
 
         if (!vaultData?.identities || vaultData.identities.length === 0) {
           return { identities: [], activeIdentityIndex: null };
@@ -554,7 +609,7 @@ export const authHandlers: MessageHandler[] = [
 
         const activeIdentityIndex = vaultData.activeIdentityByApp?.[appKey] ?? null;
 
-        // Return only identities that are authorized for this app
+        // Return all identities with their authorization status
         const identities = vaultData.identities
           .map((identity: any, index: number) => ({
             index,
@@ -564,8 +619,7 @@ export const authHandlers: MessageHandler[] = [
             createdAt: identity.createdAt,
             isActive: activeIdentityIndex === index,
             isAuthorized: !!(identity.appPermissions && identity.appPermissions[appKey])
-          }))
-          .filter((identity: any) => identity.isAuthorized); // Only return authorized identities
+          }));
 
         return {
           identities,

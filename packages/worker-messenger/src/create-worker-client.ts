@@ -21,6 +21,11 @@ export function createWorkerClient<T extends Record<string, WorkerMethod>>(
 
   return new Proxy({} as ExtractMethods<T>, {
     get: (_, method: string) => {
+      // Special case: generic request method
+      if (method === 'request') {
+        return (methodName: string, params?: unknown) => messenger.call(methodName, params);
+      }
+      // Normal case: direct method calls
       return (params: unknown) => messenger.call(method, params);
     },
   });

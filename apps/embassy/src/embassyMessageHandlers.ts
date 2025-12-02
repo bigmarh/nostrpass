@@ -32,7 +32,7 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
                 if (data.plaintext) queryParams.plaintext = data.plaintext;
                 if (data.ciphertext) queryParams.ciphertext = data.ciphertext;
 
-                (embassyInstance as any).openPage('permission', { queryParams });
+                (embassyInstance as any).openPage('permission', { size: 'tall', queryParams });
                 console.log('✅ Permission page opened successfully');
                 return { acknowledged: true };
             } catch (error) {
@@ -133,6 +133,8 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
             console.log('✅ [Embassy] Permission granted signal received from vault iframe', data);
             // Dispatch window event so permission manager can resolve the promise
             window.dispatchEvent(new CustomEvent('permission-granted', { detail: data }));
+            // Notify embassy instance to resolve waiting permission promises
+            (embassyInstance as any)?.notifyPermissionGranted?.();
         },
         PERMISSION_DENIED: (data: any) => {
             console.log('❌ [Embassy] Permission denied signal received from vault iframe', data);

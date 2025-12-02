@@ -1,7 +1,8 @@
-import { Component, Show, JSX, For, createSignal } from 'solid-js';
+import { Component, Show, JSX, For, createSignal, createResource, onCleanup, createEffect } from 'solid-js';
 import { nip19 } from 'nostr-tools';
 import RelaySettings from './RelaySettings';
 import type { VaultData } from '../workers/db';
+import { getCryptoWorker } from '../services/cryptoWorkerSingleton';
 
 interface GlobalSettingsProps {
   username: string;
@@ -23,6 +24,79 @@ interface GlobalSettingsProps {
 const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
   const [showRestoreConfirm, setShowRestoreConfirm] = createSignal(false);
   const [identityToRestore, setIdentityToRestore] = createSignal<{index: number, nickname: string} | null>(null);
+  const [loadingVersions, setLoadingVersions] = createSignal(false);
+  const [expandedVersionId, setExpandedVersionId] = createSignal<string | null>(null);
+  const [liveVersions, setLiveVersions] = createSignal<any[]>([]);
+
+  // Fetch initial vault version history
+  const [vaultVersions, { refetch: refetchVersions }] = createResource(
+    () => props.isOpen && props.username,
+    async (username) => {
+      if (!username) return [];
+      try {
+        setLoadingVersions(true);
+        const worker = getCryptoWorker();
+        if (!worker) return [];
+        const versions = await worker.getVaultVersionHistory({ username, limit: 5 });
+        setLiveVersions(versions); // Initialize live versions
+        return versions;
+      } catch (err) {
+        console.error('Failed to fetch vault versions:', err);
+        return [];
+      } finally {
+        setLoadingVersions(false);
+      }
+    }
+  );
+
+  // Real-time subscription for new vault versions (via BroadcastChannel)
+  createEffect(() => {
+    if (!props.isOpen || !props.username) return;
+
+    console.log('📡 [GlobalSettings] Starting vault version subscription...');
+
+    const worker = getCryptoWorker();
+    if (!worker) return;
+
+    // Start worker subscription
+    worker.startVaultVersionSubscription({
+      username: props.username,
+    }).catch(err => {
+      console.error('Failed to start vault version subscription:', err);
+    });
+
+    // Listen for broadcasts from worker
+    const broadcast = new BroadcastChannel('nostrpass-vault-versions');
+    broadcast.onmessage = (event) => {
+      if (event.data.type === 'NEW_VAULT_VERSION') {
+        const newVersion = event.data.data;
+        console.log('📡 [GlobalSettings] Received new version broadcast:', newVersion.version);
+
+        // Only add if it's for this user
+        if (newVersion.username === props.username) {
+          setLiveVersions((prev) => {
+            // Check if this version already exists
+            if (prev.some(v => v.eventId === newVersion.eventId)) {
+              return prev;
+            }
+            // Add new version and sort by timestamp (newest first)
+            const updated = [newVersion, ...prev];
+            updated.sort((a, b) => b.timestamp - a.timestamp);
+            // Keep only last 10 versions
+            return updated.slice(0, 10);
+          });
+        }
+      }
+    };
+
+    onCleanup(() => {
+      console.log('📡 [GlobalSettings] Cleaning up vault version subscription');
+      broadcast.close();
+      worker.stopVaultVersionSubscription({ username: props.username }).catch(err => {
+        console.error('Failed to stop vault version subscription:', err);
+      });
+    });
+  });
 
   const archivedIdentities = () => {
     if (!props.vaultData?.identities) return [];
@@ -57,9 +131,9 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
 
       await props.onUpdateVaultData({
         identities: updatedIdentities
-      }, { syncToNostr: true });
+      });
 
-      console.log('✅ [Restore Identity] Identity restored');
+      console.log('✅ [Restore Identity] Identity restored and auto-synced');
       setIdentityToRestore(null);
     } catch (e) {
       console.error('Failed to restore identity:', e);
@@ -118,6 +192,69 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
             {/* Relay Settings */}
             <div>
               <RelaySettings />
+            </div>
+
+            {/* Vault Version History */}
+            <div>
+              <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Vault Version History</h3>
+              <Show when={loadingVersions()}>
+                <div class="flex items-center justify-center p-4">
+                  <div class="text-sm text-gray-500 dark:text-gray-400">Loading versions...</div>
+                </div>
+              </Show>
+              <Show when={!loadingVersions() && liveVersions().length === 0}>
+                <div class="text-sm text-gray-500 dark:text-gray-400 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  No version history available yet
+                </div>
+              </Show>
+              <Show when={!loadingVersions() && liveVersions().length > 0}>
+                <div class="space-y-2">
+                  <For each={liveVersions()}>
+                    {(version) => {
+                      const isExpanded = () => expandedVersionId() === version.eventId;
+                      return (
+                        <div class="bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                          <button
+                            class="w-full p-3 text-left hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                            onClick={() => setExpandedVersionId(isExpanded() ? null : version.eventId)}
+                          >
+                            <div class="flex items-center justify-between">
+                              <div>
+                                <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  Version {version.version}
+                                </div>
+                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  {new Date(version.timestamp).toLocaleString()}
+                                </div>
+                              </div>
+                              <div class="flex items-center gap-2">
+                                <div class="text-sm text-gray-600 dark:text-gray-400">
+                                  {version.identitiesCount} {version.identitiesCount === 1 ? 'identity' : 'identities'}
+                                </div>
+                                <div class="text-gray-500 dark:text-gray-400">
+                                  {isExpanded() ? '▼' : '▶'}
+                                </div>
+                              </div>
+                            </div>
+                            <div class="text-xs text-gray-400 dark:text-gray-500 mt-2 font-mono truncate">
+                              {version.eventId.substring(0, 16)}...
+                            </div>
+                          </button>
+                          <Show when={isExpanded()}>
+                            <div class="px-3 pb-3">
+                              <div class="mt-2 p-3 bg-gray-900 dark:bg-gray-950 rounded border border-gray-700 overflow-x-auto">
+                                <pre class="text-xs text-gray-300 font-mono whitespace-pre-wrap break-words">
+                                  {JSON.stringify(version.vaultData, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+                          </Show>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Show>
             </div>
 
             {/* Archived Identities */}

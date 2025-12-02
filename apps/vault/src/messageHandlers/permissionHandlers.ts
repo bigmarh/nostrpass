@@ -14,20 +14,25 @@ export const permissionHandlers: MessageHandler[] = [
       const origin = context?.origin || 'unknown';
       const { action, eventKind, identityIndex } = data;
 
-      // This would trigger the permission UI prompt
-      // For now, just check the permission
-      // Validate requested identity matches authorized identity for this origin
+      // CHECK_PERMISSION is a lightweight preflight check
+      // It should NOT validate identity authorization (that's for the actual operation handlers)
+      // It only checks: 1) Is vault locked? 2) Does this need permission prompt?
+
       if (identityIndex === undefined || identityIndex === null) {
         throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
       }
-      const authorizedIndex = await deps.getAppIdentityIndex(origin);
-      if (identityIndex !== authorizedIndex) {
-        return { granted: false, action, origin };
-      }
+
+      // Get lock status directly from worker
+      const cryptoWorker = deps.getCryptoWorker();
+      const workerAuthState = await cryptoWorker.request('getAuthState', { username: currentUser.username });
+      const isLocked = workerAuthState.isLocked;
+
+      // Check permission level (don't validate identity authorization here)
       const permissionResult = await deps.checkPermission(action, origin, eventKind, identityIndex);
       const granted = !!permissionResult?.allowed || permissionResult?.sessionGranted === true;
       const needsPrompt = permissionResult?.level === 'ASK_EVERYTIME';
-      const isLocked = deps.isVaultLocked();
+
+      console.log('[CHECK_PERMISSION] Result:', { granted, needsPrompt, isLocked, action, origin, identityIndex });
       return {
         granted,
         needsPrompt,

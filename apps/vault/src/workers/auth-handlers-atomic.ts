@@ -3,10 +3,48 @@
  *
  * Simple, atomic auth operations using SessionStateManager.
  * Replaces the complex multi-source auth logic.
+ *
+ * Broadcasts AUTH_STATE_CHANGED event after state changes.
  */
 
 import { getSessionStateManager, type CompleteSessionState } from './session-state-manager';
 import { cryptoPrimitives } from './crypto-primitives';
+
+/**
+ * Broadcast auth state change to all tabs via BroadcastChannel
+ * Note: In SharedWorker context, we can't use self.postMessage
+ */
+function broadcastAuthStateChanged(state: CompleteSessionState | null) {
+  const message = {
+    type: 'AUTH_STATE_CHANGED',
+    state: state ? {
+      isAuthenticated: state.isAuthenticated,
+      isLocked: !state.isUnlocked,
+      user: state.username ? {
+        username: state.username,
+        publicKey: state.publicKey,
+        storagePublicKey: state.storagePublicKey
+      } : null,
+      sessionId: state.sessionId,
+      vaultVersion: state.vaultVersion,
+      identityCount: state.identityCount
+    } : {
+      isAuthenticated: false,
+      isLocked: true,
+      user: null,
+      sessionId: null
+    }
+  };
+
+  // Send to all tabs via BroadcastChannel (works in both Worker types)
+  try {
+    const channel = new BroadcastChannel('nostrpass-vault');
+    channel.postMessage(message);
+    channel.close();
+  } catch (error) {
+    console.error('[auth-handlers-atomic] Failed to broadcast:', error);
+  }
+}
 
 /**
  * Get current auth state
@@ -14,6 +52,12 @@ import { cryptoPrimitives } from './crypto-primitives';
  */
 export async function handleGetAuthState(params: { username?: string }) {
   const manager = getSessionStateManager();
+
+  // Try to restore session from IndexedDB if no in-memory session exists
+  if (!manager.getAuthState(params.username)) {
+    await manager.restoreFromDB();
+  }
+
   const state = manager.getAuthState(params.username);
 
   if (!state) {
@@ -60,6 +104,9 @@ export async function handleAtomicLogin(params: {
     environment: params.environment
   });
 
+  // Broadcast state change
+  broadcastAuthStateChanged(session);
+
   return {
     success: true,
     session: {
@@ -87,6 +134,28 @@ export async function handleAtomicUnlock(params: {
     cryptoPrimitives
   });
 
+  // Restart Nostr subscription now that we have storage keys for decryption
+  try {
+    const { nostrSync } = await import('./nostr-sync');
+    const defaultRelays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080',
+    ];
+    await nostrSync.startNostrSubscription({
+      username: params.username,
+      relays: session.relays || defaultRelays
+    });
+    console.log('[handleAtomicUnlock] Nostr subscription restarted after unlock');
+  } catch (error) {
+    console.warn('[handleAtomicUnlock] Failed to restart Nostr subscription:', error);
+  }
+
+  // Broadcast state change
+  broadcastAuthStateChanged(session);
+
   return {
     success: true,
     session: {
@@ -107,6 +176,9 @@ export async function handleAtomicLogout(params: { username: string }) {
   const manager = getSessionStateManager();
   await manager.logout(params.username);
 
+  // Broadcast state change (logged out)
+  broadcastAuthStateChanged(null);
+
   return {
     success: true
   };
@@ -119,6 +191,19 @@ export async function handleLockSession(params: { username: string }) {
   const manager = getSessionStateManager();
   manager.lockSession(params.username);
 
+  // Stop Nostr subscription since we can't decrypt without storage keys
+  try {
+    const { nostrSync } = await import('./nostr-sync');
+    await nostrSync.stopNostrSubscription({ username: params.username });
+    console.log('[handleLockSession] Nostr subscription stopped on lock');
+  } catch (error) {
+    console.warn('[handleLockSession] Failed to stop Nostr subscription:', error);
+  }
+
+  // Broadcast state change (locked)
+  const state = manager.getAuthState(params.username);
+  broadcastAuthStateChanged(state);
+
   return {
     success: true
   };
@@ -129,13 +214,14 @@ export async function handleLockSession(params: { username: string }) {
  */
 export async function handleGetVaultDataFromSession(params: { username: string }) {
   const manager = getSessionStateManager();
-  const state = manager.getAuthState(params.username);
+  // Access full session directly (getAuthState doesn't include vaultData)
+  const session = (manager as any).sessions.get(params.username);
 
-  if (!state || !state.vaultData) {
+  if (!session || !session.vaultData) {
     return null;
   }
 
-  return state.vaultData;
+  return session.vaultData;
 }
 
 /**

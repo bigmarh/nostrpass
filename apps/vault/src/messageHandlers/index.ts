@@ -112,9 +112,13 @@ export function setupMessageHandlers(
   });
 
   // Register permission handlers
+  console.error('🟣 Registering permission handlers:', permissionHandlers.map(h => h.route));
   permissionHandlers.forEach(({ route, handler }) => {
     messenger.route(route, {
-      handler: (data: any, context: any) => handler(data, context, dependencies)
+      handler: (data: any, context: any) => {
+        console.error(`🟣 Permission handler called for route: ${route}`);
+        return handler(data, context, dependencies);
+      }
     });
   });
 

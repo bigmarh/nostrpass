@@ -84,6 +84,11 @@ export class NostrPassButton {
 
     // Listen for vault data changes to refresh the button
     this.setupEventListeners();
+
+    // Try to restore session on page load
+    this.restoreSession().catch(error => {
+      console.warn('[NostrPassButton] Failed to restore session on init:', error);
+    });
   }
 
   private setupEventListeners() {
@@ -159,9 +164,11 @@ export class NostrPassButton {
           console.log('[NostrPassButton] All identities count:', allIdentities.length);
 
           if (currentIdentity) {
-            // Identity is still authorized - update status
+            // Update all identity fields to reflect latest vault data
             const wasAuthorized = this.currentUser.authorized;
+            this.currentUser.nickname = currentIdentity.nickname;
             this.currentUser.authorized = currentIdentity.isAuthorized;
+            this.currentUser.npub = currentIdentity.npub;
 
             console.log('[NostrPassButton] Authorization status changed:', {
               before: wasAuthorized,
@@ -796,13 +803,16 @@ export class NostrPassButton {
       console.warn('Failed to fetch all identities:', error);
     }
 
-    // Check if current user is authorized
-    const hasAuthorizedIdentity = user.authorized || allIdentities.some((id: any) => id.isAuthorized);
+    // Filter to only show authorized identities for this app
+    const authorizedIdentities = allIdentities.filter((id: any) => id.isAuthorized);
 
-    // Build identities list HTML
+    // Check if current user is authorized
+    const hasAuthorizedIdentity = user.authorized || authorizedIdentities.length > 0;
+
+    // Build identities list HTML (only show authorized identities)
     let identitiesHTML = '';
-    if (allIdentities.length > 1) {
-      const showSearch = allIdentities.length > 4;
+    if (authorizedIdentities.length > 1) {
+      const showSearch = authorizedIdentities.length > 4;
       identitiesHTML = `
         <div class="nostrpass-dropdown-divider"></div>
         <div class="nostrpass-dropdown-section">
@@ -811,7 +821,7 @@ export class NostrPassButton {
           </div>
           ${showSearch ? '<input type="text" class="nostrpass-identity-search" placeholder="Search identities..." data-search-identities />' : ''}
           <div class="nostrpass-identity-list" data-identity-container>
-            ${allIdentities.map((identity: any) => {
+            ${authorizedIdentities.map((identity: any) => {
               const isCurrentIdentity = identity.index === user.identityIndex;
               const idInitials = identity.nickname ? this.getInitialsFromName(identity.nickname) : `I${identity.index + 1}`;
               const rawIdName = identity.nickname || `Identity ${identity.index + 1}`;
@@ -828,7 +838,6 @@ export class NostrPassButton {
                     ${identity.npub ? `<div class="nostrpass-identity-npub">${identity.npub.slice(0, 12)}...</div>` : ''}
                   </div>
                   ${isCurrentIdentity ? `<svg class="nostrpass-identity-check" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.333 4L6 11.333 2.667 8" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>` : ''}
-                  ${!identity.isAuthorized && !isCurrentIdentity ? `<span class="nostrpass-identity-badge">Not authorized</span>` : ''}
                 </button>
               `;
             }).join('')}
@@ -1307,7 +1316,7 @@ export class NostrPassButton {
 
   private saveSession(user: UserInfo) {
     try {
-      sessionStorage.setItem('nostrpass_session', JSON.stringify(user));
+      localStorage.setItem('nostrpass_session', JSON.stringify(user));
     } catch (e) {
       console.warn('Failed to save NostrPass session:', e);
     }
@@ -1315,7 +1324,7 @@ export class NostrPassButton {
 
   public clearSession() {
     try {
-      sessionStorage.removeItem('nostrpass_session');
+      localStorage.removeItem('nostrpass_session');
       this.currentUser = null;
       this.isCheckingAuth = false; // Reset checking auth state
       this.render();

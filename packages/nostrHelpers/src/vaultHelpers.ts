@@ -45,7 +45,6 @@ export interface VaultData {
 
   // Security
   passwordSalt?: string; // Salt for password key derivation
-  passwordVerifier?: string; // Encrypted known string to verify password
 }
 
 // Alias for backward compatibility
@@ -191,26 +190,32 @@ export async function getLoginObj(
 }
 
 /**
- * Save VaultObj to Nostr using storage key (PASSWORD-ENCRYPTED)
- * This implements double encryption: PIN-encrypted xpriv → Password-encrypted VaultObj
+ * Save VaultObj to Nostr using storage key (STORAGE-KEY-ENCRYPTED via NIP-04)
+ * This implements layered encryption:
+ * - LoginObj: password-encrypted (contains PIN-encrypted storage keys)
+ * - VaultObj: storage-key-encrypted (contains PIN-encrypted xpriv)
+ *
+ * Benefits:
+ * - Realtime updates without password (storage keys in memory after unlock)
+ * - Password only needed for initial login (decrypt LoginObj → get storage keys)
+ * - Checks and balances: PIN → xpriv → storage keys (verify correctness)
  */
 export async function saveVaultObj(
   vaultObj: VaultObj,
   storagePublicKey: string,
   storagePrivateKey: string,
-  relays: string[],
-  passwordKey: string  // Password key for encrypting the entire VaultObj
+  relays: string[]
 ): Promise<string[]> {
   try {
     const vaultJson = JSON.stringify(vaultObj);
-    
-    // CRITICAL: Encrypt entire VaultObj with password
-    // This protects sensitive data (identities, permissions, recovery) from public relays
-    // Uses AES-256-GCM encryption with password-derived key
+
+    // CRITICAL: Encrypt entire VaultObj with STORAGE KEY (NIP-04)
+    // This allows realtime updates without password (storage keys already in memory)
+    // Uses NIP-04 encryption: encrypt(storagePrivateKey, storagePublicKey, content)
     const { encrypt } = await import('nostr-tools/nip04');
-    const encryptedContent = await encrypt(passwordKey, storagePublicKey, vaultJson);
-    
-    console.log('🔐 [saveVaultObj] VaultObj encrypted with password key');
+    const encryptedContent = await encrypt(storagePrivateKey, storagePublicKey, vaultJson);
+
+    console.log('🔐 [saveVaultObj] VaultObj encrypted with storage key (NIP-04)');
 
     const namespace = getNamespace();
     // Create vault event with storage key as author
@@ -221,9 +226,9 @@ export async function saveVaultObj(
         ['d', `${namespace}_vault_${storagePublicKey}_${getEnvironment()}`],
         ['client', namespace],
         ['subject', 'encrypted-vault'],
-        ['encryption', 'password-aes'], // Mark as password-encrypted
+        ['encryption', 'nip04-storage'], // Mark as storage-key-encrypted (NIP-04)
       ],
-      content: encryptedContent, // Use password-encrypted content
+      content: encryptedContent, // Use storage-key-encrypted content
       pubkey: storagePublicKey, // Storage key as author
     };
 
@@ -233,17 +238,17 @@ export async function saveVaultObj(
     // Publish to relays
     const pool = new SimplePool();
     const successfulPublishes: string[] = [];
-    
+
     for (const relay of relays) {
       try {
         await pool.publish([relay], signedEvent);
-        console.log(`✅ Published password-encrypted VaultObj to ${relay}`);
+        console.log(`✅ Published storage-key-encrypted VaultObj to ${relay}`);
         successfulPublishes.push(relay);
       } catch (error: any) {
         console.error(`❌ Failed to publish VaultObj to ${relay}:`, error.message);
       }
     }
-    
+
     return successfulPublishes;
   } catch (error) {
     console.error('Failed to save VaultObj:', error);

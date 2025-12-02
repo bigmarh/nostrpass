@@ -23,6 +23,7 @@ import {
 } from '@nostrpass/types';
 import { ensureCryptoReady } from './crypto-primitives';
 import { broadcastVaultUpdate } from './shared';
+import { nostrSync } from './nostr-sync';
 
 /**
  * Type for the activeSessions map
@@ -207,6 +208,7 @@ async function updateVaultData(params: {
   username: string;
   vaultData: any;
   skipVersionIncrement?: boolean;
+  options?: { syncToNostr?: boolean };
 }): Promise<void> {
   await ensureCryptoReady();
   const toSave = { ...params.vaultData };
@@ -251,7 +253,8 @@ async function updateVaultData(params: {
     identitiesCount: toSave.identities?.length || 0,
     hasXprivEncrypted: !!toSave.xprivEncrypted,
     xprivEncryptedLength: toSave.xprivEncrypted?.length,
-    updatedAt: toSave.updatedAt ? new Date(toSave.updatedAt).toISOString() : 'N/A'
+    updatedAt: toSave.updatedAt ? new Date(toSave.updatedAt).toISOString() : 'N/A',
+    syncToNostr: params.options?.syncToNostr
   });
 
   // Persist
@@ -266,6 +269,17 @@ async function updateVaultData(params: {
   } catch {}
   // Broadcast
   broadcastVaultUpdate(params.username, 'VAULT_DATA_UPDATED', { username: params.username });
+
+  // Sync to Nostr if requested
+  if (params.options?.syncToNostr) {
+    try {
+      console.log('📡 [updateVaultData] Syncing to Nostr...');
+      await nostrSync.saveVaultToNostr({ username: params.username });
+      console.log('✅ [updateVaultData] Vault synced to Nostr successfully');
+    } catch (err) {
+      console.warn('⚠️ [updateVaultData] Failed to sync vault to Nostr (non-critical):', err);
+    }
+  }
 }
 
 /**

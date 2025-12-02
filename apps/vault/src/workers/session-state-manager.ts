@@ -8,6 +8,7 @@
  */
 
 import type { VaultData } from './db';
+import type { LoginObj } from '@nostrpass/types';
 import { getLoginObj, getVaultFromNostr } from '@nostrpass/nostrHelpers';
 
 /**
@@ -32,6 +33,10 @@ export interface CompleteSessionState {
   createdAt: number;
   unlockedAt: number;
   expiresAt: number;
+  relays?: string[];  // Relays for Nostr operations
+
+  // LoginObj (cached from login, needed for unlock)
+  loginObj?: LoginObj;
 
   // Sensitive data (only when unlocked)
   xpriv?: string;
@@ -101,18 +106,36 @@ export class SessionStateManager {
     const { username, password, relays, environment = 'production' } = params;
 
     try {
-      // Step 1: Fetch LoginObj from Nostr
-      console.log('[SessionStateManager] Fetching LoginObj from Nostr...');
-      const loginResult = await getLoginObj(username, environment, relays, password);
+      // Step 1: Try to load LoginObj from IndexedDB cache (fast)
+      const { vaultDB } = await import('./db');
+      await vaultDB.init();
+
+      let loginResult = await vaultDB.getLoginObj(username);
 
       if (!loginResult) {
-        throw new Error('Account not found or wrong password');
+        // Cache miss - fetch from Nostr (slow: network + PBKDF2)
+        console.log('[SessionStateManager] LoginObj not cached, fetching from Nostr...');
+        loginResult = await getLoginObj(username, environment, relays, password);
+
+        if (!loginResult) {
+          throw new Error('Account not found or wrong password');
+        }
+
+        // Cache the LoginObj for future logins
+        await vaultDB.saveLoginObj(username, loginResult.loginObj, loginResult.passwordSalt);
+        console.log('[SessionStateManager] LoginObj cached successfully');
+      } else {
+        console.log('[SessionStateManager] LoginObj loaded from cache (fast path)');
       }
 
-      const { loginObj } = loginResult;
+      const { loginObj, passwordSalt } = loginResult;
 
-      // Step 2: Get storage keypair (we'll need this but keep it for unlock)
-      // For now, just create the authenticated (but locked) session
+      // Step 2: Store LoginObj in session for later use during unlock
+      // We can't fetch VaultObj yet because it's encrypted with storage key
+      // And storage key is encrypted with PIN (which we don't have until unlock)
+      console.log('[SessionStateManager] LoginObj retrieved, deferring VaultObj fetch to unlock');
+
+      // Step 3: Create authenticated (but locked) session
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const now = Date.now();
 
@@ -128,14 +151,26 @@ export class SessionStateManager {
         sessionId,
         createdAt: now,
         unlockedAt: 0,
-        expiresAt: now + this.SESSION_TIMEOUT
+        expiresAt: now + this.SESSION_TIMEOUT,
+        relays, // Store for later use during unlock
+        loginObj // Store for decrypting storage keys during unlock
       };
 
       // Store complete state in ONE place
       this.sessions.set(username, session);
       this.activeUsername = username;
 
-      console.log('[SessionStateManager] Login successful, session created:', sessionId);
+      // Persist login state to IndexedDB (without sensitive keys)
+      await vaultDB.init();
+      await vaultDB.saveSession({
+        sessionId,
+        username,
+        publicKey: loginObj.storagePublicKey,
+        isUnlocked: false,
+        createdAt: now
+      });
+
+      console.log('[SessionStateManager] Login successful, session created and persisted:', sessionId);
 
       return session;
     } catch (error) {
@@ -167,26 +202,85 @@ export class SessionStateManager {
     }
 
     try {
-      // Import modules needed for decryption
-      const { VaultDB } = await import('./db');
-      const vaultDB = new VaultDB();
+      // Step 1: Load VaultObj from IndexedDB cache (fast, local-first)
+      console.log('[SessionStateManager] Loading VaultObj from IndexedDB cache...');
+      const { vaultDB } = await import('./db');
       await vaultDB.init();
-
-      // Get cached vault data
-      const vaultData = await vaultDB.getVault(params.username);
+      let vaultData = await vaultDB.getVault(params.username);
 
       if (!vaultData) {
-        throw new Error('Vault data not found');
+        console.log('[SessionStateManager] VaultObj not in cache, need to fetch from Nostr first');
+        console.log('[SessionStateManager] This requires storage keys - deriving from xpriv temporarily...');
+
+        // We need to fetch the LoginObj to get the storage keypair
+        // Then use that to fetch and decrypt the VaultObj from Nostr
+        if (!session.loginObj) {
+          // Fetch LoginObj from Nostr (should have been cached during login, but might be a restored session)
+          console.log('[SessionStateManager] Fetching LoginObj from Nostr...');
+
+          const loginResult = await getLoginObj(
+            params.username,
+            'production',
+            session.relays || [],
+            '' // We don't have password, will use what's cached
+          );
+
+          if (!loginResult || !loginResult.loginObj) {
+            throw new Error('LoginObj not found - please login with password first');
+          }
+
+          session.loginObj = loginResult.loginObj;
+          console.log('[SessionStateManager] LoginObj fetched successfully');
+        }
+
+        // Decrypt storage keypair with PIN
+        console.log('[SessionStateManager] Decrypting storage keypair with PIN...');
+        const storageKeypairJson = await params.cryptoPrimitives.decryptDataWithSalt({
+          encryptedData: session.loginObj.storageKeypairEncrypted,
+          password: params.pin,
+          salt: session.loginObj.pinSalt
+        });
+
+        const storageKeypair = JSON.parse(storageKeypairJson);
+        const storagePrivateKey = storageKeypair.privateKey;
+        const storagePublicKey = storageKeypair.publicKey;
+
+        // Fetch VaultObj from Nostr
+        console.log('[SessionStateManager] Fetching VaultObj from Nostr...');
+        vaultData = await getVaultFromNostr(
+          storagePublicKey,
+          session.relays || [],
+          storagePrivateKey
+        );
+
+        if (!vaultData) {
+          throw new Error('VaultObj not found on Nostr');
+        }
+
+        // Save to IndexedDB for future unlocks
+        console.log('[SessionStateManager] Saving VaultObj to IndexedDB cache...');
+        await vaultDB.saveVault(vaultData);
+        console.log('[SessionStateManager] VaultObj cached successfully');
+      } else {
+        console.log('[SessionStateManager] VaultObj loaded from cache');
       }
 
-      // Decrypt xpriv with PIN
+      // Step 2: Decrypt xpriv with PIN
+      console.log('[SessionStateManager] Decrypting xpriv with PIN...');
+
+      if (!vaultData.xprivEncrypted || !vaultData.salt) {
+        throw new Error('xpriv not found in vault data');
+      }
+
       const xpriv = await params.cryptoPrimitives.decryptDataWithSalt({
         encryptedData: vaultData.xprivEncrypted,
         password: params.pin,
         salt: vaultData.salt
       });
 
-      // Derive main keypair (index 0)
+      console.log('[SessionStateManager] xpriv decrypted successfully');
+
+      // Step 3: Derive main keypair (index 0)
       const mainKeypair = await params.cryptoPrimitives.deriveKeypairFromXpriv({
         xpriv,
         index: 0
@@ -194,15 +288,18 @@ export class SessionStateManager {
       const privateKey = mainKeypair.privateKey || mainKeypair.get?.('privateKey');
       const publicKey = mainKeypair.publicKey || mainKeypair.get?.('publicKey');
 
-      // Derive storage keypair (index 1337)
+      // Step 4: Derive storage keypair (index 1337)
       const STORAGE_INDEX = 1337;
       const storageKeypair = await params.cryptoPrimitives.deriveKeypairFromXpriv({
         xpriv,
         index: STORAGE_INDEX
       });
       const storagePrivateKey = storageKeypair.privateKey || storageKeypair.get?.('privateKey');
+      const storagePublicKey = storageKeypair.publicKey || storageKeypair.get?.('publicKey');
 
-      // Update session atomically
+      console.log('[SessionStateManager] Keypairs derived from xpriv');
+
+      // Step 5: Update session atomically
       const now = Date.now();
       session.isUnlocked = true;
       session.xpriv = xpriv;
@@ -236,6 +333,16 @@ export class SessionStateManager {
 
     if (this.activeUsername === username) {
       this.activeUsername = null;
+    }
+
+    // Clear persisted session from IndexedDB
+    try {
+      const { vaultDB } = await import('./db');
+      await vaultDB.init();
+      await vaultDB.clearSession(username);
+      console.log('[SessionStateManager] Persisted session cleared');
+    } catch (error) {
+      console.error('[SessionStateManager] Failed to clear persisted session:', error);
     }
 
     console.log('[SessionStateManager] Logout complete');
@@ -331,6 +438,55 @@ export class SessionStateManager {
     console.log('[SessionStateManager] Clearing all sessions');
     this.sessions.clear();
     this.activeUsername = null;
+  }
+
+  /**
+   * Restore login state from IndexedDB
+   * Called during worker initialization
+   */
+  async restoreFromDB(): Promise<void> {
+    try {
+      const { vaultDB } = await import('./db');
+      await vaultDB.init();
+
+      // Get all sessions and restore the most recent one
+      const sessions = await vaultDB.getAllSessions();
+
+      if (sessions && sessions.length > 0) {
+        // Sort by createdAt descending and get the most recent
+        const persistedSession = sessions.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+
+        console.log('[SessionStateManager] Restoring session from IndexedDB:', persistedSession.username);
+
+        // Create a locked session (no keys, needs unlock)
+        // We need to fetch the LoginObj again to be able to unlock later
+        const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const now = Date.now();
+
+        const session: CompleteSessionState = {
+          isAuthenticated: true,
+          isUnlocked: false,
+          username: persistedSession.username,
+          publicKey: '',
+          storagePublicKey: persistedSession.publicKey,
+          vaultVersion: 0,
+          identityCount: 0,
+          sessionId,
+          createdAt: now,
+          unlockedAt: 0,
+          expiresAt: now + this.SESSION_TIMEOUT
+        };
+
+        this.sessions.set(persistedSession.username, session);
+        this.activeUsername = persistedSession.username;
+
+        console.log('[SessionStateManager] Session restored, user needs to unlock with PIN');
+      } else {
+        console.log('[SessionStateManager] No persisted session found');
+      }
+    } catch (error) {
+      console.error('[SessionStateManager] Failed to restore session from DB:', error);
+    }
   }
 }
 
