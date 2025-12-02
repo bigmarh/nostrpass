@@ -107,7 +107,7 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
       passwordVerifier: (vaultData as any).passwordVerifier,
       identities: vaultData.identities || [],
       storagePublicKey: vaultData.publicKey,
-      activeIdentityByApp: vaultData.activeIdentityByApp || {},
+      // NOTE: activeIdentityByApp removed - now stored in localStorage per-browser
       recovery: (vaultData as any).recovery,
       lastSyncedAt: vaultData.lastSyncedAt,
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
@@ -157,7 +157,7 @@ async function saveVault(params: {
   xprivEncrypted: string;
   salt: string;
   identities?: any[];
-  activeIdentityByApp?: Record<string, number | null>;
+  // activeIdentityByApp removed - now stored in localStorage
   passwordVerifier?: string;
   passwordSalt?: string;
   recovery?: any;
@@ -174,7 +174,7 @@ async function saveVault(params: {
     encryptedVault: params.xprivEncrypted, // Redundant field for compatibility
     salt: params.salt,
     identities: params.identities || [],
-    activeIdentityByApp: params.activeIdentityByApp || {},
+    // activeIdentityByApp removed - now stored in localStorage per-browser
     passwordVerifier: params.passwordVerifier,
     passwordSalt: params.passwordSalt,
     recovery: params.recovery,

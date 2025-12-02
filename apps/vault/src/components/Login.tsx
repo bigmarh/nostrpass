@@ -337,17 +337,17 @@ export const Login: Component = () => {
                             )}
                         </div>
                         
-                        <form onSubmit={handleSubmit} class={`flex w-full flex-col gap-3 ${isSignup() ? 'signup-form' : 'login-form'}`} method="post">
+                        <form onSubmit={handleSubmit} class={`flex w-full flex-col gap-3 ${isSignup() ? 'signup-form' : 'login-form'}`} method="post" action="#">
                             <div class="w-full">
                                 <label for="username" class="sr-only">Username</label>
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     name="username"
                                     id="username"
-                                    placeholder="Username" 
+                                    placeholder="Username"
                                     value={username()}
                                     onInput={(e) => setUsername(e.currentTarget.value)}
-                                    class="w-full border-2 border-gray-300 dark:border-gray-600 p-2 rounded-md focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" 
+                                    class="w-full border-2 border-gray-300 dark:border-gray-600 p-2 rounded-md focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                                     autocomplete="username"
                                     required
                                     disabled={isLoading()}
@@ -355,14 +355,14 @@ export const Login: Component = () => {
                             </div>
                             <div class="w-full">
                                 <label for="password" class="sr-only">Password</label>
-                                <input 
-                                    type="password" 
-                                    name={isSignup() ? "new-password" : "current-password"}
-                                    id={isSignup() ? "new-password" : "current-password"}
-                                    placeholder="Password" 
+                                <input
+                                    type="password"
+                                    name="password"
+                                    id="password"
+                                    placeholder="Password"
                                     value={password()}
                                     onInput={(e) => setPassword(e.currentTarget.value)}
-                                    class="w-full p-2 rounded-md border-2 border-gray-300 dark:border-gray-600 focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500" 
+                                    class="w-full p-2 rounded-md border-2 border-gray-300 dark:border-gray-600 focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                                     autocomplete={isSignup() ? "new-password" : "current-password"}
                                     required
                                     disabled={isLoading()}

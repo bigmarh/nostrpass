@@ -5,6 +5,7 @@ import { useEnvironment } from './EnvironmentProvider';
 import { useAuth } from './AuthProvider';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import type { PermissionLevel } from '@nostrpass/types';
+import { getActiveIdentity } from '../utils/activeIdentityManager';
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
@@ -233,7 +234,11 @@ export const MessengerProvider: ParentComponent = (props) => {
         if (!cw || !current) throw new Error('Crypto not ready');
         const vaultData = await cw.getVaultData({ username: current.profile.username });
         const appKey = toAppKey(origin);
-        let activeIndex = vaultData.activeIdentityByApp?.[appKey];
+
+        // Get active identity from localStorage (per-browser)
+        let activeIndex = getActiveIdentity(current.profile.username, origin);
+
+        // If no active identity set, find first authorized identity for this app
         if (activeIndex === undefined || activeIndex === null) {
           activeIndex = vaultData.identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
         }

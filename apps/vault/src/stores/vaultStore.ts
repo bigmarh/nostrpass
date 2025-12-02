@@ -24,9 +24,13 @@ const [currentUsername, setCurrentUsername] = createSignal<string | null>(null);
 // Derived signals for fine-grained reactivity
 // These automatically update when vaultData changes, triggering reactivity in components
 const identities = createMemo(() => vaultData()?.identities || []);
-const activeIdentityByApp = createMemo(() => vaultData()?.activeIdentityByApp || {});
 const vaultVersion = createMemo(() => vaultData()?.version || 0);
 const vaultUpdatedAt = createMemo(() => vaultData()?.updatedAt || 0);
+
+// NOTE: activeIdentityByApp has been removed from vaultData
+// Active identity is now managed per-browser in localStorage via activeIdentityManager
+// This prevents cross-device/tab conflicts where different browsers should
+// be able to have different active identities for the same app
 
 /**
  * Get permissions for a specific app and identity
@@ -239,7 +243,6 @@ export function useVaultStore() {
 
     // Derived signals for fine-grained reactivity
     identities,
-    activeIdentityByApp,
     vaultVersion,
     vaultUpdatedAt,
 

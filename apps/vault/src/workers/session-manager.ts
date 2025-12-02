@@ -407,7 +407,7 @@ export const sessionManager = {
             xprivEncrypted: '', // Placeholder - will be populated during PIN unlock
             salt: loginObj.pinSalt,
             identities: [], // Will be loaded during PIN unlock
-            activeIdentityByApp: {},
+            // activeIdentityByApp removed - now stored in localStorage per-browser
             passwordSalt: passwordSalt,
             lastSyncedAt: Date.now(),
             updatedAt: Date.now(),
@@ -1144,7 +1144,7 @@ export const sessionManager = {
       ...cachedData,
       xprivEncrypted: vaultData.xprivEncrypted,
       identities: vaultData.identities || [],
-      activeIdentityByApp: vaultData.activeIdentityByApp || {},
+      // activeIdentityByApp removed - now stored in localStorage per-browser
       updatedAt: vaultData.updatedAt || Date.now(),
       lastSyncedAt: Date.now()
     } as VaultData);
@@ -1507,8 +1507,10 @@ export const sessionManager = {
       return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
     }
 
+    // Note: identityIndex should always be provided by caller
+    // activeIdentityByApp has been removed - it's now in localStorage per-browser
     const identityIndex = Math.max(0, Math.min(
-      (params.identityIndex ?? (vault as any).activeIdentityByApp?.[origin] ?? 0),
+      (params.identityIndex ?? 0),
       (vault.identities.length - 1)
     ));
     const identity = vault.identities[identityIndex] as any;
@@ -1638,8 +1640,10 @@ export const sessionManager = {
     const vault = await vaultDB.getVault(params.username);
     if (!vault || !vault.identities || vault.identities.length === 0) return null;
 
+    // Note: identityIndex should always be provided by caller
+    // activeIdentityByApp has been removed - it's now in localStorage per-browser
     const identityIndex = Math.max(0, Math.min(
-      (params.identityIndex ?? (vault as any).activeIdentityByApp?.[params.origin] ?? 0),
+      (params.identityIndex ?? 0),
       (vault.identities.length - 1)
     ));
     const identity = vault.identities[identityIndex] as any;
@@ -1674,9 +1678,10 @@ export const sessionManager = {
       updatedVault.identities.push({ appPermissions: {} });
     }
 
-    // Determine the active identity for this app (fallback to 0)
+    // Note: identityIndex should always be provided by caller
+    // activeIdentityByApp has been removed - it's now in localStorage per-browser
     const identityIndex = Math.max(0, Math.min(
-      (params.identityIndex ?? updatedVault.activeIdentityByApp?.[origin] ?? 0),
+      (params.identityIndex ?? 0),
       (updatedVault.identities.length - 1)
     ));
     const identity = { ...updatedVault.identities[identityIndex] };

@@ -6,6 +6,7 @@ import { showSuccessToast } from '../components/Toast';
 import { addAuditEvent } from '../components/AuditLog';
 import { vaultError, ErrorCode } from './errors';
 import { permissionPromptManager } from '../utils/permissionPromptManager';
+import { getActiveIdentity } from '../utils/activeIdentityManager';
 
 function originToAppKey(origin: string): string {
   try {
@@ -196,8 +197,15 @@ export const vaultHandlers: MessageHandler[] = [
         if (!initialVaultData?.identities || initialVaultData.identities.length === 0) {
           return -1;
         }
-        let activeIndex = initialVaultData.activeIdentityByApp?.[appKey];
+        // Get active identity from localStorage first
+        const currentUser = deps.getUser();
+        if (!currentUser?.profile?.username) {
+          return -1;
+        }
+
+        let activeIndex = getActiveIdentity(currentUser.profile.username, rawOrigin);
         if (activeIndex === undefined || activeIndex === null) {
+          // Fallback: find first identity with permissions for this app
           activeIndex = initialVaultData.identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
         }
         return activeIndex ?? -1;
