@@ -37,7 +37,7 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
         setLoadingVersions(true);
         const worker = getCryptoWorker();
         if (!worker) return [];
-        const versions = await worker.getVaultVersionHistory({ username, limit: 10 });
+        const versions = await worker.getVaultVersionHistory({ username, limit: 5 });
         setLiveVersions(versions); // Initialize live versions
         return versions;
       } catch (err) {
