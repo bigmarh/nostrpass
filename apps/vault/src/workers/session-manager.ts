@@ -1739,6 +1739,14 @@ export const sessionManager = {
     updatedVault.identities[identityIndex] = identity;
     updatedVault.updatedAt = Date.now();
 
+    console.log('💾 [saveAppPermissions] Saving merged permissions:', JSON.stringify({
+      origin,
+      identityIndex,
+      incomingUpdates: permissions,
+      mergedPermissions: merged.permissions,
+      fullMerged: merged
+    }, null, 2));
+
     // Use streamlined vault operations path for automatic sync
     await vaultOperations.updateVaultData({
       username,
