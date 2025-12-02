@@ -80,14 +80,14 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
   };
 
   return (
-    <div class="w-full max-w-2xl mx-auto p-4 md:p-6">
+    <div class="w-full max-w-2xl mx-auto p-4 md:p-6 bg-white dark:bg-gray-900">
       <Show when={!showAnswers()}>
         <div class="mb-6">
-          <h2 class="text-2xl font-bold mb-2">Set Up PIN Recovery</h2>
-          <p class="text-gray-600">
+          <h2 class="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">Set Up PIN Recovery</h2>
+          <p class="text-gray-600 dark:text-gray-400">
             Select 3 security questions. Your answers will be used to recover your PIN if you forget it.
           </p>
-          <p class="text-sm text-gray-500 mt-2">
+          <p class="text-sm text-gray-500 dark:text-gray-500 mt-2">
             Note: Answers are case-insensitive and spaces will be removed.
           </p>
         </div>
@@ -95,32 +95,32 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
 
       <Show when={showAnswers()}>
         <div class="mb-4">
-          <h2 class="text-xl font-bold mb-1">Answer your selected questions:</h2>
+          <h2 class="text-xl font-bold mb-1 text-gray-900 dark:text-gray-100">Answer your selected questions:</h2>
         </div>
       </Show>
 
       <Show when={error()}>
-        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-md text-sm mb-4">
+        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4">
           {error()}
         </div>
       </Show>
 
       <Show when={!showAnswers()}>
         <div class="mb-6">
-          <p class="text-sm font-medium text-gray-700 mb-3">
+          <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             Select 3 questions ({selectedQuestions().length}/3):
           </p>
-          <div class="max-h-[240px] overflow-y-auto border rounded-lg p-2 space-y-2">
+          <div class="max-h-[240px] overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-2 space-y-2 bg-white dark:bg-gray-800">
             <For each={SECURITY_QUESTIONS}>
               {(question, index) => (
-                <label class="flex items-start p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                <label class="flex items-start p-3 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800">
                   <input
                     type="checkbox"
                     checked={selectedQuestions().includes(index())}
                     onChange={() => toggleQuestion(index())}
-                    class="mt-1 mr-3 flex-shrink-0"
+                    class="mt-1 mr-3 flex-shrink-0 accent-blue-600 dark:accent-blue-400"
                   />
-                  <span class={`flex-1 ${selectedQuestions().includes(index()) ? 'font-medium' : ''}`}>
+                  <span class={`flex-1 text-gray-900 dark:text-gray-100 ${selectedQuestions().includes(index()) ? 'font-medium' : ''}`}>
                     {question}
                   </span>
                 </label>
@@ -133,13 +133,13 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
           <button
             onClick={handleContinue}
             disabled={selectedQuestions().length !== 3}
-            class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            class="flex-1 px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-md hover:bg-gray-800 dark:hover:bg-gray-100 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
           >
             Continue
           </button>
           <button
             onClick={props.onSkip}
-            class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+            class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors"
           >
             Skip Recovery Setup
           </button>
@@ -151,7 +151,7 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
           <For each={selectedQuestions()}>
             {(questionIndex) => (
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {SECURITY_QUESTIONS[questionIndex]}
                 </label>
                 <input
@@ -159,7 +159,7 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
                   value={answers()[questionIndex] || ''}
                   onInput={(e) => updateAnswer(questionIndex, e.currentTarget.value)}
                   placeholder="Your answer"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   autocomplete="off"
                 />
               </div>
@@ -167,9 +167,9 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
           </For>
         </div>
 
-        <div class="bg-yellow-50 border border-yellow-200 p-3 rounded-md mb-4">
-          <p class="text-xs text-yellow-800 font-medium mb-1">Important:</p>
-          <ul class="text-xs text-yellow-700 list-disc list-inside space-y-0.5">
+        <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-md mb-4">
+          <p class="text-xs text-yellow-800 dark:text-yellow-400 font-medium mb-1">Important:</p>
+          <ul class="text-xs text-yellow-700 dark:text-yellow-400 list-disc list-inside space-y-0.5">
             <li>Write down your answers exactly as entered</li>
             <li>Answers are case-insensitive when recovering</li>
             <li>You cannot recover your PIN without these answers</li>
@@ -179,13 +179,13 @@ const SecurityQuestionsSetup: Component<SecurityQuestionsSetupProps> = (props) =
         <div class="flex gap-3">
           <button
             onClick={handleComplete}
-            class="flex-1 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800"
+            class="flex-1 px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-md hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
           >
             Complete Setup
           </button>
           <button
             onClick={() => setShowAnswers(false)}
-            class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+            class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors"
           >
             Back
           </button>

@@ -442,8 +442,8 @@ export const Login: Component = () => {
             
             {/* PIN Setup Modal */}
             <Show when={showPinSetup()}>
-                <div class="fixed inset-0 bg-black/50 flex items-start md:items-center justify-center z-50 overflow-y-auto">
-                    <div class="bg-white w-full md:w-auto md:rounded-lg md:shadow-xl md:border-2 md:border-black min-h-screen md:min-h-0">
+                <div class="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-start md:items-center justify-center z-50 overflow-y-auto">
+                    <div class="bg-white dark:bg-gray-900 w-full md:w-auto md:rounded-lg md:shadow-xl md:border-2 md:border-black dark:md:border-gray-700 min-h-screen md:min-h-0">
                         <PinSetup
                             onPinSet={handlePinSet}
                             onPinSetWithRecovery={handlePinSetWithRecovery}
@@ -459,8 +459,8 @@ export const Login: Component = () => {
 
             {/* PIN Unlock Modal (shown after successful login) */}
             <Show when={showPinUnlock()}>
-                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div class="bg-white dark:bg-gray-800 w-full max-w-md md:rounded-lg md:shadow-xl md:border-2 md:border-black p-8">
+                <div class="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50">
+                    <div class="bg-white dark:bg-gray-800 w-full max-w-md md:rounded-lg md:shadow-xl md:border-2 md:border-black dark:md:border-gray-700 p-8">
                         <div class="text-center mb-6">
                             <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Enter Your PIN</h2>
                             <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
