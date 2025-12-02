@@ -148,7 +148,12 @@ export const SimpleAuthPromptController: Component = () => {
         }));
       }
 
+      // Wait a moment for embassy/button to process the update before closing
+      console.log('[SimpleAuthPromptController] Waiting for button to update...');
+      await new Promise(resolve => setTimeout(resolve, 300));
+
       // Close the vault modal and return to the app
+      console.log('[SimpleAuthPromptController] Closing vault');
       send('HIDE_VAULT');
     } catch (error) {
       console.error('Failed to authorize app:', error);
