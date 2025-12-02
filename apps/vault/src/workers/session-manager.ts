@@ -25,6 +25,7 @@ import { PERMISSION_KINDS, type PermissionLevel, type VaultObj } from '@nostrpas
 import { cryptoPrimitives } from './crypto-primitives';
 import { nostrSync } from './nostr-sync';
 import { getSessionStateManager } from './session-state-manager';
+import { vaultOperations } from './vault-operations';
 
 // Singleton crypto instance for session manager operations
 const crypto = new NostrCrypto();
