@@ -24,6 +24,8 @@ import { getEnvironment } from '@nostrpass/nostrHelpers';
 import { PERMISSION_KINDS, type PermissionLevel, type VaultObj } from '@nostrpass/types';
 import { cryptoPrimitives } from './crypto-primitives';
 import { nostrSync } from './nostr-sync';
+import { getSessionStateManager } from './session-state-manager';
+import { vaultOperations } from './vault-operations';
 
 // Singleton crypto instance for session manager operations
 const crypto = new NostrCrypto();
@@ -851,7 +853,9 @@ export const sessionManager = {
    * Requires unlocked session with xpriv
    */
   deriveIdentityFromSession: async (params: { username: string; index: number }): Promise<{ publicKey: string; path: string }> => {
-    const session = activeSessions.get(params.username);
+    const sessionManager = getSessionStateManager();
+    const session = sessionManager.getAuthState(params.username);
+
     if (!session || !session.xpriv) {
       throw new Error('No xpriv in session - please unlock with PIN first');
     }
@@ -1735,23 +1739,22 @@ export const sessionManager = {
     updatedVault.identities[identityIndex] = identity;
     updatedVault.updatedAt = Date.now();
 
-    // Persist
-    await vaultDB.saveVault(updatedVault);
-
-    // Broadcast the update
-    broadcastVaultUpdate(username, 'PERMISSIONS_UPDATED', {
+    console.log('💾 [saveAppPermissions] Saving merged permissions:', JSON.stringify({
       origin,
-      permissions: merged
+      identityIndex,
+      incomingUpdates: permissions,
+      mergedPermissions: merged.permissions,
+      fullMerged: merged
+    }, null, 2));
+
+    // Use streamlined vault operations path for automatic sync
+    await vaultOperations.updateVaultData({
+      username,
+      vaultData: updatedVault,
+      options: { syncToNostr: true }  // Sync to Nostr for cross-browser updates
     });
 
-    // Sync to Nostr for real-time cross-browser updates
-    try {
-      await nostrSync.saveVaultToNostr({ username });
-      console.log('✅ [saveAppPermissions] Vault synced to Nostr after permission change');
-    } catch (err) {
-      console.warn('⚠️ [saveAppPermissions] Failed to sync vault to Nostr (non-critical):', err);
-    }
-
+    console.log('✅ [saveAppPermissions] Permissions saved and synced via streamlined path');
     return { success: true };
   },
 

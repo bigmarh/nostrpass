@@ -94,7 +94,7 @@ export const SimpleAuthPromptController: Component = () => {
               ...(current.activeIdentityByApp || {}),
               [appKey]: ce.detail.identityIndex
             }
-          }), { syncToNostr: true });
+          }));
 
           // Trigger vault data refresh event to notify embassy
           console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');
@@ -194,7 +194,7 @@ export const SimpleAuthPromptController: Component = () => {
           ...(current.activeIdentityByApp || {}),
           [appKey]: d.identityIndex
         }
-      }), { syncToNostr: true });
+      }));
 
       // Trigger vault data refresh event to notify embassy
       console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');

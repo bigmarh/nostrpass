@@ -56,7 +56,7 @@ export const handlers = {
   // Session management (session lifecycle, auth, permissions)
   ...sessionManager,
 
-  // Nostr synchronization (relay interactions, PRE events)
+  // Nostr synchronization (relay interactions)
   ...nostrSync,
 
   // Atomic auth handlers (new simplified API - can be used alongside old API)

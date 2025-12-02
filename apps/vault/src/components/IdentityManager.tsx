@@ -28,7 +28,6 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   const [identitySelectionCallback, setIdentitySelectionCallback] = createSignal<((identityIndex: number) => void) | null>(null);
   const [isConnectingIdentity, setIsConnectingIdentity] = createSignal(false);
   const [identityOperationError, setIdentityOperationError] = createSignal<string | null>(null);
-  const [appPermissions, setAppPermissions] = createSignal<AppPermissions | null>(null);
   const [isSavingPermission, setIsSavingPermission] = createSignal(false);
   const [permissionSaveError, setPermissionSaveError] = createSignal<string | null>(null);
   const [showSettingsPanel, setShowSettingsPanel] = createSignal(false);
@@ -37,6 +36,42 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   const [identityToArchive, setIdentityToArchive] = createSignal<{index: number, nickname: string} | null>(null);
 
   const permissionService = PermissionService.getInstance();
+
+  // Reactive permissions derived from vault data
+  // This automatically updates when vault data changes (real-time cross-browser sync!)
+  const appPermissions = createMemo(() => {
+    const vault = props.vaultData;
+    const appId = props.appId;
+
+    if (!vault || !appId) return null;
+
+    const identityIndex = vault.activeIdentityByApp?.[appId] ?? 0;
+    const identity = vault.identities?.[identityIndex];
+
+    if (!identity) return null;
+
+    const permissions = identity.appPermissions?.[appId];
+
+    // If no permissions exist, create default ones
+    if (!permissions) {
+      return {
+        appId,
+        appName: desanitizeDomain(appId),
+        permissions: {
+          social: 'ALLOW',
+          messaging: 'ASK_EVERYTIME',
+          signData: 'ASK_EVERYTIME',
+          financial: 'ASK_EVERYTIME',
+          zaps: 'ASK_EVERYTIME'
+        },
+        getPublicKey: 'ALLOW',
+        grantedAt: Date.now(),
+        lastUsedAt: Date.now()
+      };
+    }
+
+    return permissions;
+  });
 
   // Create identities from vault data with proper app permission checking
   const identities = createMemo(() => {
@@ -104,7 +139,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     return results;
   });
 
-  // Create default permissions for a new app
+  // Note: appPermissions is now a reactive createMemo() that automatically
+  // updates when vault data changes. No manual loading needed!
+
+  // Helper function to create default permissions for a new app
   const createDefaultPermissions = (appId: string): AppPermissions => ({
     appId,
     appName: desanitizeDomain(appId),
@@ -112,42 +150,12 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       social: 'ALLOW',
       messaging: 'ASK_EVERYTIME',
       signData: 'ASK_EVERYTIME',
-      financial: 'ASK_EVERYTIME'
+      financial: 'ASK_EVERYTIME',
+      zaps: 'ASK_EVERYTIME'
     },
     getPublicKey: 'ALLOW',
     grantedAt: Date.now(),
     lastUsedAt: Date.now()
-  });
-
-  // Load permissions for the current app and identity
-  const loadAppPermissions = async () => {
-    if (!props.appId) return;
-
-    console.log('🔄 Loading app permissions for:', props.appId);
-    try {
-      const idx = props.vaultData?.activeIdentityByApp?.[props.appId] ?? 0;
-      const appPerm = await permissionService.getAppPermissions(
-        props.username,
-        props.appId,
-        idx
-      );
-      if (appPerm) {
-        console.log('🎯 App permissions details:', JSON.stringify(appPerm, null, 2));
-        setAppPermissions(appPerm);
-      } else {
-        setAppPermissions(createDefaultPermissions(props.appId));
-      }
-    } catch (error) {
-      console.error('❌ Error loading app permissions:', error);
-      setAppPermissions(createDefaultPermissions(props.appId));
-    }
-  };
-
-  // Load permissions when settings panel opens
-  createEffect(() => {
-    if (showSettingsPanel() && props.appId) {
-      loadAppPermissions();
-    }
   });
 
   // Handle permission change
@@ -174,31 +182,30 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     setPermissionSaveError(null);
 
     try {
-      // Update local permission
+      // Build updates object based on permission type
       const updates: Partial<AppPermissions> = {};
+      const currentPerms = appPermissions();
 
+      if (!currentPerms) {
+        console.error('❌ No current permissions available');
+        return;
+      }
+
+      // Handle top-level permission (getPublicKey)
       if (permissionType === 'getPublicKey') {
         updates.getPublicKey = newLevel;
-      } else if (permissionType === 'social') {
+      }
+      // Handle nested permissions (social, messaging, signData, zaps, financial)
+      else if (['social', 'messaging', 'signData', 'zaps', 'financial'].includes(permissionType)) {
         updates.permissions = {
-          ...appPermissions()!.permissions,
-          social: newLevel
+          ...currentPerms.permissions,
+          [permissionType]: newLevel
         };
-      } else if (permissionType === 'messaging') {
-        updates.permissions = {
-          ...appPermissions()!.permissions,
-          messaging: newLevel
-        };
-      } else if (permissionType === 'signData') {
-        updates.permissions = {
-          ...appPermissions()!.permissions,
-          signData: newLevel
-        };
-      } else if (permissionType === 'financial') {
-        updates.permissions = {
-          ...appPermissions()!.permissions,
-          financial: newLevel
-        };
+      }
+      // Unknown permission type
+      else {
+        console.error('❌ Unknown permission type:', permissionType);
+        return;
       }
 
       console.log('💾 Saving app permissions...');
@@ -216,58 +223,24 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         );
         console.log('✅ App permissions saved locally');
 
-        // Reload vault data to see the changes
-        props.onRefresh();
-        console.log('📋 Vault data after save:', JSON.stringify(props.vaultData, null, 2));
+        // No need to manually refresh - worker broadcasts VAULT_DATA_UPDATED
+        // which triggers VaultStore to reload automatically
+        console.log('📋 Waiting for broadcast to trigger reactive update...');
       } catch (error) {
         console.error('❌ Error in saveAppPermissions:', error);
         throw error;
       }
 
-      // Reload permissions to get updated state
-      console.log('🔄 Reloading permissions...');
-      await loadAppPermissions();
-      console.log('✅ Permissions reloaded');
+      // Note: Nostr sync happens automatically via streamlined vault-operations path
+      // appPermissions createMemo will automatically update when vault data changes
+      // No manual reload needed - SolidJS reactivity handles it!
+      console.log('✅ Permissions saved - automatic Nostr sync in progress via streamlined path');
+      setPermissionSaveError('✅ Settings saved');
+      setTimeout(() => setPermissionSaveError(null), 3000);
 
-      // Clear saving state immediately after local save
+      // Clear saving state
       console.log('🏁 Clearing saving state...');
       setIsSavingPermission(false);
-
-      // Sync to Nostr in background (don't await)
-      console.log('🔄 Starting Nostr sync in background...');
-      const sync = async () => {
-        try {
-          const status: any = await props.cryptoWorker!.hasKeysInSession({ username: props.username });
-          const hasStorageSigning = !!(status?.hasXpriv || status?.hasStorageKeypair);
-          if (!hasStorageSigning) {
-            setPermissionSaveError('Unlock required to sync to Nostr');
-            props.onShowPinUnlock();
-            return;
-          }
-          await props.onSyncToNostr();
-          console.log('✅ Nostr sync completed successfully');
-          setPermissionSaveError('✅ Settings saved');
-          setTimeout(() => setPermissionSaveError(null), 3000);
-        } catch (error: any) {
-          throw error;
-        }
-      };
-      sync().catch((error: any) => {
-        console.error('❌ Nostr sync failed:', error);
-        if (error.message?.includes('Vault is locked')) {
-          setPermissionSaveError('Please unlock your vault with PIN first');
-          props.onShowPinUnlock();
-        } else if (error.message?.includes('no xpriv') || error.message?.includes('No xpriv access')) {
-          setPermissionSaveError('Session expired - please unlock with PIN');
-          props.onShowPinUnlock();
-        } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
-          setPermissionSaveError('Nostr sync timed out - settings saved locally but may not be synced to all relays');
-        } else if (error.message?.includes('Failed to publish to any relay')) {
-          setPermissionSaveError('Failed to sync to Nostr relays - settings saved locally');
-        } else {
-          setPermissionSaveError(error.message || 'Failed to save to Nostr');
-        }
-      });
 
     } catch (error) {
       console.error('❌ Permission save failed:', error);
@@ -588,13 +561,13 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         }
       });
 
-      // Save and sync to Nostr
+      // Save (automatically syncs to Nostr)
       await props.onUpdateVaultData({
         identities: updatedIdentities,
         activeIdentityByApp: updatedActiveIdentityByApp
-      }, { syncToNostr: true });
+      });
 
-      console.log('✅ [Archive Identity] Identity archived and synced to Nostr');
+      console.log('✅ [Archive Identity] Identity archived and auto-synced to Nostr');
       setShowSettingsPanel(false);
       setIdentityToArchive(null);
     } catch (e) {
@@ -647,16 +620,12 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         index: nextIndex,
         createdAt: Date.now()
       } as any;
-      // Save and sync to Nostr
-      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }), { syncToNostr: true });
-      console.log('✅ [Add Identity] Saved locally and synced to Nostr');
+      // Save (automatically syncs to Nostr via full vault snapshot)
+      await props.onUpdateVaultData((curr) => ({ identities: [...(curr.identities || []), identity] }));
+      console.log('✅ [Add Identity] Saved and auto-synced to Nostr');
 
-      // Publish identity meta as PRE (non-blocking)
-      try {
-        await props.cryptoWorker.publishIdentityMeta({ username: props.username, nickname: identity.nickname, path: identity.path });
-      } catch (e) {
-        console.warn('⚠️ [Add Identity] Failed to publish identity PRE:', e);
-      }
+      // Note: PRE events removed in streamlined sync architecture
+      // Full vault snapshot is published automatically above
 
       setShowAddIdentityModal(false);
       setNewIdentityNickname('');

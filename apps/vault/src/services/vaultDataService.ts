@@ -68,12 +68,13 @@ export class VaultDataService {
    * Update vault data for a user
    */
   async updateVaultData(
-    username: string, 
+    username: string,
     updates: Partial<VaultData> | VaultData | ((current: VaultData) => Partial<VaultData>),
     options: UpdateVaultDataOptions = {}
   ): Promise<void> {
-    const { syncToNostr = false, updateTimestamp = true } = options;
-    
+    // STREAMLINED: Always sync to Nostr (removed flag, always true)
+    const { updateTimestamp = true } = options;
+
     const cryptoWorker = getCryptoWorker();
     if (!cryptoWorker) {
       throw new Error('Crypto worker not ready');
@@ -113,8 +114,12 @@ export class VaultDataService {
         };
       }
 
-      // Update in crypto worker
-      await cryptoWorker.updateVaultData({ username, vaultData: updatedData });
+      // Update in crypto worker - ALWAYS syncs to Nostr (streamlined approach)
+      await cryptoWorker.updateVaultData({
+        username,
+        vaultData: updatedData,
+        options: { syncToNostr: true }  // Always true!
+      });
 
       // Update cache
       this.cache.set(username, { data: updatedData, timestamp: Date.now() });
@@ -377,6 +382,7 @@ export class VaultDataService {
     const path = identities[idx]?.path || `m/44'/1237'/0'/0/${idx}`;
 
     // Persist permissions inside the worker/vault
+    // This automatically syncs to Nostr via streamlined vault-operations path
     await cryptoWorker.saveAppPermissions({
       username,
       origin,
@@ -385,23 +391,6 @@ export class VaultDataService {
       identityIndex: idx
     });
 
-    // Publish permissions PRE via worker (best effort)
-    try {
-      const latestPermissions = await cryptoWorker.getAppPermissions({
-        username,
-        origin,
-        identityIndex: idx
-      });
-      await (cryptoWorker as any).publishPermissions({
-        username,
-        path,
-        appDomain: origin,
-        permissions: latestPermissions || permissions || {}
-      });
-    } catch (e) {
-      console.warn('[saveAppPermissions] Failed to publish PRE permissions (non-critical):', e);
-    }
-    
     // Clear cache to ensure fresh data is loaded next time
     this.clearCache(username);
   }
