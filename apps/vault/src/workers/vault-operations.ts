@@ -271,6 +271,12 @@ async function updateVaultData(params: {
   broadcastVaultUpdate(params.username, 'VAULT_DATA_UPDATED', { username: params.username });
 
   // Sync to Nostr if requested
+  console.log('🔍 [updateVaultData] Checking sync options:', {
+    hasOptions: !!params.options,
+    syncToNostr: params.options?.syncToNostr,
+    willSync: !!params.options?.syncToNostr
+  });
+
   if (params.options?.syncToNostr) {
     try {
       console.log('📡 [updateVaultData] Syncing to Nostr...');
@@ -279,6 +285,8 @@ async function updateVaultData(params: {
     } catch (err) {
       console.warn('⚠️ [updateVaultData] Failed to sync vault to Nostr (non-critical):', err);
     }
+  } else {
+    console.log('⏭️ [updateVaultData] Skipping Nostr sync (syncToNostr not true)');
   }
 }
 
