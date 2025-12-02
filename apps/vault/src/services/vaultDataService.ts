@@ -124,10 +124,8 @@ export class VaultDataService {
       // Update cache
       this.cache.set(username, { data: updatedData, timestamp: Date.now() });
 
-      // Sync to Nostr if requested
-      if (syncToNostr) {
-        await this.syncToNostr(username);
-      }
+      // STREAMLINED: Sync happens automatically in worker via updateVaultData
+      // No need to call syncToNostr here - it's handled by the worker
     } catch (error) {
       console.error('Failed to update vault data:', error);
       throw new Error(`Failed to update vault data: ${error instanceof Error ? error.message : 'Unknown error'}`);
