@@ -150,6 +150,17 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     }
   });
 
+  // Reload permissions when vault data changes (for cross-browser sync)
+  createEffect(() => {
+    // Track vault data changes by accessing it
+    const vault = props.vaultData;
+    // Only reload if we're showing permissions for an app
+    if (props.appId && vault) {
+      console.log('🔄 Vault data changed - reloading permissions for UI update');
+      loadAppPermissions();
+    }
+  });
+
   // Handle permission change
   const handlePermissionChange = async (permissionType: string, newLevel: PermissionLevel) => {
     if (!props.appId || !appPermissions()) return;
