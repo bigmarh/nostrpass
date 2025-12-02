@@ -137,9 +137,16 @@ export async function handleAtomicUnlock(params: {
   // Restart Nostr subscription now that we have storage keys for decryption
   try {
     const { nostrSync } = await import('./nostr-sync');
+    const defaultRelays = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'ws://localhost:8080',
+    ];
     await nostrSync.startNostrSubscription({
       username: params.username,
-      relays: session.relays || []
+      relays: session.relays || defaultRelays
     });
     console.log('[handleAtomicUnlock] Nostr subscription restarted after unlock');
   } catch (error) {
