@@ -382,6 +382,7 @@ export class VaultDataService {
     const path = identities[idx]?.path || `m/44'/1237'/0'/0/${idx}`;
 
     // Persist permissions inside the worker/vault
+    // This automatically syncs to Nostr via streamlined vault-operations path
     await cryptoWorker.saveAppPermissions({
       username,
       origin,
@@ -390,23 +391,6 @@ export class VaultDataService {
       identityIndex: idx
     });
 
-    // Publish permissions PRE via worker (best effort)
-    try {
-      const latestPermissions = await cryptoWorker.getAppPermissions({
-        username,
-        origin,
-        identityIndex: idx
-      });
-      await (cryptoWorker as any).publishPermissions({
-        username,
-        path,
-        appDomain: origin,
-        permissions: latestPermissions || permissions || {}
-      });
-    } catch (e) {
-      console.warn('[saveAppPermissions] Failed to publish PRE permissions (non-critical):', e);
-    }
-    
     // Clear cache to ensure fresh data is loaded next time
     this.clearCache(username);
   }
