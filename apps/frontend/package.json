@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "find ../website/public -mindepth 1 ! -name 'embassy.js' -delete",
+    "prebuild": "find ../website/public -mindepth 1 -delete",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
