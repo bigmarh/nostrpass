@@ -1,0 +1,116 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'pnpm'
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v2
+      with:
+        version: 8
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: Build Vault
+      run: pnpm --filter @nostrpass/vault build
+      env:
+        NODE_ENV: production
+        VITE_ENVIRONMENT: production
+        VITE_VAULT_URL: ${{ secrets.VAULT_URL }}
+        VITE_NOSTR_RELAYS: ${{ secrets.NOSTR_RELAYS }}
+
+    - name: Build Provider SDK
+      run: pnpm --filter @nostrpass/provider build
+      env:
+        NODE_ENV: production
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Deploy CDN to GCS
+      run: |
+        # Get version
+        VERSION=$(node -p "require('./packages/provider/package.json').version")
+
+        # Upload latest
+        gsutil -h "Cache-Control:public, max-age=31536000, immutable" \
+               -h "Content-Type:application/javascript" \
+               cp packages/provider/dist/index.iife.js gs://${{ secrets.GCS_CDN_BUCKET }}/embassy.js
+
+        # Upload versioned
+        gsutil -h "Cache-Control:public, max-age=31536000, immutable" \
+               -h "Content-Type:application/javascript" \
+               cp packages/provider/dist/index.iife.js gs://${{ secrets.GCS_CDN_BUCKET }}/embassy-v${VERSION}.js
+
+        # Upload source map
+        gsutil -h "Cache-Control:public, max-age=31536000" \
+               -h "Content-Type:application/json" \
+               cp packages/provider/dist/index.iife.js.map gs://${{ secrets.GCS_CDN_BUCKET }}/embassy.js.map
+
+        # Set public read
+        gsutil acl ch -u AllUsers:R gs://${{ secrets.GCS_CDN_BUCKET }}/embassy.js
+        gsutil acl ch -u AllUsers:R gs://${{ secrets.GCS_CDN_BUCKET }}/embassy-v${VERSION}.js
+        gsutil acl ch -u AllUsers:R gs://${{ secrets.GCS_CDN_BUCKET }}/embassy.js.map
+
+    - name: Deploy Vault to GCS
+      run: |
+        # Upload HTML
+        gsutil -h "Cache-Control:no-cache, must-revalidate" \
+               -h "Content-Type:text/html" \
+               cp apps/vault/dist/index.html gs://${{ secrets.GCS_VAULT_BUCKET }}/index.html
+
+        # Upload assets
+        gsutil -m -h "Cache-Control:public, max-age=31536000, immutable" \
+               rsync -r -c -d \
+               apps/vault/dist/assets/ gs://${{ secrets.GCS_VAULT_BUCKET }}/assets/
+
+        # Upload workers
+        if [ -f "apps/vault/dist/crypto.worker.js" ]; then
+          gsutil -h "Cache-Control:public, max-age=31536000, immutable" \
+                 -h "Content-Type:application/javascript" \
+                 cp apps/vault/dist/crypto.worker.js* gs://${{ secrets.GCS_VAULT_BUCKET }}/
+        fi
+
+        # Set public read
+        gsutil -m acl ch -r -u AllUsers:R gs://${{ secrets.GCS_VAULT_BUCKET }}
+
+    - name: Purge CloudFlare Cache
+      if: ${{ secrets.CLOUDFLARE_ZONE_ID != '' }}
+      run: |
+        curl -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+          -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          --data '{"purge_everything":true}'
+
+    - name: Notify deployment
+      if: success()
+      run: |
+        echo "✅ Deployment successful!"
+        echo "📍 Vault: https://vault.nostrpass.com"
+        echo "📍 CDN: https://cdn.nostrpass.com/embassy.js"
+
+    - name: Notify failure
+      if: failure()
+      run: |
+        echo "❌ Deployment failed!"

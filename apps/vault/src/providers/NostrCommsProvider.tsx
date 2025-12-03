@@ -39,28 +39,36 @@ export const NostrCommsProvider: ParentComponent = (props) => {
   const [isConnected, setIsConnected] = createSignal(false);
   const [relays, setRelays] = createSignal<RelayStatus[]>([]);
   const [usernameRegistry, setUsernameRegistry] = createSignal<UsernameRegistry | null>(null);
-  
-  const { getRelays, environmentName, isDebugMode } = useEnvironment();
+
+  const { getRelays, storageEnvironmentName, isDebugMode } = useEnvironment();
   let pool: SimplePool | null = null;
 
   onMount(async () => {
     try {
       // Initialize connection pool
       pool = new SimplePool();
-      
+
       // Get relays from environment config
       const envRelays = getRelays();
-      
+
       // Set up relay status tracking
       const initialRelays = envRelays.map(url => ({
         url,
         connected: false
       }));
       setRelays(initialRelays);
-      
+
+      // CRITICAL: Configure nostrHelpers to use the correct storage environment
+      // This ensures username checks query the right namespace
+      const { configureNostrPass } = await import('@nostrpass/nostrHelpers');
+      configureNostrPass({
+        environment: storageEnvironmentName()
+      });
+      console.log('[NostrComms] Configured storage environment:', storageEnvironmentName());
+
       // Initialize username registry with environment-aware setup
       const registrationKeys = await getRegistrationKeypair();
-      
+
       // Create a custom registry that adds environment tags
       const registry = new EnvironmentAwareUsernameRegistry(registrationKeys, envRelays);
       setUsernameRegistry(registry);

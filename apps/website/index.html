@@ -42,7 +42,8 @@
         const provider = window.initNostrPass({
           appName: 'NostrPass Test Site',
           appDomain: window.location.origin,
-          vaultUrl: 'https://vault.nostrpass.com/'
+          vaultUrl: 'https://vault.nostrpass.com/',
+          // storageEnvironment: 'demo' // Uncomment to save accounts to 'demo' namespace for testing
         });
 
         // Create container for NostrPass button

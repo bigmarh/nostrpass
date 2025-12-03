@@ -8,11 +8,13 @@ interface EnvironmentConfig {
   relays: string[];
   apiBaseUrl?: string;
   debug: boolean;
+  storageEnvironment?: string; // Override for where to save vault data
 }
 
 interface EnvironmentContextType {
   environment: () => EnvironmentConfig;
   environmentName: () => string;
+  storageEnvironmentName: () => string; // Returns storage environment (from URL or detected)
   isProduction: () => boolean;
   isDevelopment: () => boolean;
   isStaging: () => boolean;
@@ -108,13 +110,23 @@ export const EnvironmentProvider: ParentComponent = (props) => {
   onMount(() => {
     const envName = detectEnvironment();
     const envConfig = ENVIRONMENT_CONFIGS[envName] || ENVIRONMENT_CONFIGS.development;
+
+    // Check for storage environment override from URL params (passed by Embassy)
+    const urlParams = new URLSearchParams(window.location.search);
+    const storageEnvParam = urlParams.get('storageEnvironment');
+
+    if (storageEnvParam) {
+      console.log('[EnvironmentProvider] Storage environment override from URL:', storageEnvParam);
+      envConfig.storageEnvironment = storageEnvParam;
+    }
+
     setEnvironment(envConfig);
-    
   });
 
   const value: EnvironmentContextType = {
     environment,
     environmentName: () => environment().name,
+    storageEnvironmentName: () => environment().storageEnvironment || environment().name,
     isProduction: () => environment().isProduction,
     isDevelopment: () => environment().isDevelopment,
     isStaging: () => environment().isStaging,

@@ -23,7 +23,7 @@ interface EmbassyConfig {
     signData?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
   };
   vaultUrl?: string;
-  environment?: string; // Environment namespace for vault data (e.g., 'production', 'development', 'staging')
+  storageEnvironment?: string; // Storage environment override - where to save login/vault data (e.g., 'demo', 'test', 'staging'). Useful for demos/testing without affecting production data.
   namespace?: string; // Custom namespace for vault data (defaults to 'nostrpass.com')
   trustedOrigins?: string[]; // Custom trusted vault origins
   theme?: 'light' | 'dark' | 'auto';
@@ -393,7 +393,7 @@ class NostrPassEmbassy {
       appName: config.appName || document.title || 'Unknown App',
       appDomain,
       permissions: config.permissions,
-      vaultUrl: config.vaultUrl || 'http://localhost:3001',
+      vaultUrl: config.vaultUrl || (import.meta.env.PROD ? 'https://vault.nostrpass.com' : 'http://localhost:3001'),
       trustedOrigins: config.trustedOrigins, // Keep as-is, will handle defaults in initializeMessenger
       theme: config.theme || 'auto',
       debug: config.debug || false,
@@ -452,8 +452,8 @@ class NostrPassEmbassy {
       url.searchParams.set('appName', this.config.appName!);
       url.searchParams.set('appDomain', this.config.appDomain!);
       url.searchParams.set('theme', this.config.theme!);
-      if (this.config.environment) {
-        url.searchParams.set('environment', this.config.environment);
+      if (this.config.storageEnvironment) {
+        url.searchParams.set('storageEnvironment', this.config.storageEnvironment);
       }
       if (this.config.namespace) {
         url.searchParams.set('namespace', this.config.namespace);
@@ -582,8 +582,8 @@ class NostrPassEmbassy {
             newUrl.searchParams.set('appName', this.config.appName!);
             newUrl.searchParams.set('appDomain', this.config.appDomain!);
             newUrl.searchParams.set('theme', this.config.theme!);
-            if (this.config.environment) {
-              newUrl.searchParams.set('environment', this.config.environment);
+            if (this.config.storageEnvironment) {
+              newUrl.searchParams.set('storageEnvironment', this.config.storageEnvironment);
             }
             if (this.config.namespace) {
               newUrl.searchParams.set('namespace', this.config.namespace);

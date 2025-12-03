@@ -37,6 +37,7 @@ function App() {
         if (window.initNostrPass) {
           window.nostr = window.initNostrPass({
             appName: 'NostrPass Demo',
+            storageEnvironment: 'demo',
             theme: 'light'
           })
           console.log('✅ NostrPass initialized and overriding browser extension')

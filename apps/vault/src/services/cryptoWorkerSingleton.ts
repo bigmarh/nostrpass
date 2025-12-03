@@ -12,7 +12,11 @@ export function getCryptoWorker(): any {
     // Prefer module SharedWorker (hot reload reflects handlers) then fall back to classic IIFE
     // Attempt 1: Module SharedWorker using unified worker (supports Shared/Dedicated)
     try {
-      const workerUrl = new URL('../workers/crypto.worker.ts', import.meta.url);
+      // In production: use prebuilt worker from /public
+      // In development: use TypeScript source with HMR
+      const workerUrl = import.meta.env.PROD
+        ? new URL('/crypto.worker.js', window.location.origin)
+        : new URL('../workers/crypto.worker.ts', import.meta.url);
       // NOTE: Adding version param to force reload after code changes
       workerUrl.searchParams.set('v', '14'); // Increment this to force worker reload
       const shared = new SharedWorker(workerUrl, { type: 'module', name: 'nostrpass-crypto-v14' });

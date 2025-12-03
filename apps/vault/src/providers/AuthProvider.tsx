@@ -67,7 +67,7 @@ const AuthContext = createContext<AuthContextType>();
 export const AuthProvider: ParentComponent = (props) => {
   const [authState, setAuthState] = createSignal<AuthState>(initialState);
   const messenger = useMessenger();
-  const { getRelays, environmentName } = useEnvironment();
+  const { getRelays, storageEnvironmentName } = useEnvironment();
   const cryptoWorker = getCryptoWorker();
 
   /**
@@ -287,7 +287,7 @@ export const AuthProvider: ParentComponent = (props) => {
         username,
         password,
         relays: getRelays(),
-        environment: environmentName()
+        environment: storageEnvironmentName()
       });
 
       // State will be updated via AUTH_STATE_CHANGED event
@@ -410,7 +410,7 @@ export const AuthProvider: ParentComponent = (props) => {
         password,
         pin,
         relays: getRelays(),
-        environment: environmentName(),
+        environment: storageEnvironmentName(),
         recovery
       });
 

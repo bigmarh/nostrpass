@@ -21,7 +21,11 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:provider": "playwright test --project=provider",
     "test:e2e:vault": "playwright test --project=vault",
-    "test:auth": "tsx test-auth-cli.js"
+    "test:auth": "tsx test-auth-cli.js",
+    "deploy:cdn": "./scripts/deploy-cdn.sh",
+    "deploy:vault": "./scripts/deploy-vault.sh",
+    "deploy:website": "./scripts/deploy-website.sh",
+    "deploy:all": "./scripts/deploy-all.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
