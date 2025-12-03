@@ -686,8 +686,8 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   return (
     <>
       {/* Identity list */}
-      <div class="flex flex-col gap-2 relative">
-        <header class="flex justify-between items-center">
+      <div class="flex flex-col gap-2 relative flex-1 min-h-0">
+        <header class="flex justify-between items-center shrink-0">
           <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
           <div class="flex gap-2">
             <button
@@ -718,7 +718,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
             placeholder="Search identities..."
             value={searchQuery()}
             onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm shrink-0"
           />
         </Show>
 
@@ -747,8 +747,8 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
           </div>
         </Show>
 
-        {/* Scrollable identity list - max 5 visible */}
-        <div class="overflow-y-auto space-y-2" style="max-height: 550px;">
+        {/* Scrollable identity list - stretches to fill space */}
+        <div class="overflow-y-auto space-y-2 flex-1 min-h-0">
           <For each={filteredIdentities()}>
           {(identity) => (
             <div

@@ -400,9 +400,21 @@ class NostrPassEmbassy {
       parentPinOverlay: config.parentPinOverlay ?? false
     };
 
+    // Disable console.log in production unless debug is enabled
+    if (import.meta.env.PROD && !this.config.debug) {
+      const isDebugEnabled = typeof localStorage !== 'undefined' &&
+        localStorage.getItem('nostrpass:debug') === 'true';
+      if (!isDebugEnabled) {
+        console.log = () => {};
+        console.info = () => {};
+      }
+    }
+
     this.handlers = Object.keys(embassyMessageHandlers(this));
 
-    console.log('🚀 NostrPass Embassy initialized', this.config);
+    if (this.config.debug || import.meta.env.DEV) {
+      console.log('🚀 NostrPass Embassy initialized', this.config);
+    }
 
     // Inject styles on initialization
     this.injectStyles();
@@ -635,10 +647,22 @@ class NostrPassEmbassy {
           return;
         }
 
-        // Determine horizontal position (keep within viewport)
-        left = rect.left;
-        if (left + iframeWidth > window.innerWidth - gap) {
+        // Determine horizontal position
+        // Check if button is closer to right edge (like the dropdown does)
+        const buttonCenterX = rect.left + (rect.width / 2);
+        const isRightAligned = buttonCenterX > window.innerWidth / 2;
+
+        if (isRightAligned) {
+          // Align to the right of the button (like dropdown with right: 0)
           left = rect.right - iframeWidth;
+        } else {
+          // Align to the left of the button
+          left = rect.left;
+        }
+
+        // Ensure it stays within viewport bounds
+        if (left + iframeWidth > window.innerWidth - gap) {
+          left = window.innerWidth - iframeWidth - gap;
         }
         if (left < gap) {
           left = gap;
@@ -693,7 +717,7 @@ class NostrPassEmbassy {
    * Legacy method for backward compatibility
    * @deprecated Use openPage() instead
    */
-  public show(page: string = 'vault', mode: 'full' | 'compact' | 'minimal' = 'full', buttonElement?: HTMLElement): void {
+  public show(page: string = 'vault', mode: 'full' | 'compact' | 'minimal' | 'thin' = 'full', buttonElement?: HTMLElement): void {
     // Map old page names to new VaultPage type
     let vaultPage: VaultPage;
     if (page === 'unlock' || page === 'unlock-modal') {
@@ -834,7 +858,6 @@ class NostrPassEmbassy {
         background: transparent !important;
         z-index: 2147483647 !important;
         overflow: hidden !important;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
       }
 
       @media (max-width: 500px) {

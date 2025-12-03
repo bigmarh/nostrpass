@@ -219,10 +219,10 @@ function App() {
               &lt;&lt; Back
             </button>
 
-            <h2 className="text-4xl font-bold mb-8">Quick Start</h2>
+            <h2 className="text-2xl font-bold mb-8">Quick Start</h2>
 
             <div className="mb-8">
-              <h3 className="text-2xl font-semibold mb-4">Add NostrPass to your website in 2 lines</h3>
+              <h3 className="text-xl font-semibold mb-4">Add NostrPass to your website in 2 lines</h3>
               <p className="text-gray-600 mb-6">
                 Drop in a ready-made login button that handles everything for you.
               </p>
@@ -458,17 +458,18 @@ function App() {
           showDemo ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
+    
         <div className="h-full overflow-y-auto">
           <div className="max-w-4xl mx-auto p-8">
-            <button
-              onClick={() => setShowDemo(false)}
-              className="mb-8 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
-            >
-              Back &gt;&gt;
-            </button>
-
+            <div className="flex justify-end">
+          <button
+          onClick={() => setShowDemo(false)}
+          className="mb-8 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
+          >
+          Back &gt;&gt;
+        </button></div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-4xl font-bold">Try NostrPass</h2>
+              <h2 className="text-2xl font-bold">Try NostrPass</h2>
               <div id="nostrpass-button-container"></div>
             </div>
             <p className="text-gray-600 mb-4">
@@ -486,98 +487,104 @@ function App() {
               <p className="text-xs text-blue-700 mt-2">Click the NostrPass button above to login, then try posting a reaction!</p>
             </div>
 
-            {/* Emoji Reactions */}
-            <div className="mb-6">
-              <h3 className="text-xl font-semibold mb-3">Quick Reactions</h3>
-              <p className="text-gray-600 mb-4 text-sm">Choose an emoji to share your vibe</p>
-              <div className="grid grid-cols-8 md:grid-cols-16 gap-2">
-                {['🚀', '⚡', '🔥', '💜', '👍', '🤙', '✨', '🎉', '💯', '🌟', '❤️', '🙌', '👏', '🫂', '🌈', '☕'].map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => handleReaction(emoji)}
-                    disabled={!pubkey}
-                    className={`aspect-square text-2xl bg-white border-2 border-gray-300 rounded-lg hover:border-black hover:scale-110 transition-all ${!pubkey ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Reaction Wall */}
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold mb-2">Live Reactions</h3>
-              <p className="text-gray-600 mb-3 text-sm">See what's being published to Nostr</p>
-              <div className="max-h-[300px] overflow-y-auto border-2 border-gray-300 rounded-lg p-3 bg-gray-50">
-                {reactions.length === 0 ? (
-                  <p className="text-gray-400 text-center">No reactions yet. Be the first!</p>
-                ) : (
-                  <div className="space-y-2">
-                    {reactions.map((reaction) => (
-                      <div
-                        key={reaction.id}
-                        className="bg-white border border-gray-200 rounded-lg p-3"
+            {/* Side by side layout for reactions and actions */}
+            <div className="grid md:grid-cols-2 gap-6 mb-8">
+              {/* Left column - Quick Actions */}
+              <div className="space-y-6">
+                {/* Emoji Reactions */}
+                <div>
+                  <h3 className="text-xl font-semibold mb-3">Quick Reactions</h3>
+                  <p className="text-gray-600 mb-4 text-sm">Choose an emoji to share your vibe</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {['🚀', '⚡', '🔥', '💜', '👍', '🤙', '✨', '🎉', '💯', '🌟', '❤️', '🙌', '👏', '🫂', '🌈', '☕'].map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleReaction(emoji)}
+                        disabled={!pubkey}
+                        className={`aspect-square text-2xl bg-white border-2 border-gray-300 rounded-lg hover:border-black hover:scale-110 transition-all ${!pubkey ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
-                        <div className="flex items-start justify-between mb-1">
-                          <p className="text-base flex-1">{reaction.content}</p>
-                          <div className="flex flex-col items-end gap-1 ml-3">
-                            <span className="text-xs text-gray-400 whitespace-nowrap">
-                              {new Date(reaction.created_at * 1000).toLocaleTimeString()}
-                            </span>
-                            <div className="flex gap-1">
-                              <a
-                                href={`https://njump.me/${reaction.id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2 py-0.5 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors whitespace-nowrap"
-                              >
-                                View Note
-                              </a>
-                              <a
-                                href={`https://njump.me/${nip19.npubEncode(reaction.pubkey)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2 py-0.5 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors whitespace-nowrap"
-                              >
-                                View Author
-                              </a>
-                            </div>
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-500">
-                          by {nip19.npubEncode(reaction.pubkey).substring(0, 12)}...
-                        </p>
-                      </div>
+                        {emoji}
+                      </button>
                     ))}
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
 
-            {/* Pre-made Statements */}
-            <div className="mb-8">
-              <h3 className="text-xl font-semibold mb-3">Share Your Thoughts</h3>
-              <p className="text-gray-600 mb-4 text-sm">Pick a statement to sign and publish</p>
-              <div className="grid gap-2">
-                {[
-                  '🚀 Nostr is the future!',
-                  '⚡ Lightning fast authentication',
-                  '🔐 Privacy-first is the way',
-                  '💜 Love this technology',
-                  '✨ This is amazing!',
-                  '🎯 Perfect developer experience',
-                  '🌟 Built different',
-                  '🔥 Absolutely fire'
-                ].map((statement) => (
-                  <button
-                    key={statement}
-                    onClick={() => handleReaction(statement)}
-                    disabled={!pubkey}
-                    className={`px-4 py-2 text-sm bg-white text-left border-2 border-gray-300 rounded-lg hover:border-black hover:bg-gray-50 transition-colors ${!pubkey ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {statement}
-                  </button>
-                ))}
+                {/* Pre-made Statements */}
+                <div>
+                  <h3 className="text-xl font-semibold mb-3">Share Your Thoughts</h3>
+                  <p className="text-gray-600 mb-4 text-sm">Pick a statement to sign and publish</p>
+                  <div className="grid gap-2">
+                    {[
+                      '🚀 Nostr is the future!',
+                      '⚡ Lightning fast authentication',
+                      '🔐 Privacy-first is the way',
+                      '💜 Love this technology',
+                      '✨ This is amazing!',
+                      '🎯 Perfect developer experience',
+                      '🌟 Built different',
+                      '🔥 Absolutely fire'
+                    ].map((statement) => (
+                      <button
+                        key={statement}
+                        onClick={() => handleReaction(statement)}
+                        disabled={!pubkey}
+                        className={`px-4 py-2 text-sm bg-white text-left border-2 border-gray-300 rounded-lg hover:border-black hover:bg-gray-50 transition-colors ${!pubkey ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {statement}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right column - Live Reactions */}
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Live Reactions</h3>
+                <p className="text-gray-600 mb-3 text-sm">See what's being published to Nostr</p>
+                <div className="h-[calc(100%-4rem)] overflow-y-auto border-2 border-gray-300 rounded-lg p-3 bg-gray-50">
+                  {reactions.length === 0 ? (
+                    <p className="text-gray-400 text-center">No reactions yet. Be the first!</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {reactions.map((reaction) => (
+                        <div
+                          key={reaction.id}
+                          className="bg-white border border-gray-200 rounded-lg p-3"
+                        >
+                          <div className="flex items-start justify-between mb-1">
+                            <p className="text-base flex-1">{reaction.content}</p>
+                            <div className="flex flex-col items-end gap-1 ml-3">
+                              <span className="text-xs text-gray-400 whitespace-nowrap">
+                                {new Date(reaction.created_at * 1000).toLocaleTimeString()}
+                              </span>
+                              <div className="flex gap-1">
+                                <a
+                                  href={`https://njump.me/${reaction.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2 py-0.5 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors whitespace-nowrap"
+                                >
+                                  View Note
+                                </a>
+                                <a
+                                  href={`https://njump.me/${nip19.npubEncode(reaction.pubkey)}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2 py-0.5 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors whitespace-nowrap"
+                                >
+                                  View Author
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            by {nip19.npubEncode(reaction.pubkey).substring(0, 12)}...
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

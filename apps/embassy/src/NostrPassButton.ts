@@ -537,6 +537,89 @@ export class NostrPassButton {
         border-radius: 8px;
       }
 
+      .nostrpass-lock-toggle-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .nostrpass-lock-icons {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 44px;
+        gap: 8px;
+      }
+
+      .nostrpass-lock-icon,
+      .nostrpass-unlock-icon {
+        color: #6b7280;
+        flex-shrink: 0;
+      }
+
+      [data-theme="dark"] .nostrpass-lock-icon,
+      [data-theme="dark"] .nostrpass-unlock-icon {
+        color: #9ca3af;
+      }
+
+      .nostrpass-lock-toggle-btn {
+        padding: 4px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 6px;
+        transition: all 0.15s ease;
+        display: flex;
+        align-items: center;
+      }
+
+      .nostrpass-lock-slider {
+        position: relative;
+        display: inline-block;
+        width: 36px;
+        height: 20px;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+      }
+
+      .nostrpass-lock-slider.unlocked {
+        background: #10b981;
+      }
+
+      .nostrpass-lock-slider.locked {
+        background: #6b7280;
+      }
+
+      [data-theme="dark"] .nostrpass-lock-slider.unlocked {
+        background: #10b981;
+      }
+
+      [data-theme="dark"] .nostrpass-lock-slider.locked {
+        background: #9ca3af;
+      }
+
+      .nostrpass-lock-slider-thumb {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        background: white;
+        border-radius: 50%;
+        transition: transform 0.3s ease;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+      }
+
+      .nostrpass-lock-slider.unlocked .nostrpass-lock-slider-thumb {
+        transform: translateX(16px);
+      }
+
+      .nostrpass-lock-slider.locked .nostrpass-lock-slider-thumb {
+        transform: translateX(0);
+      }
+
       .nostrpass-dropdown-avatar {
         width: 40px;
         height: 40px;
@@ -943,6 +1026,30 @@ export class NostrPassButton {
                 <div class="nostrpass-dropdown-name">${displayName}</div>
                 ${username ? `<div class="nostrpass-dropdown-username">${username}</div>` : user.npub ? `<div class="nostrpass-dropdown-npub">${user.npub.slice(0, 16)}...</div>` : ''}
               </div>
+              ${hasAuthorizedIdentity ? `
+              <div class="nostrpass-lock-toggle-container">
+                <button
+                  data-action="toggle-lock"
+                  data-is-locked="false"
+                  class="nostrpass-lock-toggle-btn"
+                  title="Lock vault"
+                >
+                  <span class="nostrpass-lock-slider unlocked">
+                    <span class="nostrpass-lock-slider-thumb"></span>
+                  </span>
+                </button>
+                <div class="nostrpass-lock-icons">
+                  <svg class="nostrpass-lock-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  <svg class="nostrpass-unlock-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                  </svg>
+                </div>
+              </div>
+              ` : ''}
             </div>
           </div>
           ${identitiesHTML}
@@ -954,12 +1061,6 @@ export class NostrPassButton {
                 <path d="M12.933 10.267a1.333 1.333 0 00.267 1.466l.048.049a1.618 1.618 0 11-2.29 2.289l-.048-.048a1.333 1.333 0 00-1.467-.267 1.333 1.333 0 00-.81 1.22v.137a1.619 1.619 0 01-3.237 0v-.073A1.333 1.333 0 004.133 13.6a1.333 1.333 0 00-1.466.267l-.049.048a1.618 1.618 0 11-2.289-2.29l.048-.048a1.333 1.333 0 00.267-1.467 1.333 1.333 0 00-1.22-.81h-.137a1.619 1.619 0 010-3.237h.073A1.333 1.333 0 00.6 4.8a1.333 1.333 0 00-.267-1.466l-.048-.049a1.618 1.618 0 112.29-2.289l.048.048a1.333 1.333 0 001.467.267h.064a1.333 1.333 0 00.81-1.22v-.137a1.619 1.619 0 013.237 0v.073a1.333 1.333 0 00.81 1.22 1.333 1.333 0 001.466-.267l.049-.048a1.618 1.618 0 112.289 2.29l-.048.048a1.333 1.333 0 00-.267 1.467v.064a1.333 1.333 0 001.22.81h.137a1.619 1.619 0 010 3.237h-.073a1.333 1.333 0 00-1.22.81z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               <span>Manage account</span>
-            </button>
-            <button class="nostrpass-dropdown-item" data-action="disconnect-app">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2v12M12 6l-4 4-4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span>Disconnect this app</span>
             </button>
             <button class="nostrpass-dropdown-item" data-action="sign-out">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -1015,16 +1116,16 @@ export class NostrPassButton {
       });
     });
 
+    // Lock toggle button
+    const lockToggleBtn = this.container.querySelector('[data-action="toggle-lock"]') as HTMLButtonElement;
+    lockToggleBtn?.addEventListener('click', () => {
+      this.handleToggleLock();
+    });
+
     const manageBtn = this.container.querySelector('[data-action="manage-account"]') as HTMLButtonElement;
     manageBtn?.addEventListener('click', () => {
       this.closeDropdown();
       this.handleManageAccount();
-    });
-
-    const disconnectAppBtn = this.container.querySelector('[data-action="disconnect-app"]') as HTMLButtonElement;
-    disconnectAppBtn?.addEventListener('click', () => {
-      this.closeDropdown();
-      this.handleDisconnectApp();
     });
 
     const signOutBtn = this.container.querySelector('[data-action="sign-out"]') as HTMLButtonElement;
@@ -1080,6 +1181,11 @@ export class NostrPassButton {
         };
         this.saveSession(this.currentUser);
         await this.render();
+
+        // Call onLogin callback to notify app of identity change
+        if (this.config.onLogin) {
+          this.config.onLogin(this.currentUser);
+        }
       }
     } catch (error: any) {
       console.error('Failed to switch identity:', error);
@@ -1102,6 +1208,11 @@ export class NostrPassButton {
             };
             this.saveSession(this.currentUser);
             await this.render();
+
+            // Call onLogin callback to notify app of identity change
+            if (this.config.onLogin) {
+              this.config.onLogin(this.currentUser);
+            }
           }
         } catch (manageError) {
           console.error('Failed to authorize identity:', manageError);
@@ -1223,6 +1334,17 @@ export class NostrPassButton {
 
           // Hide the vault modal
           this.embassy.hide();
+
+          // Update lock toggle state to unlocked
+          const lockBtn = this.container.querySelector('[data-action="toggle-lock"]') as HTMLElement;
+          const sliderEl = lockBtn?.querySelector('.nostrpass-lock-slider') as HTMLElement;
+
+          if (sliderEl) {
+            sliderEl.classList.remove('locked');
+            sliderEl.classList.add('unlocked');
+            lockBtn.setAttribute('data-is-locked', 'false');
+            lockBtn.title = 'Lock vault';
+          }
 
           // Show dropdown after a short delay
           setTimeout(() => {
@@ -1370,7 +1492,7 @@ export class NostrPassButton {
         if (permissions) queryParams.permissions = permissions;
 
         this.embassy.openPage('unlock', {
-          size: 'compact',
+          size: 'thin',
           buttonElement: btn,
           queryParams
         });
@@ -1406,20 +1528,37 @@ export class NostrPassButton {
     }
   }
 
-  private async handleDisconnectApp() {
+  private async handleToggleLock() {
     try {
-      if (!this.currentUser) return;
+      // Lock the vault via embassy
+      console.log('[NostrPassButton] Locking vault...');
 
-      // Just clear local session - don't call embassy.logout()
-      // This only disconnects the current app
-      console.log('[NostrPassButton] Disconnecting app (local only)');
+      // Get the button element and update its state immediately for visual feedback
+      const lockBtn = this.container.querySelector('[data-action="toggle-lock"]') as HTMLElement;
+      const sliderEl = lockBtn?.querySelector('.nostrpass-lock-slider') as HTMLElement;
 
-      this.currentUser = null;
-      this.clearSession();
-      this.render();
-      this.config.onSignOut?.();
+      if (sliderEl) {
+        sliderEl.classList.remove('unlocked');
+        sliderEl.classList.add('locked');
+        lockBtn.setAttribute('data-is-locked', 'true');
+        lockBtn.title = 'Vault locked';
+      }
+
+      // Close the dropdown
+      this.closeDropdown();
+
+      // Send lock vault message to the vault and wait for it to complete
+      try {
+        await this.embassy.messenger.request('LOCK_VAULT', {});
+        console.log('[NostrPassButton] Vault locked successfully');
+
+        // Add a small delay to ensure the lock state propagates
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (err) {
+        console.error('[NostrPassButton] Failed to send lock message:', err);
+      }
     } catch (error) {
-      console.error('[NostrPassButton] Failed to disconnect app:', error);
+      console.error('[NostrPassButton] Failed to lock vault:', error);
     }
   }
 
@@ -1469,8 +1608,7 @@ export class NostrPassButton {
     const confirmed = confirm(
       'Sign out of NostrPass?\n\n' +
       'This will log you out across all apps and browser tabs. ' +
-      'You\'ll need to sign in again to use NostrPass.\n\n' +
-      'Tip: Use "Disconnect this app" to just disconnect the current app.'
+      'You\'ll need to sign in again to use NostrPass.'
     );
 
     if (!confirmed) {
