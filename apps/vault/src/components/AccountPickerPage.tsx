@@ -150,24 +150,43 @@ export const AccountPickerPage: Component = () => {
     const selectedIdentityData = identities().find((item: any) => item.index === identityIndex);
     const isAuthorized = selectedIdentityData?.isAuthorized || false;
 
+    console.log('[AccountPickerPage] handleSelect called:', { identityIndex, isAuthorized, selectedIdentityData });
+
     try {
       // Update active identity in localStorage (per-browser, not synced)
       setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
+
+      // Notify embassy of identity change so NostrPassButton can update
+      send('VAULT_DATA_UPDATED', {
+        username: currentUser.profile.username,
+        timestamp: Date.now()
+      });
 
       if (isAuthorized) {
         // Identity is already authorized - send message to parent and close
         if (requestId) {
           // Dispatch event for internal vault listeners
           window.dispatchEvent(new CustomEvent('account-picker-selected', {
-            detail: { requestId, identityIndex }
+            detail: { requestId, identityIndex, identity: selectedIdentityData }
           }));
           // Send message to parent window (embassy/NostrPassButton)
-          send('ACCOUNT_PICKER_SELECTED', { requestId, identityIndex });
+          send('ACCOUNT_PICKER_SELECTED', {
+            requestId,
+            identityIndex,
+            identity: {
+              publicKey: selectedIdentityData?.publicKey,
+              npub: selectedIdentityData?.npub,
+              nickname: selectedIdentityData?.nickname,
+              authorized: true,
+              avatar: selectedIdentityData?.avatar
+            }
+          });
         }
         // Close the modal
         send('HIDE_VAULT');
       } else {
         // Identity not authorized - show simple auth prompt overlay
+        console.log('[AccountPickerPage] Identity not authorized, showing auth prompt');
         const authRequestId = `simple-auth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
         // Set up listeners for the auth prompt response
@@ -179,10 +198,20 @@ export const AccountPickerPage: Component = () => {
             if (requestId) {
               // Dispatch event for internal vault listeners
               window.dispatchEvent(new CustomEvent('account-picker-selected', {
-                detail: { requestId, identityIndex }
+                detail: { requestId, identityIndex, identity: selectedIdentityData }
               }));
               // Send message to parent window (embassy/NostrPassButton)
-              send('ACCOUNT_PICKER_SELECTED', { requestId, identityIndex });
+              send('ACCOUNT_PICKER_SELECTED', {
+                requestId,
+                identityIndex,
+                identity: {
+                  publicKey: selectedIdentityData?.publicKey,
+                  npub: selectedIdentityData?.npub,
+                  nickname: selectedIdentityData?.nickname,
+                  authorized: true,
+                  avatar: selectedIdentityData?.avatar
+                }
+              });
             }
 
             // Wait for button to update before closing (auth prompt already waited, this is extra safety)

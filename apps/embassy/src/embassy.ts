@@ -13,7 +13,7 @@ import { NostrPassButton, NostrPassButtonConfig, UserInfo } from './NostrPassBut
 
 interface EmbassyConfig {
   appName?: string;
-  appDomain?: string;
+  appDomain?: string; // Internal use only - always set to window.location.host, cannot be configured by developer
   permissions?: {
     getPublicKey?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
     getRelays?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
@@ -23,6 +23,8 @@ interface EmbassyConfig {
     signData?: 'ALLOW' | 'ASK_EVERYTIME' | 'DENY';
   };
   vaultUrl?: string;
+  environment?: string; // Environment namespace for vault data (e.g., 'production', 'development', 'staging')
+  namespace?: string; // Custom namespace for vault data (defaults to 'nostrpass.com')
   trustedOrigins?: string[]; // Custom trusted vault origins
   theme?: 'light' | 'dark' | 'auto';
   debug?: boolean;
@@ -142,6 +144,7 @@ class NostrPassEmbassy {
   // private lastUnlockAt = 0;
   private unlockResolvers: Array<() => void> = [];
   private permissionResolvers: Array<() => void> = [];
+  private authResolvers: Array<() => void> = [];
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private sleep(ms: number) { return new Promise(res => setTimeout(res, ms)); }
 
@@ -173,6 +176,20 @@ class NostrPassEmbassy {
     });
   }
 
+  private waitForAuth(): Promise<void> {
+    return new Promise((resolve) => {
+      this.authResolvers.push(resolve);
+      // Timeout after 5 minutes (longer for signup/login)
+      setTimeout(() => {
+        const index = this.authResolvers.indexOf(resolve);
+        if (index > -1) {
+          this.authResolvers.splice(index, 1);
+          resolve();
+        }
+      }, 300000);
+    });
+  }
+
   public notifyUnlocked(): void {
     console.log('🔓 Notifying unlock resolvers:', this.unlockResolvers.length);
     while (this.unlockResolvers.length > 0) {
@@ -185,6 +202,14 @@ class NostrPassEmbassy {
     console.log('✅ Notifying permission resolvers:', this.permissionResolvers.length);
     while (this.permissionResolvers.length > 0) {
       const resolve = this.permissionResolvers.shift();
+      if (resolve) resolve();
+    }
+  }
+
+  public notifyAuthenticated(): void {
+    console.log('🔐 Notifying auth resolvers:', this.authResolvers.length);
+    while (this.authResolvers.length > 0) {
+      const resolve = this.authResolvers.shift();
       if (resolve) resolve();
     }
   }
@@ -361,17 +386,8 @@ class NostrPassEmbassy {
     }
 
   constructor(config: EmbassyConfig = {}) {
-    // Normalize appDomain to just origin (host:port), strip any paths
-    let appDomain = config.appDomain || window.location.host;
-    if (appDomain.includes('://')) {
-      try {
-        appDomain = new URL(appDomain).host;
-      } catch {
-        // If URL parsing fails, use as-is
-      }
-    }
-    // Remove any trailing slashes or paths
-    appDomain = appDomain.split('/')[0];
+    // Always use window.location.host for security - appDomain cannot be configured
+    const appDomain = window.location.host;
 
     this.config = {
       appName: config.appName || document.title || 'Unknown App',
@@ -424,6 +440,12 @@ class NostrPassEmbassy {
       url.searchParams.set('appName', this.config.appName!);
       url.searchParams.set('appDomain', this.config.appDomain!);
       url.searchParams.set('theme', this.config.theme!);
+      if (this.config.environment) {
+        url.searchParams.set('environment', this.config.environment);
+      }
+      if (this.config.namespace) {
+        url.searchParams.set('namespace', this.config.namespace);
+      }
 
       this.iframe.src = url.toString();
       console.log('[Embassy] Creating iframe with:', {
@@ -436,7 +458,7 @@ class NostrPassEmbassy {
 
       // Security attributes
       this.iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
-      this.iframe.setAttribute('allow', 'publickey-credentials-create; publickey-credentials-get');
+      this.iframe.setAttribute('allow', 'publickey-credentials-create; publickey-credentials-get; clipboard-write');
 
       // Accessibility attributes for hidden state
       this.iframe.setAttribute('aria-hidden', 'true');
@@ -548,6 +570,12 @@ class NostrPassEmbassy {
             newUrl.searchParams.set('appName', this.config.appName!);
             newUrl.searchParams.set('appDomain', this.config.appDomain!);
             newUrl.searchParams.set('theme', this.config.theme!);
+            if (this.config.environment) {
+              newUrl.searchParams.set('environment', this.config.environment);
+            }
+            if (this.config.namespace) {
+              newUrl.searchParams.set('namespace', this.config.namespace);
+            }
             // Add custom query params
             Object.keys(queryParams).forEach(key => {
               newUrl.searchParams.set(key, queryParams[key]);
@@ -1096,7 +1124,8 @@ class NostrPassEmbassy {
         // If user is not authenticated at all, show full vault for login
         const errorMsg = String(error?.message || error);
         if (errorMsg.toLowerCase().includes('not authenticated')) {
-          console.log('⚠️ User not authenticated, showing full vault for login');
+          console.log('⚠️ User not authenticated, showing full vault for login and waiting for auth...');
+          unlockPromise = this.waitForAuth();
           this.show('vault', 'full');
         }
       }

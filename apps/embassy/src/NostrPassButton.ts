@@ -21,12 +21,20 @@ export interface NostrPassButtonConfig {
    * - 'auto': Follow system preference (default)
    */
   theme?: 'light' | 'dark' | 'auto';
+  /** Show only avatar/initials, expand to show username on hover */
+  expandOnHover?: boolean;
+  /** Style variant (deprecated - use expandOnHover instead) */
+  style?: string;
   /** Callback when user signs in */
   onSignIn?: (user: UserInfo) => void;
   /** Callback when user signs out */
   onSignOut?: () => void;
   /** Callback on errors */
   onError?: (error: unknown) => void;
+  /** Callback when user logs in (alias for onSignIn) */
+  onLogin?: (user: UserInfo) => void;
+  /** Callback when user logs out (alias for onSignOut) */
+  onLogout?: () => void;
 }
 
 export interface UserInfo {
@@ -43,6 +51,7 @@ export class NostrPassButton {
   private container: HTMLDivElement;
   private embassy: any; // NostrPassEmbassy instance
   private currentUser: UserInfo | null = null;
+  private allIdentities: any[] = [];
   private theme: 'light' | 'dark' = 'light';
   private isDropdownOpen: boolean = false;
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
@@ -62,6 +71,11 @@ export class NostrPassButton {
     // Create container
     this.container = document.createElement('div');
     this.container.className = `nostrpass-button-container ${config.className || ''}`;
+
+    // Set expand-on-hover attribute
+    if (config.expandOnHover) {
+      this.container.setAttribute('data-expand-on-hover', 'true');
+    }
 
     // Apply theme
     this.updateTheme();
@@ -124,6 +138,13 @@ export class NostrPassButton {
       }
     });
 
+    // Listen for account picker selection (when identity is switched from vault)
+    window.addEventListener('account-picker-selected', (event: Event) => {
+      const customEvent = event as CustomEvent;
+      console.log('[NostrPassButton] 🔄 Account picker selected event received', customEvent.detail);
+      this.handleAccountPickerSelection(customEvent.detail);
+    });
+
     // Listen for vault-data-refresh events to update the button and dropdown
     window.addEventListener('vault-data-refresh', async (event) => {
       console.log('[NostrPassButton] 🔄 Vault data refresh event received:', event);
@@ -172,6 +193,11 @@ export class NostrPassButton {
 
               // Save updated session
               this.saveSession(this.currentUser);
+
+              // Call onLogin callback to notify app of identity change
+              if (this.config.onLogin) {
+                this.config.onLogin(this.currentUser);
+              }
 
               // Re-render to reflect changes
               console.log('[NostrPassButton] Re-rendering button with new active identity...');
@@ -284,7 +310,6 @@ export class NostrPassButton {
         cursor: pointer;
         transition: all 0.15s ease;
         background: #fff;
-        width: 200px;
       }
 
       .nostrpass-btn-base:hover {
@@ -330,7 +355,7 @@ export class NostrPassButton {
         justify-content: center;
         font-size: 20px;
         flex-shrink: 0;
-        background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+        background: linear-gradient(135deg, #424242 0%, #6d6e71 100%);
         border: 1px solid #d1d5db;
       }
 
@@ -427,6 +452,18 @@ export class NostrPassButton {
 
       [data-theme="dark"] .nostrpass-user-btn-text {
         color: #f9fafb;
+      }
+
+      /* Icon-only mode: perfect circle */
+      .nostrpass-button-container[data-expand-on-hover="true"] .nostrpass-user-btn {
+        /* width: 48px; */
+        /* height: 48px; */
+        padding: 3px;
+        border-radius: 50%;
+      }
+
+      .nostrpass-button-container[data-expand-on-hover="true"] .nostrpass-user-btn-text {
+        display: none;
       }
 
       .nostrpass-chevron {
@@ -823,12 +860,15 @@ export class NostrPassButton {
     try {
       const response = await this.embassy.getAllIdentities();
       allIdentities = response?.identities || [];
+      this.allIdentities = allIdentities; // Store for later use
+      console.log('[NostrPassButton] getAllIdentities response:', { response, allIdentities });
     } catch (error) {
       console.warn('Failed to fetch all identities:', error);
     }
 
     // Filter to only show authorized identities for this app
     const authorizedIdentities = allIdentities.filter((id: any) => id.isAuthorized);
+    console.log('[NostrPassButton] Authorized identities:', { authorizedIdentities, total: allIdentities.length });
 
     // Check if current user is authorized
     const hasAuthorizedIdentity = user.authorized || authorizedIdentities.length > 0;
@@ -1005,8 +1045,28 @@ export class NostrPassButton {
   private async handleSwitchIdentity(identityIndex: number) {
     this.closeDropdown();
 
+    // Check if this identity is authorized
+    const selectedIdentity = this.allIdentities.find(id => id.index === identityIndex);
+    const isAuthorized = selectedIdentity?.isAuthorized || false;
+
+    console.log('[NostrPassButton] handleSwitchIdentity:', { identityIndex, isAuthorized, selectedIdentity });
+
+    if (!isAuthorized) {
+      // Identity not authorized - open vault to authorize
+      console.log('[NostrPassButton] Identity not authorized, opening account picker for authorization');
+      try {
+        await this.embassy.manageAccount({
+          forcePrompt: true,
+          buttonElement: this.container.querySelector('[data-action="toggle-menu"]') as HTMLButtonElement
+        });
+      } catch (error) {
+        console.error('Failed to open account picker:', error);
+      }
+      return;
+    }
+
+    // Identity is authorized - switch directly
     try {
-      // Switch identity directly without opening the vault
       const result = await this.embassy.switchIdentity(identityIndex);
 
       // Update current user if successful
@@ -1190,10 +1250,16 @@ export class NostrPassButton {
 
   private openDropdown() {
     const dropdown = this.container.querySelector('[data-dropdown]') as HTMLElement;
+    const button = this.container.querySelector('.nostrpass-user-btn') as HTMLElement;
     if (!dropdown) return;
 
     this.isDropdownOpen = true;
     dropdown.classList.add('open');
+
+    // Add active class to button for expanded state
+    if (button) {
+      button.classList.add('active');
+    }
 
     // Add click outside listener
     setTimeout(() => {
@@ -1209,10 +1275,17 @@ export class NostrPassButton {
 
   private closeDropdown() {
     const dropdown = this.container.querySelector('[data-dropdown]') as HTMLElement;
+    const button = this.container.querySelector('.nostrpass-user-btn') as HTMLElement;
     if (!dropdown) return;
 
     this.isDropdownOpen = false;
     dropdown.classList.remove('open');
+
+    // Remove active class from button
+    if (button) {
+      button.classList.remove('active');
+    }
+
     this.removeOutsideClickListener();
   }
 
@@ -1356,6 +1429,39 @@ export class NostrPassButton {
     this.clearSession();
     this.render();
     this.config.onSignOut?.();
+    this.config.onLogout?.();
+  }
+
+  private async handleAccountPickerSelection(data: any) {
+    console.log('[NostrPassButton] Handling account picker selection:', data);
+
+    if (!data?.identity) {
+      console.warn('[NostrPassButton] No identity data in account picker selection');
+      return;
+    }
+
+    // Update current user with the selected identity
+    this.currentUser = {
+      identityIndex: data.identityIndex ?? 0,
+      publicKey: data.identity.publicKey,
+      npub: data.identity.npub,
+      nickname: data.identity.nickname,
+      authorized: data.identity.authorized ?? false,
+      avatar: data.identity.avatar
+    };
+
+    // Save to session
+    this.saveSession(this.currentUser);
+
+    // Re-render the button with the new identity
+    await this.render();
+
+    // Call onLogin callback if provided
+    if (this.config.onLogin) {
+      this.config.onLogin(this.currentUser);
+    }
+
+    console.log('[NostrPassButton] Button updated with new identity:', this.currentUser);
   }
 
   private async handleSignOut() {
@@ -1442,6 +1548,12 @@ export class NostrPassButton {
           this.isCheckingAuth = false;
           this.saveSession(this.currentUser);
           this.render();
+
+          // Call onLogin callback if provided (session restored)
+          if (this.config.onLogin) {
+            this.config.onLogin(this.currentUser);
+          }
+
           return true;
         } else {
           // User is not authenticated - clear any stale session
