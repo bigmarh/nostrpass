@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-BUCKET_NAME="nostrpass-cdn"
+BUCKET_NAME="cdn.nostrpass.com"
 
 echo -e "${GREEN}🚀 NostrPass CDN Deployment Script${NC}"
 echo "=================================="
