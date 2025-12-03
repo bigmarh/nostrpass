@@ -279,7 +279,7 @@ export const AccountPickerPage: Component = () => {
   };
 
   return (
-    <>
+    <div class="h-screen w-full overflow-hidden">
       <Show when={loading()}>
         <div class="flex items-center justify-center w-full h-full p-8 bg-white dark:bg-gray-900">
           <div class="text-center">
@@ -314,7 +314,7 @@ export const AccountPickerPage: Component = () => {
           onCancel={handleCancel}
         />
       </Show>
-    </>
+    </div>
   );
 };
 

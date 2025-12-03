@@ -53,38 +53,40 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
   };
 
   return (
-    <div class="flex items-center justify-center w-full h-full p-4">
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div class="p-6">
-          {/* Header */}
-          <div class="mb-6">
-            <div class="text-3xl mb-2">🔑</div>
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-              Select Account
-            </h2>
-            <p class="text-sm text-gray-600 dark:text-gray-400">
-              <strong>{props.appName || props.appOrigin}</strong> needs you to select which identity to use.
-              {props.identities.some(i => !i.isAuthorized) && (
-                <span class="block mt-1 text-xs">
-                  You'll be asked to authorize new identities.
-                </span>
-              )}
-            </p>
-          </div>
+    <div class="flex flex-col w-full h-full">
+      <div class="bg-white dark:bg-gray-800 w-full h-full flex flex-col">
+        {/* Header - Fixed at top */}
+        <div class="p-6 pb-4 shrink-0">
+          <div class="text-3xl mb-2">🔑</div>
+          <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+            Select Account
+          </h2>
+          <p class="text-sm text-gray-600 dark:text-gray-400">
+            <strong>{props.appName || props.appOrigin}</strong> needs you to select which identity to use.
+            {props.identities.some(i => !i.isAuthorized) && (
+              <span class="block mt-1 text-xs">
+                You'll be asked to authorize new identities.
+              </span>
+            )}
+          </p>
+        </div>
 
-          {/* Search input - only show when more than 4 identities */}
-          <Show when={showSearch()}>
+        {/* Search input - Fixed below header */}
+        <Show when={showSearch()}>
+          <div class="px-6 pb-4 shrink-0">
             <input
               type="text"
               placeholder="Search identities..."
               value={searchQuery()}
               onInput={(e) => setSearchQuery(e.currentTarget.value)}
-              class="w-full px-3 py-2 mb-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             />
-          </Show>
+          </div>
+        </Show>
 
-          {/* Identity List - scrollable with max 3 visible */}
-          <div class="space-y-2 mb-6 max-h-[calc(3*88px)] overflow-y-auto">
+        {/* Identity List - Scrollable area only */}
+        <div class="flex-1 min-h-0 overflow-y-auto px-6">
+          <div class="space-y-2 pb-4">
             <For each={filteredIdentities()}>
               {(item) => (
                 <button
@@ -132,8 +134,10 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
               </div>
             </Show>
           </div>
+        </div>
 
-          {/* Actions */}
+        {/* Actions - Fixed at bottom */}
+        <div class="p-6 pt-4 shrink-0 border-t border-gray-200 dark:border-gray-700">
           <div class="flex gap-3">
             <button
               onClick={props.onCancel}
