@@ -29,7 +29,7 @@ function App() {
     // Load NostrPass embassy script when demo panel is opened
     if (showDemo && !nostrPassReady) {
       const script = document.createElement('script')
-      script.src = '/embassy.js'
+      script.src = 'https://cdn.nostrpass.com/embassy.js'
       script.async = true
       script.setAttribute('data-manual-init', 'true') // Disable auto-init, we'll manually initialize
       script.onload = () => {
