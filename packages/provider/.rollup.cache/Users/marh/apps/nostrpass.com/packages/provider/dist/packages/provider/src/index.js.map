@@ -1,1 +1,0 @@
-{"version":3,"file":"index.js","sourceRoot":"","sources":["../../../../src/index.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,aAAa,EAAE,gBAAgB,EAAE,MAAM,gCAAgC,CAAC","sourcesContent":["export { initNostrPass, NostrPassEmbassy } from '@nostrpass/embassy/src/embassy';\n\n\n"]}

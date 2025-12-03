@@ -1,1 +1,0 @@
-{"version":3,"file":"index.js","sourceRoot":"","sources":["../src/index.ts"],"names":[],"mappings":"AAAA,yEAAyE;AACzE,OAAO,EAAE,aAAa,EAAE,gBAAgB,EAAE,MAAM,gCAAgC,CAAC","sourcesContent":["// @ts-expect-error - Embassy is external dependency, resolved at runtime\nexport { initNostrPass, NostrPassEmbassy } from '../../apps/embassy/src/embassy';\n\n\n"]}

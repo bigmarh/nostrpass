@@ -47,7 +47,7 @@ interface NostrOperationOptions {
 
 interface AccountManagerOptions {
   forcePrompt?: boolean;
-  size?: 'full' | 'compact' | 'minimal';
+  size?: 'full' | 'compact' | 'minimal' | 'thin';
   buttonElement?: HTMLElement;
 }
 
@@ -87,7 +87,7 @@ type VaultPage =
 
 interface VaultPageConfig {
   route: string;
-  defaultSize: 'full' | 'compact' | 'tall' | 'minimal';
+  defaultSize: 'full' | 'compact' | 'tall' | 'minimal' | 'thin';
   autoCloseOnSuccess?: boolean; // Auto-hide after successful action
 }
 
@@ -98,7 +98,7 @@ const VAULT_PAGES: Record<VaultPage, VaultPageConfig> = {
   },
   unlock: {
     route: '/unlock-modal',
-    defaultSize: 'compact',
+    defaultSize: 'thin',
     autoCloseOnSuccess: true,
   },
   dashboard: {
@@ -526,7 +526,7 @@ class NostrPassEmbassy {
   public openPage(
     page: VaultPage,
     options?: {
-      size?: 'full' | 'compact' | 'tall' | 'minimal';
+      size?: 'full' | 'compact' | 'tall' | 'minimal' | 'thin';
       buttonElement?: HTMLElement;
       queryParams?: Record<string, string>;
     }
@@ -594,6 +594,7 @@ class NostrPassEmbassy {
     this.iframe.classList.remove('nostrpass-iframe-compact');
     this.iframe.classList.remove('nostrpass-iframe-tall');
     this.iframe.classList.remove('nostrpass-iframe-minimal');
+    this.iframe.classList.remove('nostrpass-iframe-thin');
 
     // Clear any inline styles that might have been set for compact mode
     this.iframe.style.top = '';
@@ -602,16 +603,20 @@ class NostrPassEmbassy {
 
     if (size === 'minimal') {
       this.iframe.classList.add('nostrpass-iframe-minimal');
-    } else if (size === 'compact' || size === 'tall') {
-      this.iframe.classList.add(size === 'tall' ? 'nostrpass-iframe-tall' : 'nostrpass-iframe-compact');
+    } else if (size === 'compact' || size === 'tall' || size === 'thin') {
+      this.iframe.classList.add(
+        size === 'tall' ? 'nostrpass-iframe-tall' :
+        size === 'thin' ? 'nostrpass-iframe-thin' :
+        'nostrpass-iframe-compact'
+      );
 
-      // Position compact/tall mode relative to button if provided, otherwise center
+      // Position compact/tall/thin mode relative to button if provided, otherwise center
       if (buttonElement) {
         const rect = buttonElement.getBoundingClientRect();
         const spaceBelow = window.innerHeight - rect.bottom;
         const spaceAbove = rect.top;
-        const iframeWidth = 395;
-        const iframeHeight = size === 'tall' ? 600 : 395; // Taller for account picker
+        const iframeWidth = size === 'thin' ? 228 : 395;
+        const iframeHeight = size === 'tall' ? 600 : size === 'thin' ? 422 : 395;
         const gap = 8;
 
         let top: number;
@@ -660,8 +665,8 @@ class NostrPassEmbassy {
       this.backdropEl.style.backdropFilter = 'none';
     }
 
-    // Add click-outside handler for compact and tall modes
-    if (size === 'compact' || size === 'tall') {
+    // Add click-outside handler for compact, tall, and thin modes
+    if (size === 'compact' || size === 'tall' || size === 'thin') {
       if (this.outsideClickHandler) {
         document.removeEventListener('click', this.outsideClickHandler);
       }
@@ -717,6 +722,7 @@ class NostrPassEmbassy {
     this.iframe.classList.remove('nostrpass-iframe-compact');
     this.iframe.classList.remove('nostrpass-iframe-tall');
     this.iframe.classList.remove('nostrpass-iframe-minimal');
+    this.iframe.classList.remove('nostrpass-iframe-thin');
     this.iframe.classList.add('nostrpass-iframe-hidden');
 
     // Hide backdrop
@@ -812,6 +818,29 @@ class NostrPassEmbassy {
           height: 90vw !important;
           max-width: 395px !important;
           max-height: 395px !important;
+        }
+      }
+
+      /* Thin state - Thinner modal for PIN unlock */
+      .nostrpass-iframe-thin {
+        position: fixed !important;
+        width: 228px !important;
+        height: 422px !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        border: none !important;
+        border-radius: 16px !important;
+        background: transparent !important;
+        z-index: 2147483647 !important;
+        overflow: hidden !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+      }
+
+      @media (max-width: 500px) {
+        .nostrpass-iframe-thin {
+          width: 228px !important;
+          height: 422px !important;
         }
       }
 
@@ -1078,7 +1107,7 @@ class NostrPassEmbassy {
           // Create the wait promise BEFORE showing the UI
           console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.openPage('unlock', { size: 'compact' });
+          this.openPage('unlock');
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
@@ -1201,7 +1230,7 @@ class NostrPassEmbassy {
           // Create the wait promise BEFORE showing the UI
           console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.openPage('unlock', { size: 'compact' });
+          this.openPage('unlock');
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
@@ -1295,7 +1324,7 @@ class NostrPassEmbassy {
           } else {
             // Show unlock page and wait for unlock
             const unlockPromise = this.waitForUnlock();
-            this.openPage('unlock', { size: 'compact' });
+            this.openPage('unlock');
             await unlockPromise;
           }
 
@@ -1360,7 +1389,7 @@ class NostrPassEmbassy {
           // Create the wait promise BEFORE showing the UI
           console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.openPage('unlock', { size: 'compact' });
+          this.openPage('unlock');
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
@@ -1511,7 +1540,7 @@ class NostrPassEmbassy {
           // Create the wait promise BEFORE showing the UI
           console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.openPage('unlock', { size: 'compact' });
+          this.openPage('unlock');
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');
@@ -1655,7 +1684,7 @@ class NostrPassEmbassy {
           // Create the wait promise BEFORE showing the UI
           console.log('⏳ Vault is locked, showing quick unlock...');
           unlockPromise = this.waitForUnlock();
-          this.openPage('unlock', { size: 'compact' });
+          this.openPage('unlock');
         } else if (needsPrompt && !this.config.parentPinOverlay) {
           // Create permission wait promise BEFORE showing the vault
           console.log('⏳ Permission required, showing vault and waiting for approval...');

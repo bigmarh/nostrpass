@@ -112,9 +112,8 @@ export const PinUnlock: Component = () => {
 
 
     return (
-        <div class="flex justify-center items-center min-h-screen w-full">
-            <div class="flex w-full h-full bg-white dark:bg-gray-800 flex-col rounded-[16px] overflow-hidden">
-                <div class="flex flex-col items-center justify-center px-8 py-6 h-full">
+        <div class="flex w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex-col overflow-hidden">
+            <div class="flex flex-col items-center justify-center px-6 py-6 h-full">
                   
                     <Show when={error()}>
                         <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4 max-w-md text-center">
@@ -205,7 +204,7 @@ export const PinUnlock: Component = () => {
                         </div>
                     </Show>
 
-                    <div class="mt-6 space-y-2 text-center flex flex-col gap-2">
+                    <div class="mt-6 space-y-3 text-center flex flex-col">
                         <Show when={!showRecovery() && !showPinReset()}>
                             <button
                                 onClick={() => setShowRecovery(true)}
@@ -220,20 +219,17 @@ export const PinUnlock: Component = () => {
                         >
                             Cancel
                         </button>
-                        <div>
-                            <button
-                                onClick={() => {
-                                    logout();
-                                    navigate(`/${params.app}`);
-                                }}
-                                class="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
-                            >
-                                Use a different account
-                            </button>
-                        </div>
+                        <button
+                            onClick={() => {
+                                logout();
+                                navigate(`/${params.app}`);
+                            }}
+                            class="w-full px-4 py-2.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-xl text-sm font-medium cursor-pointer transition-all duration-150 hover:bg-gray-50 dark:hover:bg-gray-700 active:scale-95 shadow-sm"
+                        >
+                            Use a different account
+                        </button>
                     </div>
                 </div>
-            </div>
         </div>
     );
 };
