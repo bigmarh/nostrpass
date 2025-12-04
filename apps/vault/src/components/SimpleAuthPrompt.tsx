@@ -1,4 +1,4 @@
-import { Component } from 'solid-js';
+import { Component, createSignal } from 'solid-js';
 import type { Identity } from '@nostrpass/types';
 import { nip19 } from 'nostr-tools';
 
@@ -7,7 +7,7 @@ interface SimpleAuthPromptProps {
   appName?: string;
   identity: Identity;
   identityIndex: number;
-  onAuthorize: () => void;
+  onAuthorize: () => Promise<void>;
   onDeny: () => void;
   onCustomize: () => void;
   permissions?: {
@@ -21,6 +21,17 @@ interface SimpleAuthPromptProps {
 }
 
 export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
+  const [isConnecting, setIsConnecting] = createSignal(false);
+
+  const handleConnect = async () => {
+    setIsConnecting(true);
+    try {
+      await props.onAuthorize();
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
   const getNpub = (identity: Identity) => {
     try {
       const npub = nip19.npubEncode(identity.publicKey);
@@ -116,15 +127,27 @@ export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
             <div class="flex gap-3">
               <button
                 onClick={props.onDeny}
-                class="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 font-medium transition-colors"
+                disabled={isConnecting()}
+                class="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
               <button
-                onClick={props.onAuthorize}
-                class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                onClick={handleConnect}
+                disabled={isConnecting()}
+                class="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-75 disabled:cursor-wait flex items-center justify-center gap-2"
               >
-                Connect
+                {isConnecting() ? (
+                  <>
+                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Connecting...</span>
+                  </>
+                ) : (
+                  'Connect'
+                )}
               </button>
             </div>
 
