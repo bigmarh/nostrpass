@@ -17,6 +17,7 @@ import { randomBytes } from '@noble/hashes/utils';
 import { hmac } from '@noble/hashes/hmac';
 import { base64 } from '@scure/base';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import { gcm } from '@noble/ciphers/aes.js';
 
 /**
  * SECURITY: Debug logging control
@@ -338,32 +339,49 @@ export class NostrCrypto {
     // Derive key using provided salt
     const { key } = this.deriveKeyFromPassword(password, salt);
     const keyBytes = hexToBytes(key);
-    
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyBytes,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt']
-    );
-    
+
     // Generate random IV
     const iv = randomBytes(12);
-    
+
     // Encrypt
     const dataBytes = new TextEncoder().encode(data);
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      cryptoKey,
-      dataBytes
-    );
-    
+
+    // Check if crypto.subtle is available (HTTPS or localhost)
+    const hasCryptoSubtle = typeof crypto !== 'undefined' &&
+                           typeof crypto.subtle !== 'undefined' &&
+                           typeof crypto.subtle.importKey === 'function';
+
+    let encrypted: Uint8Array;
+
+    if (hasCryptoSubtle) {
+      // Use native Web Crypto API (fastest)
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        keyBytes,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt']
+      );
+
+      const encryptedBuffer = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        cryptoKey,
+        dataBytes
+      );
+
+      encrypted = new Uint8Array(encryptedBuffer);
+    } else {
+      // Fallback to noble-ciphers for non-secure contexts (HTTP on mobile)
+      const aes = gcm(keyBytes, iv);
+      encrypted = aes.encrypt(dataBytes);
+    }
+
     // Combine: salt + iv + ciphertext
     const combined = new Uint8Array(32 + 12 + encrypted.byteLength);
     combined.set(hexToBytes(salt), 0);
     combined.set(iv, 32);
-    combined.set(new Uint8Array(encrypted), 44);
-    
+    combined.set(encrypted, 44);
+
     return base64.encode(combined);
   }
 
@@ -373,31 +391,44 @@ export class NostrCrypto {
   async decryptDataWithSalt(encryptedData: string, password: string, salt: string): Promise<string> {
     // Decode base64
     const combined = base64.decode(encryptedData);
-    
+
     // Extract components (skip salt verification, use provided salt)
     const iv = combined.slice(32, 44);
     const ciphertext = combined.slice(44);
-    
+
     // Derive key
     const { key } = this.deriveKeyFromPassword(password, salt);
     const keyBytes = hexToBytes(key);
-    
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyBytes,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['decrypt']
-    );
-    
-    // Decrypt
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      cryptoKey,
-      ciphertext
-    );
-    
-    return new TextDecoder().decode(decrypted);
+
+    // Check if crypto.subtle is available (HTTPS or localhost)
+    // On mobile over HTTP, crypto.subtle is undefined, so we fall back to noble-ciphers
+    const hasCryptoSubtle = typeof crypto !== 'undefined' &&
+                           typeof crypto.subtle !== 'undefined' &&
+                           typeof crypto.subtle.importKey === 'function';
+
+    if (hasCryptoSubtle) {
+      // Use native Web Crypto API (fastest)
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        keyBytes,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
+
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        cryptoKey,
+        ciphertext
+      );
+
+      return new TextDecoder().decode(decrypted);
+    } else {
+      // Fallback to noble-ciphers for non-secure contexts (HTTP on mobile)
+      const aes = gcm(keyBytes, iv);
+      const decrypted = aes.decrypt(ciphertext);
+      return new TextDecoder().decode(decrypted);
+    }
   }
 
   /**
@@ -533,6 +564,72 @@ export class NostrCrypto {
       cryptoLog('NIP-04 decryption failed');
       throw new Error('NIP-04 decryption failed');
     }
+  }
+
+  /**
+   * BYOK (Bring Your Own Key) helpers
+   */
+
+  /**
+   * Validate and decode an nsec (bech32-encoded private key)
+   * Returns the hex-encoded private key if valid
+   * @throws Error if nsec is invalid
+   */
+  async validateAndDecodeNsec(nsec: string): Promise<{ privateKey: string; publicKey: string }> {
+    try {
+      const nip19Module = await import('nostr-tools/nip19');
+
+      // Validate format
+      if (!nsec.startsWith('nsec1')) {
+        throw new Error('Invalid nsec format - must start with nsec1');
+      }
+
+      // Decode nsec to get private key bytes
+      const decoded = nip19Module.decode(nsec);
+
+      if (decoded.type !== 'nsec') {
+        throw new Error('Invalid nsec format');
+      }
+
+      // Convert Uint8Array to hex string
+      const privateKey = bytesToHex(decoded.data as Uint8Array);
+
+      // Derive public key from private key
+      const publicKey = this.getPublicKey(privateKey);
+
+      return { privateKey, publicKey };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Invalid nsec')) {
+        throw error;
+      }
+      throw new Error('Invalid nsec - could not decode');
+    }
+  }
+
+  /**
+   * Encrypt an nsec for BYOK storage
+   * Uses the same salt as xpriv for consistency
+   */
+  async encryptNsecForBYOK(nsec: string, pin: string, salt: string): Promise<string> {
+    // Validate nsec first
+    await this.validateAndDecodeNsec(nsec);
+
+    // Encrypt using same salt as xpriv
+    return this.encryptDataWithSalt(nsec, pin, salt);
+  }
+
+  /**
+   * Decrypt an nsec from BYOK storage
+   * Returns the hex private key (not nsec format)
+   */
+  async decryptNsecFromBYOK(encryptedNsec: string, pin: string, salt: string): Promise<string> {
+    // Decrypt to get nsec
+    const nsec = await this.decryptDataWithSalt(encryptedNsec, pin, salt);
+
+    // Decode nsec to get hex private key
+    const { privateKey } = await this.validateAndDecodeNsec(nsec);
+
+    return privateKey;
   }
 }
 

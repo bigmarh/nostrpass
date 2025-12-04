@@ -159,12 +159,14 @@ export class SecureXpriv {
 
 /**
  * Secure key storage container for a complete session
- * Manages xpriv, privateKey, and storagePrivateKey
+ * Manages xpriv, privateKey, storagePrivateKey, and BYOK identity keys
  */
 export class SecureKeyStorage {
   private xpriv: SecureXpriv = new SecureXpriv();
   private privateKey: SecureKey = new SecureKey();
   private storagePrivateKey: SecureKey = new SecureKey();
+  /** BYOK identity private keys, keyed by publicKey */
+  private byokKeys: Map<string, SecureKey> = new Map();
 
   /**
    * Set all keys at once (typical during unlock)
@@ -183,6 +185,60 @@ export class SecureKeyStorage {
     if (keys.storagePrivateKey) {
       this.storagePrivateKey.set(keys.storagePrivateKey);
     }
+  }
+
+  /**
+   * Set a BYOK identity's private key
+   * @param publicKey The identity's public key (used as lookup key)
+   * @param privateKeyHex The decrypted private key in hex format
+   */
+  setBYOKKey(publicKey: string, privateKeyHex: string): void {
+    // Clear existing key if present
+    const existing = this.byokKeys.get(publicKey);
+    if (existing) {
+      existing.clear();
+    }
+    const secureKey = new SecureKey(privateKeyHex);
+    this.byokKeys.set(publicKey, secureKey);
+  }
+
+  /**
+   * Get a BYOK identity's private key
+   * @param publicKey The identity's public key
+   * @returns The private key hex or null if not found
+   */
+  getBYOKKey(publicKey: string): string | null {
+    const secureKey = this.byokKeys.get(publicKey);
+    return secureKey?.getHex() || null;
+  }
+
+  /**
+   * Check if a BYOK key exists for the given public key
+   */
+  hasBYOKKey(publicKey: string): boolean {
+    const secureKey = this.byokKeys.get(publicKey);
+    return secureKey?.isSet() || false;
+  }
+
+  /**
+   * Clear a specific BYOK key
+   */
+  clearBYOKKey(publicKey: string): void {
+    const secureKey = this.byokKeys.get(publicKey);
+    if (secureKey) {
+      secureKey.clear();
+      this.byokKeys.delete(publicKey);
+    }
+  }
+
+  /**
+   * Clear all BYOK keys
+   */
+  clearAllBYOKKeys(): void {
+    for (const [, secureKey] of this.byokKeys) {
+      secureKey.clear();
+    }
+    this.byokKeys.clear();
   }
 
   /**
@@ -231,17 +287,18 @@ export class SecureKeyStorage {
    * Check if any keys are set
    */
   hasKeys(): boolean {
-    return this.xpriv.isSet() || this.privateKey.isSet() || this.storagePrivateKey.isSet();
+    return this.xpriv.isSet() || this.privateKey.isSet() || this.storagePrivateKey.isSet() || this.byokKeys.size > 0;
   }
 
   /**
    * Check individual key status
    */
-  keyStatus(): { xpriv: boolean; privateKey: boolean; storagePrivateKey: boolean } {
+  keyStatus(): { xpriv: boolean; privateKey: boolean; storagePrivateKey: boolean; byokKeyCount: number } {
     return {
       xpriv: this.xpriv.isSet(),
       privateKey: this.privateKey.isSet(),
-      storagePrivateKey: this.storagePrivateKey.isSet()
+      storagePrivateKey: this.storagePrivateKey.isSet(),
+      byokKeyCount: this.byokKeys.size
     };
   }
 
@@ -254,6 +311,7 @@ export class SecureKeyStorage {
     this.xpriv.clear();
     this.privateKey.clear();
     this.storagePrivateKey.clear();
+    this.clearAllBYOKKeys();
   }
 }
 

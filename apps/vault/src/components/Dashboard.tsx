@@ -135,9 +135,15 @@ export const Dashboard: Component = () => {
 
                             {/* Lock/Unlock toggle */}
                             <div class="flex items-center gap-2">
-                                <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                                    {isVaultLocked() ? 'Lock' : 'Unlock'}
-                                </span>
+                                <Show when={isVaultLocked()} fallback={
+                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                    </svg>
+                                }>
+                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>
+                                </Show>
                                 <button
                                     onClick={toggleVaultLock}
                                     class={`relative inline-flex items-center h-5 rounded-full w-9 transition-colors ${

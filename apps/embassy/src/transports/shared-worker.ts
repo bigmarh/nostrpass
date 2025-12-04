@@ -1,8 +1,14 @@
 /**
  * SharedWorker Transport
  *
- * Desktop transport that connects directly to the vault's SharedWorker.
- * Provides low-latency communication for desktop browsers.
+ * Connects directly to the vault's SharedWorker for low-latency communication.
+ *
+ * IMPORTANT: SharedWorkers are SAME-ORIGIN ONLY. This transport will only work when:
+ * - Development: localhost:3000 (embassy) → localhost:3001 (vault) with VAULT_ORIGIN override
+ * - First-party: vault.example.com embedding its own embassy
+ *
+ * For cross-origin scenarios (e.g., primal.net using vault.nostrpass.com),
+ * use ServiceWorkerTransport or the existing iframe+postMessage flow.
  */
 
 import {
@@ -78,13 +84,13 @@ export class SharedWorkerTransport implements VaultTransport {
       // Store pending request
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 
-      // Send request to worker
+      // Send request to worker (using worker-messenger protocol format)
       try {
         this.port!.postMessage({
           id: requestId,
-          type: 'request',
           method,
-          params
+          params,
+          timestamp: Date.now()
         });
       } catch (error) {
         clearTimeout(timeout);
@@ -102,7 +108,7 @@ export class SharedWorkerTransport implements VaultTransport {
     console.log('[SharedWorkerTransport] Disconnecting...');
 
     // Reject all pending requests
-    for (const [requestId, pending] of this.pendingRequests.entries()) {
+    for (const [, pending] of this.pendingRequests.entries()) {
       clearTimeout(pending.timeout);
       pending.reject(new TransportDisconnectedError());
     }
@@ -125,11 +131,12 @@ export class SharedWorkerTransport implements VaultTransport {
   }
 
   private handleMessage(event: MessageEvent): void {
-    const { id, type, result, error } = event.data;
+    const { id, result, error } = event.data;
 
     console.log(`[SharedWorkerTransport] Received message:`, event.data);
 
-    if (type === 'response' && id) {
+    // worker-messenger responses have id + (result or error)
+    if (id && ('result' in event.data || 'error' in event.data)) {
       const pending = this.pendingRequests.get(id);
       if (pending) {
         clearTimeout(pending.timeout);

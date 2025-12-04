@@ -7,77 +7,148 @@
 </head>
 <body>
   <script>
-    // Embassy Bridge - Minimal HTML page for ServiceWorker registration
-    // This page acts as a bridge between the embassy iframe and the vault service worker
-    
-    (async function() {
-      if (!('serviceWorker' in navigator)) {
-        console.error('[EmbassyBridge] ServiceWorker not supported');
+    /**
+     * Embassy Bridge for Direct Worker Communication
+     *
+     * This page runs in a hidden iframe from the vault origin.
+     * It creates a Dedicated Worker and acts as a bridge between
+     * the embassy SDK and the crypto worker.
+     *
+     * Flow: Embassy → postMessage → Bridge → Worker → Bridge → postMessage → Embassy
+     */
+
+    console.log('[EmbassyBridge] Initializing...');
+
+    // Create Dedicated Worker for crypto operations
+    let worker = null;
+    let workerReady = false;
+    const pendingRequests = new Map();
+
+    // Initialize worker
+    function initWorker() {
+      try {
+        // Use the same worker as the vault uses
+        worker = new Worker('/crypto.worker.js', {
+          name: 'nostrpass-embassy-bridge-worker'
+        });
+
+        console.log('[EmbassyBridge] Dedicated Worker created');
+
+        // Handle messages from worker
+        worker.onmessage = (event) => {
+          console.log('[EmbassyBridge] Worker response:', event.data);
+
+          const { id, result, error } = event.data;
+
+          // Forward response back to embassy via parent window
+          if (window.parent !== window) {
+            window.parent.postMessage({
+              type: 'WORKER_RESPONSE',
+              id,
+              result,
+              error
+            }, '*'); // Embassy will verify origin
+          }
+
+          // Clean up pending request
+          if (id && pendingRequests.has(id)) {
+            clearTimeout(pendingRequests.get(id));
+            pendingRequests.delete(id);
+          }
+        };
+
+        worker.onerror = (error) => {
+          console.error('[EmbassyBridge] Worker error:', error);
+
+          // Notify embassy of worker error
+          if (window.parent !== window) {
+            window.parent.postMessage({
+              type: 'WORKER_ERROR',
+              error: {
+                message: error.message || 'Worker error',
+                code: 'WORKER_ERROR'
+              }
+            }, '*');
+          }
+        };
+
+        workerReady = true;
+        console.log('[EmbassyBridge] Ready to receive requests');
+
+      } catch (error) {
+        console.error('[EmbassyBridge] Failed to create worker:', error);
+
+        // Notify embassy of initialization failure
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'WORKER_ERROR',
+            error: {
+              message: error.message || 'Failed to initialize worker',
+              code: 'INIT_FAILED'
+            }
+          }, '*');
+        }
+      }
+    }
+
+    // Handle messages from embassy
+    window.addEventListener('message', (event) => {
+      // Accept messages from any origin (worker will validate permissions)
+      const { type, id, method, params } = event.data;
+
+      if (type !== 'WORKER_REQUEST') {
         return;
       }
 
-      // Register the service worker
-      try {
-        const registration = await navigator.serviceWorker.register('/service-worker.js', {
-          scope: '/'
-        });
-        console.log('[EmbassyBridge] ServiceWorker registered:', registration.scope);
+      console.log('[EmbassyBridge] Received request:', { id, method, params });
 
-        // Wait for service worker to be ready
-        await navigator.serviceWorker.ready;
-        console.log('[EmbassyBridge] ServiceWorker ready');
-
-        // Listen for messages from parent (embassy iframe)
-        window.addEventListener('message', async (event) => {
-          // Security: Only accept messages from expected origins
-          // In production, this should be restricted to known origins
-          if (event.data && event.data.type === 'EMBASSY_REQUEST') {
-            console.log('[EmbassyBridge] Received EMBASSY_REQUEST:', event.data);
-
-            // Create MessageChannel for response routing
-            const channel = new MessageChannel();
-            const port1 = channel.port1;
-            const port2 = channel.port2;
-
-            // Listen for response from service worker
-            port1.onmessage = (e) => {
-              console.log('[EmbassyBridge] Received response from ServiceWorker:', e.data);
-              
-              // Forward response to parent (embassy iframe)
-              event.source.postMessage({
-                type: 'EMBASSY_RESPONSE',
-                id: event.data.id,
-                result: e.data.result,
-                error: e.data.error
-              }, event.origin);
-            };
-
-            // Forward request to service worker
-            const sw = await navigator.serviceWorker.ready;
-            if (sw.active) {
-              sw.active.postMessage({
-                type: 'EMBASSY_REQUEST',
-                id: event.data.id,
-                method: event.data.method,
-                params: event.data.params
-              }, [port2]);
-            } else {
-              // Service worker not active, return error
-              event.source.postMessage({
-                type: 'EMBASSY_RESPONSE',
-                id: event.data.id,
-                error: 'SERVICE_WORKER_NOT_ACTIVE'
-              }, event.origin);
+      if (!workerReady || !worker) {
+        // Worker not ready, send error response
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'WORKER_RESPONSE',
+            id,
+            error: {
+              message: 'Worker not initialized',
+              code: 'WORKER_NOT_READY'
             }
-          }
-        });
-
-        console.log('[EmbassyBridge] Bridge initialized and ready');
-      } catch (error) {
-        console.error('[EmbassyBridge] Failed to register ServiceWorker:', error);
+          }, event.origin);
+        }
+        return;
       }
-    })();
+
+      // Set timeout for request (30 seconds)
+      const timeout = setTimeout(() => {
+        console.error('[EmbassyBridge] Request timeout:', id);
+        pendingRequests.delete(id);
+
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'WORKER_RESPONSE',
+            id,
+            error: {
+              message: 'Request timeout',
+              code: 'TIMEOUT'
+            }
+          }, event.origin);
+        }
+      }, 30000);
+
+      pendingRequests.set(id, timeout);
+
+      // Forward request to worker
+      worker.postMessage({
+        id,
+        type: 'request',
+        method,
+        params
+      });
+    });
+
+    // Initialize worker on load
+    initWorker();
+
+    console.log('[EmbassyBridge] Initialization complete');
   </script>
 </body>
 </html>
-

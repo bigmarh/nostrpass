@@ -1,10 +1,14 @@
 /**
- * ServiceWorker Transport
+ * Dedicated Worker Transport (Mobile)
  *
- * Mobile transport that communicates with the vault via ServiceWorker and iframe bridge.
- * Flow: Embassy → Hidden iframe → ServiceWorker → Vault tab → ServiceWorker → iframe → Embassy
+ * Connects directly to the vault's Dedicated Worker for low-latency communication.
+ * This is identical to SharedWorkerTransport, except it uses a Dedicated Worker
+ * instead of a SharedWorker.
  *
- * This enables cross-tab communication on mobile browsers where SharedWorker is not available.
+ * Flow: Embassy → Dedicated Worker → Embassy
+ *
+ * Note: Like SharedWorker, this is SAME-ORIGIN ONLY. For cross-origin scenarios,
+ * use the existing iframe+postMessage flow.
  */
 
 import {
@@ -12,8 +16,7 @@ import {
   VAULT_ORIGIN,
   TransportError,
   TransportTimeoutError,
-  TransportDisconnectedError,
-  VaultNotOpenError
+  TransportDisconnectedError
 } from './index';
 
 interface PendingRequest {
@@ -23,66 +26,34 @@ interface PendingRequest {
 }
 
 export class ServiceWorkerTransport implements VaultTransport {
-  private iframe: HTMLIFrameElement | null = null;
+  private worker: Worker | null = null;
   private connected = false;
   private pendingRequests = new Map<string, PendingRequest>();
   private requestTimeout = 30000; // 30 seconds
-  private messageHandler: ((event: MessageEvent) => void) | null = null;
 
   async connect(): Promise<void> {
     if (this.connected) {
-      console.log('[ServiceWorkerTransport] Already connected');
+      console.log('[DedicatedWorkerTransport] Already connected');
       return;
     }
 
-    console.log('[ServiceWorkerTransport] Connecting via iframe bridge...');
+    console.log('[DedicatedWorkerTransport] Connecting to vault Dedicated Worker...');
 
     try {
-      // Create hidden iframe that loads the embassy bridge page from vault origin
-      this.iframe = document.createElement('iframe');
-      this.iframe.src = `${VAULT_ORIGIN}/embassy-bridge.html`;
-      this.iframe.style.display = 'none';
-      this.iframe.style.position = 'absolute';
-      this.iframe.style.width = '0';
-      this.iframe.style.height = '0';
-      this.iframe.style.border = 'none';
-
-      // Wait for iframe to load
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new TransportError(
-            'Iframe bridge failed to load',
-            'IFRAME_LOAD_TIMEOUT'
-          ));
-        }, 10000);
-
-        this.iframe!.onload = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
-
-        this.iframe!.onerror = () => {
-          clearTimeout(timeout);
-          reject(new TransportError(
-            'Failed to load iframe bridge',
-            'IFRAME_LOAD_FAILED'
-          ));
-        };
-
-        document.body.appendChild(this.iframe!);
-      });
+      // Create Dedicated Worker connection to vault's crypto worker
+      const workerUrl = `${VAULT_ORIGIN}/crypto.worker.js`;
+      this.worker = new Worker(workerUrl, { name: 'nostrpass-vault-worker-mobile' });
 
       // Set up message handler
-      this.messageHandler = this.handleMessage.bind(this);
-      window.addEventListener('message', this.messageHandler);
+      this.worker.onmessage = this.handleMessage.bind(this);
+      this.worker.onmessageerror = this.handleMessageError.bind(this);
 
       this.connected = true;
-      console.log('[ServiceWorkerTransport] Connected via iframe bridge');
+      console.log('[DedicatedWorkerTransport] Connected to vault Dedicated Worker');
     } catch (error) {
-      console.error('[ServiceWorkerTransport] Failed to connect:', error);
-      this.cleanup();
+      console.error('[DedicatedWorkerTransport] Failed to connect:', error);
       throw new TransportError(
-        'Failed to connect to vault via ServiceWorker',
+        'Failed to connect to vault Dedicated Worker',
         'CONNECTION_FAILED',
         error
       );
@@ -90,13 +61,13 @@ export class ServiceWorkerTransport implements VaultTransport {
   }
 
   async request<T = any>(method: string, params?: any): Promise<T> {
-    if (!this.connected || !this.iframe) {
+    if (!this.connected || !this.worker) {
       throw new TransportDisconnectedError();
     }
 
     const requestId = this.generateRequestId();
 
-    console.log(`[ServiceWorkerTransport] Sending request ${requestId}:`, method, params);
+    console.log(`[DedicatedWorkerTransport] Sending request ${requestId}:`, method, params);
 
     return new Promise<T>((resolve, reject) => {
       // Set up timeout
@@ -108,17 +79,14 @@ export class ServiceWorkerTransport implements VaultTransport {
       // Store pending request
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 
-      // Send request to iframe bridge
+      // Send request to worker (using worker-messenger protocol format)
       try {
-        const message = {
-          source: 'embassy',
+        this.worker!.postMessage({
           id: requestId,
-          type: 'request',
           method,
-          params
-        };
-
-        this.iframe!.contentWindow!.postMessage(message, VAULT_ORIGIN);
+          params,
+          timestamp: Date.now()
+        });
       } catch (error) {
         clearTimeout(timeout);
         this.pendingRequests.delete(requestId);
@@ -132,18 +100,24 @@ export class ServiceWorkerTransport implements VaultTransport {
   }
 
   disconnect(): void {
-    console.log('[ServiceWorkerTransport] Disconnecting...');
+    console.log('[DedicatedWorkerTransport] Disconnecting...');
 
     // Reject all pending requests
-    for (const [requestId, pending] of this.pendingRequests.entries()) {
+    for (const [, pending] of this.pendingRequests.entries()) {
       clearTimeout(pending.timeout);
       pending.reject(new TransportDisconnectedError());
     }
     this.pendingRequests.clear();
 
-    this.cleanup();
+    // Terminate worker
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
 
-    console.log('[ServiceWorkerTransport] Disconnected');
+    this.connected = false;
+
+    console.log('[DedicatedWorkerTransport] Disconnected');
   }
 
   isConnected(): boolean {
@@ -151,37 +125,23 @@ export class ServiceWorkerTransport implements VaultTransport {
   }
 
   private handleMessage(event: MessageEvent): void {
-    // Only accept messages from the vault origin
-    if (event.origin !== VAULT_ORIGIN) {
-      return;
-    }
+    const { id, result, error } = event.data;
 
-    const { source, id, type, result, error } = event.data;
+    console.log(`[DedicatedWorkerTransport] Received message:`, event.data);
 
-    // Only handle messages from the bridge iframe
-    if (source !== 'embassy-bridge') {
-      return;
-    }
-
-    console.log(`[ServiceWorkerTransport] Received message:`, event.data);
-
-    if (type === 'response' && id) {
+    // worker-messenger responses have id + (result or error)
+    if (id && ('result' in event.data || 'error' in event.data)) {
       const pending = this.pendingRequests.get(id);
       if (pending) {
         clearTimeout(pending.timeout);
         this.pendingRequests.delete(id);
 
         if (error) {
-          // Check for specific error codes
-          if (error.code === 'VAULT_NOT_OPEN') {
-            pending.reject(new VaultNotOpenError());
-          } else {
-            pending.reject(new TransportError(
-              error.message || 'Request failed',
-              error.code || 'REQUEST_FAILED',
-              error
-            ));
-          }
+          pending.reject(new TransportError(
+            error.message || 'Request failed',
+            error.code || 'REQUEST_FAILED',
+            error
+          ));
         } else {
           pending.resolve(result);
         }
@@ -189,22 +149,10 @@ export class ServiceWorkerTransport implements VaultTransport {
     }
   }
 
-  private cleanup(): void {
-    // Remove message handler
-    if (this.messageHandler) {
-      window.removeEventListener('message', this.messageHandler);
-      this.messageHandler = null;
-    }
-
-    // Remove iframe
-    if (this.iframe) {
-      if (this.iframe.parentNode) {
-        this.iframe.parentNode.removeChild(this.iframe);
-      }
-      this.iframe = null;
-    }
-
-    this.connected = false;
+  private handleMessageError(event: MessageEvent): void {
+    console.error('[DedicatedWorkerTransport] Message error:', event);
+    // Message errors typically indicate serialization issues
+    // We can't easily map this back to a specific request, so we log it
   }
 
   private generateRequestId(): string {

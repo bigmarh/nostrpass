@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import solid from 'vite-plugin-solid';
 import path from 'path';
+import fs from 'fs';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -12,7 +13,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    host: true,
+    host: '0.0.0.0',
+    https: {
+      key: fs.readFileSync('./localhost+2-key.pem'),
+      cert: fs.readFileSync('./localhost+2.pem'),
+    },
   },
   build: {
     outDir: 'dist',

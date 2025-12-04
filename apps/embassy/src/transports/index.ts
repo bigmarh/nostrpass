@@ -1,10 +1,17 @@
 /**
  * Transport Abstraction Layer
  *
- * Provides a unified interface for communicating with the vault across different platforms:
- * - Desktop: SharedWorker (direct connection to vault worker)
- * - Mobile: ServiceWorker (via iframe bridge to vault tab)
- * - Fallback: iframe (existing behavior for unsupported environments)
+ * Provides a unified interface for communicating with the vault across different platforms.
+ *
+ * IMPORTANT: Cross-origin SharedWorker is NOT possible. The embassy runs on third-party
+ * sites (e.g., primal.net) and cannot directly connect to vault.nostrpass.com's SharedWorker.
+ *
+ * Available transport modes:
+ * - service-worker: Mobile devices use ServiceWorker bridge (iframe → SW → vault tab)
+ * - iframe-fallback: Desktop uses existing iframe + postMessage (default, most compatible)
+ *
+ * The 'shared-worker' mode is only valid when embassy and vault are SAME ORIGIN,
+ * which only happens in development or special deployment scenarios.
  */
 
 export const VAULT_ORIGIN = typeof window !== 'undefined' &&
@@ -43,7 +50,25 @@ export interface VaultTransport {
 }
 
 /**
- * Detect the appropriate transport mode based on platform and browser capabilities
+ * Check if embassy and vault are on the same origin.
+ * Only when same-origin can we use SharedWorker directly.
+ */
+function isSameOrigin(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.location.origin === VAULT_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detect the appropriate transport mode based on platform and browser capabilities.
+ *
+ * Priority:
+ * 1. Same-origin + SharedWorker available → 'shared-worker' (dev only typically)
+ * 2. Mobile + ServiceWorker available → 'service-worker'
+ * 3. Otherwise → 'iframe-fallback' (existing embassy behavior)
  */
 export function detectTransportMode(): TransportMode {
   // Check if running in browser environment
@@ -51,24 +76,20 @@ export function detectTransportMode(): TransportMode {
     return 'iframe-fallback';
   }
 
-  // Mobile detection
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-  if (isMobile) {
-    // Mobile devices use ServiceWorker
-    if ('serviceWorker' in navigator) {
-      return 'service-worker';
-    }
-    // Mobile without ServiceWorker support falls back to iframe
-    return 'iframe-fallback';
-  } else {
-    // Desktop devices use SharedWorker if available
-    if (typeof SharedWorker !== 'undefined') {
-      return 'shared-worker';
-    }
-    // Desktop without SharedWorker support falls back to iframe
-    return 'iframe-fallback';
+  // Same-origin check: only use SharedWorker if vault is on same origin
+  // (e.g., development on localhost, or first-party vault deployment)
+  if (isSameOrigin() && typeof SharedWorker !== 'undefined') {
+    return 'shared-worker';
   }
+
+  // Mobile detection - use ServiceWorker bridge
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isMobile && 'serviceWorker' in navigator) {
+    return 'service-worker';
+  }
+
+  // Desktop cross-origin: use existing iframe + postMessage
+  return 'iframe-fallback';
 }
 
 /**

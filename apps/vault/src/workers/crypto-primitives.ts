@@ -351,6 +351,37 @@ export const cryptoPrimitives = {
       throw error;
     }
   },
+
+  // ========================================
+  // BYOK (Bring Your Own Key) Operations
+  // ========================================
+
+  /**
+   * Validate and decode an nsec (bech32-encoded private key)
+   * Returns the hex private key and derived public key
+   */
+  validateAndDecodeNsec: async (params: { nsec: string }): Promise<{ privateKey: string; publicKey: string }> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.validateAndDecodeNsec(params.nsec);
+  },
+
+  /**
+   * Encrypt an nsec for BYOK storage
+   * Uses the same salt as xpriv for consistency
+   */
+  encryptNsecForBYOK: async (params: { nsec: string; pin: string; salt: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.encryptNsecForBYOK(params.nsec, params.pin, params.salt);
+  },
+
+  /**
+   * Decrypt an nsec from BYOK storage
+   * Returns the hex private key (not nsec format)
+   */
+  decryptNsecFromBYOK: async (params: { encryptedNsec: string; pin: string; salt: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.decryptNsecFromBYOK(params.encryptedNsec, params.pin, params.salt);
+  },
 };
 
 // Export the ensureCryptoReady function for use by other modules if needed

@@ -324,7 +324,7 @@ export const Login: Component = () => {
     return (
         <div class="w-full h-full bg-white dark:bg-gray-900 rounded-lg overflow-hidden">
             <div class="flex w-full h-full bg-white dark:bg-gray-800 flex-col md:flex-row">
-                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center md:rounded-l-lg bg-bottom bg-contain md:bg-cover md:bg-center justify-center pt-8 pb-2 px-4 md:p-4 md:w-48 md:min-w-[12rem]`}>
+                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center md:rounded-l-lg bg-top bg-cover bg-no-repeat justify-center pt-8 pb-2 px-4 md:p-4 md:w-48 md:min-w-[12rem]`}>
                     <div class="w-32 h-32 ">
                         <img class="w-full h-full " src="/logo.svg" alt="NostrPass Logo" />
                     </div>

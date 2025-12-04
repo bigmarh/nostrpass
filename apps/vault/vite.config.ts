@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import solid from 'vite-plugin-solid';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
+import fs from 'fs';
 import { wasmPlugin } from './vite-plugin-wasm';
 
 // https://vitejs.dev/config/
@@ -18,7 +19,11 @@ export default defineConfig({
   },
   server: {
     port: 3001,
-    host: true,
+    host: '0.0.0.0', // Listen on all network interfaces
+    https: {
+      key: fs.readFileSync('./localhost+2-key.pem'),
+      cert: fs.readFileSync('./localhost+2.pem'),
+    },
   },
   build: {
     outDir: 'dist',
