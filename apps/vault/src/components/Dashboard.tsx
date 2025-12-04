@@ -1,5 +1,6 @@
 import { Component, Show, createSignal, onMount } from 'solid-js';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
+import { nip19 } from 'nostr-tools';
 
 import { useAuth, useMessenger, useCryptoWorker, useDarkModeContext } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
@@ -7,6 +8,7 @@ import { useVaultData } from '../hooks/useVaultData';
 import { IdentityManager } from './IdentityManager';
 import { PinManager } from './PinManager';
 import GlobalSettings from './GlobalSettings';
+import { getActiveIdentity } from '../utils/activeIdentityManager';
 
 export const Dashboard: Component = () => {
     const { user, logout, isVaultLocked, lockVault, unlockVault } = useAuth();
@@ -124,40 +126,148 @@ export const Dashboard: Component = () => {
                             </button>
                         </div>
 
-                        {/* Account info and lock status */}
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <h1 class="text-base font-semibold text-gray-900 dark:text-white">
-                                    {user()?.profile.username.toUpperCase()}
-                                </h1>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">Digital Passport</p>
-                            </div>
-
-                            {/* Lock/Unlock toggle */}
-                            <div class="flex items-center gap-2">
-                                <Show when={isVaultLocked()} fallback={
-                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-                                    </svg>
+                        {/* Digital ID Card */}
+                        <div class="relative bg-white dark:bg-gray-900 border-2 border-gray-900 dark:border-gray-100 rounded-lg shadow-lg overflow-hidden">
+                            {/* Card content - Main layout with grid */}
+                            <div class="grid grid-cols-[1fr_auto] gap-0 relative z-10">
+                                <Show when={vaultData()?.identities && params.app} fallback={
+                                    <div class="flex items-start gap-3 p-4 col-span-2">
+                                        {/* Fallback when no active identity */}
+                                        <div class="w-16 h-16 bg-gray-900 dark:bg-white rounded-full border-2 border-gray-900 dark:border-gray-100 flex items-center justify-center shadow-sm">
+                                            <span class="text-white dark:text-gray-900 text-2xl font-bold">
+                                                {user()?.profile.username.substring(0, 2).toUpperCase()}
+                                            </span>
+                                        </div>
+                                        <div class="flex-1 text-gray-900 dark:text-white">
+                                            <div class="text-[10px] uppercase tracking-wide font-semibold text-gray-600 dark:text-gray-400 mb-1">Digital Passport</div>
+                                            <h1 class="text-lg font-bold tracking-tight">{user()?.profile.username.toUpperCase()}</h1>
+                                        </div>
+                                    </div>
                                 }>
-                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                                    </svg>
+                                    {(() => {
+                                        const vault = vaultData();
+                                        if (!vault?.identities) return null;
+
+                                        // Get active identity from localStorage (per-browser) or fallback to vault data
+                                        const appOrigin = params.app ? (() => {
+                                            try {
+                                                const domain = desanitizeDomain(params.app);
+                                                if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
+                                                    return `http://${domain}`;
+                                                }
+                                                return `https://${domain}`;
+                                            } catch {
+                                                return params.app.startsWith('http') ? params.app : `https://${params.app}`;
+                                            }
+                                        })() : null;
+
+                                        const activeIndex = appOrigin
+                                            ? (getActiveIdentity(user()?.profile.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
+                                            : 0;
+
+                                        const activeIdentity = vault.identities[activeIndex];
+
+                                        if (!activeIdentity) return null;
+
+                                        // Get initials from identity nickname
+                                        // For multi-word names, use first letter of each word (e.g., "John Smith" -> "JS")
+                                        // For single-word names, use first two letters (e.g., "Personal" -> "PE")
+                                        const nickname = activeIdentity.nickname || 'Personal';
+                                        const words = nickname.trim().split(/\s+/);
+                                        const identityInitials = words.length > 1
+                                            ? (words[0][0] + words[1][0]).toUpperCase()
+                                            : nickname.substring(0, 2).toUpperCase();
+
+                                        return (
+                                            <>
+                                                {/* Left section: Two columns (profile + details) over footer */}
+                                                <div class="flex flex-col">
+                                                    {/* Top: Profile and Details */}
+                                                    <div class="flex items-stretch gap-4 p-4">
+                                                        {/* Column 1: Profile photo and name */}
+                                                        <div class="flex flex-col items-center gap-2 shrink-0 w-32">
+                                                            <div class="w-16 h-16 bg-gray-900 dark:bg-white rounded-full border-2 border-gray-900 dark:border-gray-100 flex items-center justify-center shadow-sm">
+                                                                <span class="text-white dark:text-gray-900 text-2xl font-bold">
+                                                                    {identityInitials}
+                                                                </span>
+                                                            </div>
+                                                            <div class="text-center">
+                                                                <div class="text-[10px] uppercase tracking-wide font-semibold text-gray-600 dark:text-gray-400 mb-0.5">Digital Passport</div>
+                                                                <div class="flex items-center gap-1 justify-center">
+                                                                    <h1 class="text-sm font-bold tracking-tight text-gray-900 dark:text-white break-words">{activeIdentity.nickname || 'Personal'}</h1>
+                                                                    <Show when={activeIdentity.isImported}>
+                                                                        <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1721 9z" />
+                                                                        </svg>
+                                                                    </Show>
+                                                                </div>
+                                                                <div class="text-[9px] text-gray-600 dark:text-gray-400">
+                                                                    {user()?.profile.username}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Column 2: ID Details - 2x2 Grid */}
+                                                        <div class="grid grid-cols-2 gap-1 text-[11px] flex-1 border-l border-gray-300 dark:border-gray-700 pl-4">
+                                                            <div class="text-center">
+                                                                <div class="text-gray-500 dark:text-gray-500 uppercase tracking-wide text-[8px]">Issued</div>
+                                                                <div class="text-gray-900 dark:text-gray-100 font-semibold">
+                                                                    {(() => {
+                                                                        const timestamp = activeIdentity.isImported ? activeIdentity.importedAt : activeIdentity.createdAt;
+                                                                        if (!timestamp) return 'N/A';
+                                                                        const date = new Date(timestamp);
+                                                                        return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+                                                                    })()}
+                                                                </div>
+                                                            </div>
+                                                            <div class="text-center">
+                                                                <div class="text-gray-500 dark:text-gray-500 uppercase tracking-wide text-[8px]">Type</div>
+                                                                <div class="text-gray-900 dark:text-gray-100 font-semibold">
+                                                                    {activeIdentity.isImported ? 'BYOK' : 'HD'}
+                                                                </div>
+                                                            </div>
+                                                            <div class="text-center">
+                                                                <div class="text-gray-500 dark:text-gray-500 uppercase tracking-wide text-[8px]">ID No.</div>
+                                                                <div class="text-gray-900 dark:text-gray-100 font-semibold font-mono">
+                                                                    #{activeIdentity.index.toString().padStart(3, '0')}
+                                                                </div>
+                                                            </div>
+                                                            <div class="text-center">
+                                                                <div class="text-gray-500 dark:text-gray-500 uppercase tracking-wide text-[8px]">Status</div>
+                                                                <div class="text-green-600 dark:text-green-400 font-semibold">
+                                                                    ACTIVE
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Bottom: Passport Number (npub) */}
+                                                    <div class="px-4 pb-4 pt-2 border-t border-gray-300 dark:border-gray-700">
+                                                        <div class="text-[8px] uppercase tracking-wider text-gray-500 dark:text-gray-500 mb-1">Passport Number</div>
+                                                        <div class="text-[10px] font-mono text-gray-900 dark:text-gray-100 break-all leading-tight">
+                                                            {nip19.npubEncode(activeIdentity.publicKey)}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Right section: VISA column spanning full height */}
+                                                <Show when={params.app}>
+                                                    <div class="flex items-center justify-center border-l border-gray-300 dark:border-gray-700 w-12 bg-green-50 dark:bg-green-950 row-span-2">
+                                                        <div class="transform -rotate-90 whitespace-nowrap text-center">
+                                                            <div class="text-[10px] uppercase text-gray-600 dark:text-gray-400 tracking-wider">
+                                                                VISA FOR
+                                                            </div>
+                                                            <div class="text-[9px] font-bold text-gray-900 dark:text-gray-100 mt-0.5">
+                                                                {desanitizeDomain(params.app!).toUpperCase()}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </Show>
+                                            </>
+                                        );
+                                    })()}
                                 </Show>
-                                <button
-                                    onClick={toggleVaultLock}
-                                    class={`relative inline-flex items-center h-5 rounded-full w-9 transition-colors ${
-                                        isVaultLocked()
-                                            ? 'bg-gray-300 dark:bg-gray-700'
-                                            : 'bg-gray-900 dark:bg-white'
-                                    }`}
-                                >
-                                    <span
-                                        class={`inline-block w-3.5 h-3.5 transform rounded-full bg-white dark:bg-gray-900 transition-transform ${
-                                            isVaultLocked() ? 'translate-x-0.5' : 'translate-x-5'
-                                        }`}
-                                    />
-                                </button>
+
                             </div>
                         </div>
                     </div>
@@ -184,23 +294,32 @@ export const Dashboard: Component = () => {
                 {/* Footer */}
                 <footer class="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 shrink-0 mt-auto">
                     <div class="px-6 py-4 flex items-center justify-between">
-                        {/* Settings button */}
-                        <button
-                            onClick={() => {
-                                console.log('⚙️ [Dashboard] Settings button clicked');
-                                setShowGlobalSettings(true);
-                                console.log('⚙️ [Dashboard] showGlobalSettings set to:', showGlobalSettings());
-                            }}
-                            class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
-                        >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            <span>Settings</span>
-                        </button>
+                        {/* Left side - Logo and Settings */}
+                        <div class="flex items-center gap-4">
+                            {/* NostrPass Logo with Egg */}
+                            <div class="flex items-center gap-2">
+                                <img src="/logo.svg" alt="NostrPass" class="w-5 h-5" />
+                                <div class="text-gray-900 dark:text-white text-xs font-bold">NOSTRPASS</div>
+                            </div>
 
-                        {/* Right side - Dark mode and sync */}
+                            {/* Settings button */}
+                            <button
+                                onClick={() => {
+                                    console.log('⚙️ [Dashboard] Settings button clicked');
+                                    setShowGlobalSettings(true);
+                                    console.log('⚙️ [Dashboard] showGlobalSettings set to:', showGlobalSettings());
+                                }}
+                                class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <span>Settings</span>
+                            </button>
+                        </div>
+
+                        {/* Right side - Lock/Unlock, Dark mode, and sync */}
                         <div class="flex items-center gap-3">
                             {/* Sync indicator */}
                             <Show when={isRefreshing()}>
@@ -208,6 +327,38 @@ export const Dashboard: Component = () => {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                 </svg>
                             </Show>
+
+                            {/* Lock/Unlock Toggle */}
+                            <div class="flex items-center gap-2">
+                                {/* Locked icon (left side) - shows when unlocked, indicating you can lock */}
+                                <Show when={!isVaultLocked()}>
+                                    <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>
+                                </Show>
+                                <button
+                                    onClick={toggleVaultLock}
+                                    class={`relative inline-flex items-center h-5 rounded-full w-9 transition-colors ${
+                                        isVaultLocked()
+                                            ? 'bg-gray-300 dark:bg-gray-700'
+                                            : 'bg-gray-900 dark:bg-white'
+                                    }`}
+                                >
+                                    <span
+                                        class={`inline-block w-3.5 h-3.5 transform rounded-full transition-transform ${
+                                            isVaultLocked()
+                                                ? 'translate-x-0.5 bg-white dark:bg-gray-900'
+                                                : 'translate-x-5 bg-white dark:bg-gray-900'
+                                        }`}
+                                    />
+                                </button>
+                                {/* Unlocked icon (right side) - shows when locked, indicating you can unlock */}
+                                <Show when={isVaultLocked()}>
+                                    <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                    </svg>
+                                </Show>
+                            </div>
 
                             {/* Dark Mode Toggle */}
                             <button
