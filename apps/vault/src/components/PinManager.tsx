@@ -49,6 +49,11 @@ export const PinManager: Component<PinManagerProps> = (props) => {
     try {
       const success = await props.onUnlock(pin);
       if (success) {
+        // Clear the PIN input on successful unlock
+        if (pinPadRef && pinPadRef.clearPin) {
+          pinPadRef.clearPin();
+        }
+
         setShowPinUnlock(false);
         // Reset recovery flow state
         setShowRecovery(false);

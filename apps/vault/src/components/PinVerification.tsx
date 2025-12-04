@@ -20,10 +20,14 @@ const PinVerification: Component<PinVerificationProps> = (props) => {
   const handlePinComplete = (pin: string) => {
     // Hash the entered PIN
     const pinHash = hashPin(pin);
-    
+
     // For now, if no expected hash is provided, just call onSuccess
     // In production, you'd compare against stored hash
     if (!props.expectedPinHash || pinHash === props.expectedPinHash) {
+      // Clear PIN on success
+      if (pinPadRef && pinPadRef.clearPin) {
+        pinPadRef.clearPin();
+      }
       props.onSuccess(pin);
     } else {
       // Wrong PIN
@@ -37,8 +41,10 @@ const PinVerification: Component<PinVerificationProps> = (props) => {
         }
       } else {
         setError(`Incorrect PIN. ${3 - newAttempts} attempts remaining.`);
-        if (pinPadRef) {
+        if (pinPadRef && pinPadRef.shakeAndClear) {
           pinPadRef.shakeAndClear();
+        } else {
+          console.warn('[PinVerification] pinPadRef not available for shakeAndClear');
         }
       }
       

@@ -60,8 +60,10 @@ const PinPad: Component<PinPadProps> = (props) => {
   };
 
   const shakeAndClear = () => {
+    console.log('[PinPad] shakeAndClear called, current PIN length:', currentPin().length);
     setIsShaking(true);
     setTimeout(() => {
+      console.log('[PinPad] Clearing PIN after shake animation');
       setIsShaking(false);
       clearPin();
     }, 500);
@@ -69,7 +71,7 @@ const PinPad: Component<PinPadProps> = (props) => {
 
 
   return (
-    <div class="w-full flex flex-col items-center">
+    <div class="w-full flex flex-col items-center" data-testid="pin-pad">
       {/* PIN Display - Dark pill background */}
       <div class="bg-gray-700 dark:bg-gray-200 px-4 py-2.5 rounded-full mb-4">
         <div class={`flex justify-center gap-2.5 ${isShaking() ? 'shake-animation' : ''}`}>

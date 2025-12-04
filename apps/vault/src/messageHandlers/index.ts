@@ -141,3 +141,6 @@ export interface MessageHandler {
   route: Msg | string;
   handler: (data: any, context: any, deps: MessageHandlerDependencies) => Promise<any>;
 }
+
+// Re-export handlers for testing
+export { authHandlers, vaultHandlers, permissionHandlers };
