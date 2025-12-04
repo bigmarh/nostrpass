@@ -29,15 +29,14 @@ fi
 
 # Build the frontend app
 echo -e "${YELLOW}📦 Building frontend app...${NC}"
-pnpm --filter @nostrpass/frontend build
+NODE_ENV=production pnpm --filter @nostrpass/frontend build
 
-if [ ! -d "apps/website/public" ]; then
-    echo -e "${RED}❌ Error: Build failed - apps/website/public directory not found${NC}"
+if [ ! -d "apps/frontend/dist" ]; then
+    echo -e "${RED}❌ Error: Build failed - apps/frontend/dist directory not found${NC}"
     exit 1
 fi
 
-# Embassy.js is already included in the frontend build (copies to website/public)
-echo -e "${YELLOW}✓ Frontend built to apps/website/public${NC}"
+echo -e "${YELLOW}✓ Frontend built to apps/frontend/dist${NC}"
 
 echo -e "${GREEN}✅ Build complete${NC}"
 echo ""
