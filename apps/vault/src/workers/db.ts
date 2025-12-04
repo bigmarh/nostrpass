@@ -345,8 +345,14 @@ class VaultDB {
 
     // Create composite key: hash(username)_environment
     // This matches the Nostr event identifier and handles same username in different namespaces
-    const { hash } = await import('@nostrpass/nostrHelpers');
-    const cacheKey = `${hash(username)}_${environment}`;
+    const { sha256 } = await import('@noble/hashes/sha256');
+    const { bytesToHex } = await import('@noble/hashes/utils');
+    const encoder = new TextEncoder();
+    const normalizedUsername = username.toLowerCase().trim();
+    const data = encoder.encode(normalizedUsername);
+    const hashBytes = sha256(data);
+    const usernameHash = bytesToHex(hashBytes);
+    const cacheKey = `${usernameHash}_${environment}`;
 
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(['loginObjs'], 'readwrite');
@@ -372,8 +378,14 @@ class VaultDB {
     }
 
     // Create composite key: hash(username)_environment
-    const { hash } = await import('@nostrpass/nostrHelpers');
-    const cacheKey = `${hash(username)}_${environment}`;
+    const { sha256 } = await import('@noble/hashes/sha256');
+    const { bytesToHex } = await import('@noble/hashes/utils');
+    const encoder = new TextEncoder();
+    const normalizedUsername = username.toLowerCase().trim();
+    const data = encoder.encode(normalizedUsername);
+    const hashBytes = sha256(data);
+    const usernameHash = bytesToHex(hashBytes);
+    const cacheKey = `${usernameHash}_${environment}`;
 
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(['loginObjs'], 'readonly');
