@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NostrPass Embassy Bridge</title>
+</head>
+<body>
+  <script>
+    // Embassy Bridge - Minimal HTML page for ServiceWorker registration
+    // This page acts as a bridge between the embassy iframe and the vault service worker
+    
+    (async function() {
+      if (!('serviceWorker' in navigator)) {
+        console.error('[EmbassyBridge] ServiceWorker not supported');
+        return;
+      }
+
+      // Register the service worker
+      try {
+        const registration = await navigator.serviceWorker.register('/service-worker.js', {
+          scope: '/'
+        });
+        console.log('[EmbassyBridge] ServiceWorker registered:', registration.scope);
+
+        // Wait for service worker to be ready
+        await navigator.serviceWorker.ready;
+        console.log('[EmbassyBridge] ServiceWorker ready');
+
+        // Listen for messages from parent (embassy iframe)
+        window.addEventListener('message', async (event) => {
+          // Security: Only accept messages from expected origins
+          // In production, this should be restricted to known origins
+          if (event.data && event.data.type === 'EMBASSY_REQUEST') {
+            console.log('[EmbassyBridge] Received EMBASSY_REQUEST:', event.data);
+
+            // Create MessageChannel for response routing
+            const channel = new MessageChannel();
+            const port1 = channel.port1;
+            const port2 = channel.port2;
+
+            // Listen for response from service worker
+            port1.onmessage = (e) => {
+              console.log('[EmbassyBridge] Received response from ServiceWorker:', e.data);
+              
+              // Forward response to parent (embassy iframe)
+              event.source.postMessage({
+                type: 'EMBASSY_RESPONSE',
+                id: event.data.id,
+                result: e.data.result,
+                error: e.data.error
+              }, event.origin);
+            };
+
+            // Forward request to service worker
+            const sw = await navigator.serviceWorker.ready;
+            if (sw.active) {
+              sw.active.postMessage({
+                type: 'EMBASSY_REQUEST',
+                id: event.data.id,
+                method: event.data.method,
+                params: event.data.params
+              }, [port2]);
+            } else {
+              // Service worker not active, return error
+              event.source.postMessage({
+                type: 'EMBASSY_RESPONSE',
+                id: event.data.id,
+                error: 'SERVICE_WORKER_NOT_ACTIVE'
+              }, event.origin);
+            }
+          }
+        });
+
+        console.log('[EmbassyBridge] Bridge initialized and ready');
+      } catch (error) {
+        console.error('[EmbassyBridge] Failed to register ServiceWorker:', error);
+      }
+    })();
+  </script>
+</body>
+</html>
+

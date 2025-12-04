@@ -33,7 +33,7 @@ function App() {
       const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       script.src = isDevelopment
         ? 'http://localhost:3002/embassy.iife.js'  // Local embassy IIFE build
-        : 'https://cdn.nostrpass.com/embassy.js?v=1.0.2'
+        : 'https://storage.googleapis.com/cdn.nostrpass.com/embassy.js'
       script.async = true
       script.setAttribute('data-manual-init', 'true') // Disable auto-init, we'll manually initialize
       script.onload = () => {

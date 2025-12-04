@@ -23,6 +23,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        'service-worker': path.resolve(__dirname, 'src/service-worker.ts'),
+      },
+      output: {
+        entryFileNames: (chunkInfo) => {
+          return chunkInfo.name === 'service-worker' ? 'service-worker.js' : 'assets/[name]-[hash].js';
+        },
+      },
+    },
   },
   worker: {
     format: 'es',
