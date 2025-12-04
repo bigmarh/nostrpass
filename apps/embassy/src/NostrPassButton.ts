@@ -1567,6 +1567,10 @@ export class NostrPassButton {
     this.currentUser = null;
     this.clearSession();
     this.render();
+
+    // Hide the embassy iframe
+    this.embassy.hide();
+
     this.config.onSignOut?.();
     this.config.onLogout?.();
   }

@@ -334,7 +334,7 @@ class VaultDB {
     });
   }
 
-  async saveLoginObj(username: string, loginObj: any, passwordSalt: string): Promise<void> {
+  async saveLoginObj(username: string, loginObj: any, passwordSalt: string, environment: string = 'production'): Promise<void> {
     if (!this.db) await this.init();
 
     // Check if loginObjs store exists (might be old DB version)
@@ -343,11 +343,16 @@ class VaultDB {
       return; // Gracefully skip caching on old DB versions
     }
 
+    // Create composite key: hash(username)_environment
+    // This matches the Nostr event identifier and handles same username in different namespaces
+    const { hash } = await import('@nostrpass/nostrHelpers');
+    const cacheKey = `${hash(username)}_${environment}`;
+
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(['loginObjs'], 'readwrite');
       const store = tx.objectStore('loginObjs');
       const request = store.put({
-        username,
+        username: cacheKey, // Use composite key as primary key
         loginObj,
         passwordSalt,
         cachedAt: Date.now()
@@ -357,7 +362,7 @@ class VaultDB {
     });
   }
 
-  async getLoginObj(username: string): Promise<{ loginObj: any; passwordSalt: string } | null> {
+  async getLoginObj(username: string, environment: string = 'production'): Promise<{ loginObj: any; passwordSalt: string } | null> {
     if (!this.db) await this.init();
 
     // Check if loginObjs store exists (might be old DB version)
@@ -366,10 +371,14 @@ class VaultDB {
       return null; // Return null to trigger Nostr fetch
     }
 
+    // Create composite key: hash(username)_environment
+    const { hash } = await import('@nostrpass/nostrHelpers');
+    const cacheKey = `${hash(username)}_${environment}`;
+
     return new Promise((resolve, reject) => {
       const tx = this.db!.transaction(['loginObjs'], 'readonly');
       const store = tx.objectStore('loginObjs');
-      const request = store.get(username);
+      const request = store.get(cacheKey);
       request.onsuccess = () => {
         const row = request.result;
         if (!row) return resolve(null);

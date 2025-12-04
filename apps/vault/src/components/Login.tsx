@@ -27,10 +27,13 @@ export const Login: Component = () => {
     const { send } = useMessenger();
     const { login, createAccount, hasPinVault, unlockVault, user } = useAuth();
     const { checkUsernameAvailable, registerUsername, isConnected } = useNostrComms();
-    
+
     const cryptoReady = useCryptoWorkerReady();
     const cryptoWorker = useCryptoWorker();
-    const { getRelays } = useEnvironment();
+    const { getRelays, storageEnvironmentName } = useEnvironment();
+
+    // Log storage environment on component mount
+    console.log('[Login] Storage environment:', storageEnvironmentName());
 
     const handleHideVault = () => {
         send('HIDE_VAULT');
@@ -85,8 +88,9 @@ export const Login: Component = () => {
 
         // Normalize username
         const normalizedUsername = username().trim().toLowerCase();
-        
+
         // Check username availability
+        console.log('[Signup] Checking username availability for:', normalizedUsername, 'in environment:', storageEnvironmentName());
         setLoadingStatus('Checking username availability...');
         const isAvailable = await checkUsernameAvailable(normalizedUsername);
         
@@ -141,6 +145,7 @@ export const Login: Component = () => {
         }
 
         // Login with password (new flow uses LoginObj lookup)
+        console.log('[Login] Attempting login for:', username().trim().toLowerCase(), 'in environment:', storageEnvironmentName());
         setLoadingStatus('Verifying credentials...');
         await login(password(), username().trim().toLowerCase());
 

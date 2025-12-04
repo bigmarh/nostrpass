@@ -29,7 +29,11 @@ function App() {
     // Load NostrPass embassy script when demo panel is opened
     if (showDemo && !nostrPassReady) {
       const script = document.createElement('script')
-      script.src = 'https://cdn.nostrpass.com/embassy.js'
+      // Use local embassy in development, CDN in production
+      const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      script.src = isDevelopment
+        ? 'http://localhost:3002/embassy.iife.js'  // Local embassy IIFE build
+        : 'https://cdn.nostrpass.com/embassy.js?v=1.0.2'
       script.async = true
       script.setAttribute('data-manual-init', 'true') // Disable auto-init, we'll manually initialize
       script.onload = () => {
@@ -38,7 +42,9 @@ function App() {
           window.nostr = window.initNostrPass({
             appName: 'NostrPass Demo',
             storageEnvironment: 'demo',
-            theme: 'light'
+            theme: 'light',
+            // Use local vault in development
+            vaultUrl: isDevelopment ? 'http://localhost:3001' : undefined
           })
           console.log('✅ NostrPass initialized and overriding browser extension')
           setNostrPassReady(true)

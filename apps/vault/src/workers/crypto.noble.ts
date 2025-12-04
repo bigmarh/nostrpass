@@ -1,6 +1,10 @@
 /**
  * TypeScript-based cryptographic operations using Noble libraries
  * Replaces Rust/WASM implementation with audited, battle-tested JavaScript crypto
+ *
+ * SECURITY: All cryptographic logging is disabled by default.
+ * Set CRYPTO_DEBUG=true in environment for development debugging only.
+ * NEVER enable in production - logs could expose salts, IVs, and key material.
  */
 
 import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
@@ -13,6 +17,32 @@ import { randomBytes } from '@noble/hashes/utils';
 import { hmac } from '@noble/hashes/hmac';
 import { base64 } from '@scure/base';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
+
+/**
+ * SECURITY: Debug logging control
+ * Disabled by default to prevent leaking cryptographic parameters
+ * Only enable for local development debugging
+ */
+const CRYPTO_DEBUG = false; // NEVER set to true in production
+
+/**
+ * Safe logging function that only logs in debug mode
+ * SECURITY: Prevents accidental logging of sensitive cryptographic material
+ */
+function cryptoLog(...args: any[]): void {
+  if (CRYPTO_DEBUG) {
+    console.log(...args);
+  }
+}
+
+/**
+ * Safe warning function that only logs in debug mode
+ */
+function cryptoWarn(...args: any[]): void {
+  if (CRYPTO_DEBUG) {
+    console.warn(...args);
+  }
+}
 
 /**
  * Initialize crypto (no-op for TypeScript, kept for API compatibility)
@@ -134,14 +164,11 @@ export class NostrCrypto {
    * Uses Web Crypto API for native performance
    */
   async encryptData(data: string, password: string): Promise<string> {
-    console.log('🔐 [Noble.encryptData] Starting encryption...');
-    console.log('🔐 [Noble.encryptData] Data length:', data.length);
-    console.log('🔐 [Noble.encryptData] Password length:', password.length);
-    
+    cryptoLog('🔐 [Noble.encryptData] Starting encryption, data length:', data.length);
+
     // Derive key using PBKDF2 (Argon2id not available in browsers, PBKDF2 is acceptable)
     const { key, salt } = this.deriveKeyFromPassword(password);
-    console.log('🔑 [Noble.encryptData] Key derived. Salt:', salt.substring(0, 20) + '...');
-    
+
     // Use Web Crypto API for AES-GCM encryption
     const keyBytes = hexToBytes(key);
     const cryptoKey = await crypto.subtle.importKey(
@@ -151,11 +178,10 @@ export class NostrCrypto {
       false,
       ['encrypt']
     );
-    
+
     // Generate random IV
     const iv = randomBytes(12); // 96 bits for GCM
-    console.log('🎲 [Noble.encryptData] IV generated:', bytesToHex(iv));
-    
+
     // Encrypt
     const dataBytes = new TextEncoder().encode(data);
     const encrypted = await crypto.subtle.encrypt(
@@ -163,16 +189,15 @@ export class NostrCrypto {
       cryptoKey,
       dataBytes
     );
-    console.log('✅ [Noble.encryptData] Encryption successful. Ciphertext length:', encrypted.byteLength);
-    
+
     // Combine: salt (32 bytes) + iv (12 bytes) + ciphertext
     const combined = new Uint8Array(32 + 12 + encrypted.byteLength);
     combined.set(hexToBytes(salt), 0);
     combined.set(iv, 32);
     combined.set(new Uint8Array(encrypted), 44);
-    
+
     const result = base64.encode(combined);
-    console.log('✅ [Noble.encryptData] Combined and encoded. Final length:', result.length);
+    cryptoLog('✅ [Noble.encryptData] Encryption complete, output length:', result.length);
     return result;
   }
 
@@ -180,27 +205,21 @@ export class NostrCrypto {
    * Decrypt data using AES-256-GCM
    */
   async decryptData(encryptedData: string, password: string): Promise<string> {
-    console.log('🔓 [Noble.decryptData] Starting decryption...');
-    console.log('🔓 [Noble.decryptData] Encrypted data length:', encryptedData.length);
-    console.log('🔓 [Noble.decryptData] Password length:', password.length);
-    
+    cryptoLog('🔓 [Noble.decryptData] Starting decryption, input length:', encryptedData.length);
+
     // Decode base64
     const combined = base64.decode(encryptedData);
-    console.log('🔓 [Noble.decryptData] Decoded length:', combined.length);
-    
+
     // Extract components
     const salt = bytesToHex(combined.slice(0, 32));
     const iv = combined.slice(32, 44);
     const ciphertext = combined.slice(44);
-    console.log('🔓 [Noble.decryptData] Extracted - Salt:', salt.substring(0, 20) + '...', 'IV:', bytesToHex(iv), 'Ciphertext length:', ciphertext.length);
-    
+
     // Derive key
-    console.log('🔑 [Noble.decryptData] Deriving key with extracted salt...');
     const { key } = this.deriveKeyFromPassword(password, salt);
-    console.log('🔑 [Noble.decryptData] Key derived successfully');
-    
+
     const keyBytes = hexToBytes(key);
-    
+
     const cryptoKey = await crypto.subtle.importKey(
       'raw',
       keyBytes,
@@ -208,23 +227,21 @@ export class NostrCrypto {
       false,
       ['decrypt']
     );
-    
+
     // Decrypt
-    console.log('🔓 [Noble.decryptData] Attempting Web Crypto decryption...');
     try {
       const decrypted = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv },
         cryptoKey,
         ciphertext
       );
-      console.log('✅ [Noble.decryptData] Decryption successful! Plaintext length:', decrypted.byteLength);
-      
+
       const result = new TextDecoder().decode(decrypted);
-      console.log('✅ [Noble.decryptData] Decoded to string. Result length:', result.length);
+      cryptoLog('✅ [Noble.decryptData] Decryption successful, output length:', result.length);
       return result;
     } catch (error) {
-      console.error('❌ [Noble.decryptData] Web Crypto decryption failed:', error);
-      throw error;
+      // Only log error type, not details that could leak information
+      throw new Error('Decryption failed - invalid password or corrupted data');
     }
   }
 
@@ -496,8 +513,9 @@ export class NostrCrypto {
       const nip04Module = await import('nostr-tools/nip04');
       return await nip04Module.encrypt(senderPrivateKey, recipientPublicKey, plaintext);
     } catch (error) {
-      console.error('NIP-04 encryption failed:', error);
-      throw new Error(`NIP-04 encryption failed: ${error}`);
+      // SECURITY: Don't log error details that could leak key information
+      cryptoLog('NIP-04 encryption failed');
+      throw new Error('NIP-04 encryption failed');
     }
   }
 
@@ -511,8 +529,9 @@ export class NostrCrypto {
       const nip04Module = await import('nostr-tools/nip04');
       return await nip04Module.decrypt(recipientPrivateKey, senderPublicKey, ciphertext);
     } catch (error) {
-      console.error('NIP-04 decryption failed:', error);
-      throw new Error(`NIP-04 decryption failed: ${error}`);
+      // SECURITY: Don't log error details that could leak key information
+      cryptoLog('NIP-04 decryption failed');
+      throw new Error('NIP-04 decryption failed');
     }
   }
 }

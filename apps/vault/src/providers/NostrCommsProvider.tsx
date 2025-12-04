@@ -1,6 +1,6 @@
 import { createContext, useContext, ParentComponent, createSignal, onMount, onCleanup } from 'solid-js';
 import { SimplePool, Filter, Event as NostrEvent } from 'nostr-tools';
-import { UsernameRegistry, getRegistrationKeypair, generateKeyPair } from '@nostrpass/nostrHelpers';
+import { UsernameRegistry, getRegistrationKeypair, generateKeyPair, configureNostrPass } from '@nostrpass/nostrHelpers';
 import { useEnvironment } from './EnvironmentProvider';
 
 interface KeyPair {
@@ -43,6 +43,13 @@ export const NostrCommsProvider: ParentComponent = (props) => {
   const { getRelays, storageEnvironmentName, isDebugMode } = useEnvironment();
   let pool: SimplePool | null = null;
 
+  // CRITICAL: Configure storage environment SYNCHRONOUSLY before any async operations
+  // This ensures username checks query the correct namespace from the start
+  configureNostrPass({
+    environment: storageEnvironmentName()
+  });
+  console.log('[NostrComms] Configured storage environment (sync):', storageEnvironmentName());
+
   onMount(async () => {
     try {
       // Initialize connection pool
@@ -57,14 +64,6 @@ export const NostrCommsProvider: ParentComponent = (props) => {
         connected: false
       }));
       setRelays(initialRelays);
-
-      // CRITICAL: Configure nostrHelpers to use the correct storage environment
-      // This ensures username checks query the right namespace
-      const { configureNostrPass } = await import('@nostrpass/nostrHelpers');
-      configureNostrPass({
-        environment: storageEnvironmentName()
-      });
-      console.log('[NostrComms] Configured storage environment:', storageEnvironmentName());
 
       // Initialize username registry with environment-aware setup
       const registrationKeys = await getRegistrationKeypair();

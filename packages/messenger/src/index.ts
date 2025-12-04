@@ -11,6 +11,7 @@ export class SecureMessenger {
   private allowedOrigins = new Set<string>();
   private isInitialized = false;
   private defaultTimeout = 30000; // 30 seconds
+  protected verifiedResponseOrigin: string | null = null;
 
   constructor(private isParent: boolean = false,public window: any = window) {
     this.window = window;
@@ -18,7 +19,10 @@ export class SecureMessenger {
   }
 
   // Initialize with allowed origins
-  init(allowedOrigins: string[] = ['*']): void {
+  init(allowedOrigins: string[] = []): void {
+    if (allowedOrigins.includes('*')) {
+      console.warn('[SecureMessenger] WARNING: Using wildcard origin "*" is insecure. Messages will only be sent to verified origins.');
+    }
     allowedOrigins.forEach(origin => this.allowedOrigins.add(origin));
     this.isInitialized = true;
   }
@@ -94,12 +98,13 @@ export class SecureMessenger {
       origin: this.window.location.origin
     };
 
-    this.sendMessage(responseMessage);
+    // Always use verified origin for responses
+    this.sendMessage(responseMessage, this.verifiedResponseOrigin || undefined);
   }
 
   // Internal message sending
-  private sendMessage(message: MessagePayload): void {
-    const targetWindow = this.isParent ? 
+  private sendMessage(message: MessagePayload, targetOrigin?: string): void {
+    const targetWindow = this.isParent ?
       (this.window as any).frames[0] || this.window.document.querySelector('iframe')?.contentWindow :
       this.window.parent;
 
@@ -107,14 +112,23 @@ export class SecureMessenger {
       throw new Error('Target window not found');
     }
 
-    // Send to all allowed origins or specific origin
-    if (this.allowedOrigins.has('*')) {
-      targetWindow.postMessage(message, '*');
+    // Determine the origin to use
+    let origin: string;
+    if (targetOrigin) {
+      // Explicit target origin provided (preferred)
+      origin = targetOrigin;
+    } else if (this.verifiedResponseOrigin) {
+      // Use verified origin from incoming message
+      origin = this.verifiedResponseOrigin;
+    } else if (this.allowedOrigins.size === 1 && !this.allowedOrigins.has('*')) {
+      // Single allowed origin configured
+      origin = Array.from(this.allowedOrigins)[0];
     } else {
-      this.allowedOrigins.forEach(origin => {
-        targetWindow.postMessage(message, origin);
-      });
+      // Fallback: parent sends to iframe origin, iframe should have verified origin
+      throw new Error('No verified origin available for sending message. Ensure handshake completed.');
     }
+
+    targetWindow.postMessage(message, origin);
   }
 
   // Set up message listener
@@ -133,6 +147,15 @@ export class SecureMessenger {
     // Validate origin
     if (!this.isOriginAllowed(event.origin)) {
       console.warn('Message from unauthorized origin:', event.origin);
+      return;
+    }
+
+    // Store verified origin for responses (browser-guaranteed, cannot be spoofed)
+    if (!this.verifiedResponseOrigin) {
+      this.verifiedResponseOrigin = event.origin;
+      console.log('[SecureMessenger] Locked to origin:', event.origin);
+    } else if (this.verifiedResponseOrigin !== event.origin) {
+      console.warn('Message from different origin than established:', event.origin);
       return;
     }
 
@@ -221,12 +244,19 @@ export class SecureMessenger {
   // Check if origin is allowed
   protected isOriginAllowed(origin: string): boolean {
     if (!this.isInitialized) return false;
-    return this.allowedOrigins.has('*') || this.allowedOrigins.has(origin);
+    // If wildcard is set, accept any origin (but we'll lock to first one)
+    if (this.allowedOrigins.has('*')) return true;
+    return this.allowedOrigins.has(origin);
   }
 
   // Generate unique message ID
   private generateId(): string {
     return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // Get the verified origin
+  getVerifiedOrigin(): string | null {
+    return this.verifiedResponseOrigin;
   }
 
   // Cleanup
@@ -239,6 +269,7 @@ export class SecureMessenger {
     this.pendingRequests.clear();
     this.messageHandlers.clear();
     this.allowedOrigins.clear();
+    this.verifiedResponseOrigin = null;
     this.isInitialized = false;
   }
 }
@@ -267,6 +298,15 @@ export class SecureServerMessenger extends SecureMessenger {
     // Validate origin
     if (!this.isOriginAllowed(event.origin)) {
       console.warn('Message from unauthorized origin:', event.origin);
+      return;
+    }
+
+    // Store verified origin for responses (browser-guaranteed, cannot be spoofed)
+    if (!this.verifiedResponseOrigin) {
+      this.verifiedResponseOrigin = event.origin;
+      console.log('[SecureServerMessenger] Locked to parent origin:', event.origin);
+    } else if (this.verifiedResponseOrigin !== event.origin) {
+      console.warn('Message from different origin than established:', event.origin);
       return;
     }
 
@@ -414,30 +454,96 @@ export class ParentMessenger extends SecureMessenger {
 
 // Iframe helper with middleware support
 export class IframeMessenger extends SecureServerMessenger {
+  private onOriginVerifiedCallbacks: Array<(origin: string) => void> = [];
+  private pendingReadySignal = false;
+
   constructor(windowObj: any = window) {
     super(false, windowObj);
   }
 
-  // Initialize with parent origin
+  // Initialize with parent origin - accepts '*' for dynamic origin locking
   initWithParent(allowedParentOrigins?: string[]): void {
-    // If no origins specified, try to detect parent origin
-    if (!allowedParentOrigins) {
-      // In development, allow localhost
-      if (this.window.location.hostname === 'localhost' || this.window.location.hostname === '127.0.0.1') {
-        allowedParentOrigins = ['http://localhost:3000', 'http://localhost:8080', 'http://127.0.0.1:3000'];
-      } else {
-        // In production, you should specify allowed origins explicitly
-        throw new Error('Must specify allowed parent origins in production');
-      }
+    // Default to '*' which means "accept first message and lock to that origin"
+    // This is safe because we use event.origin (browser-guaranteed) not message content
+    const origins = allowedParentOrigins || ['*'];
+
+    if (origins.includes('*')) {
+      console.log('[IframeMessenger] Dynamic origin mode: will lock to first message origin');
     }
 
-    this.init(allowedParentOrigins);
+    this.init(origins);
 
-    // Send ready signal to parent
-    this.send('IFRAME_READY', {
-      origin: this.window.location.origin,
-      timestamp: Date.now()
-    });
+    // For wildcard mode, defer IFRAME_READY until we receive first message
+    // For specific origins, we can send immediately since we know the target
+    if (!origins.includes('*') && origins.length === 1) {
+      // Single specific origin - can send immediately
+      this.send('IFRAME_READY', {
+        origin: this.window.location.origin,
+        timestamp: Date.now()
+      });
+    } else {
+      // Wildcard or multiple origins - defer until origin is verified
+      this.pendingReadySignal = true;
+      console.log('[IframeMessenger] Ready signal deferred until origin established');
+    }
+  }
+
+  // Override handleMessage to send pending ready signal after origin is verified
+  protected async handleMessage(event: MessageEvent): Promise<void> {
+    const wasUnverified = this.verifiedResponseOrigin === null;
+
+    // Call parent handleMessage which will set verifiedResponseOrigin
+    await super.handleMessage(event);
+
+    // If origin was just verified and we have a pending ready signal, send it now
+    if (wasUnverified && this.verifiedResponseOrigin !== null) {
+      console.log('[IframeMessenger] Origin verified:', this.verifiedResponseOrigin);
+
+      // Call any registered callbacks
+      this.onOriginVerifiedCallbacks.forEach(cb => {
+        try {
+          cb(this.verifiedResponseOrigin!);
+        } catch (e) {
+          console.error('[IframeMessenger] Error in onOriginVerified callback:', e);
+        }
+      });
+      this.onOriginVerifiedCallbacks = [];
+
+      // Send deferred ready signal
+      if (this.pendingReadySignal) {
+        this.pendingReadySignal = false;
+        try {
+          this.send('IFRAME_READY', {
+            origin: this.window.location.origin,
+            timestamp: Date.now()
+          });
+          console.log('[IframeMessenger] Sent deferred IFRAME_READY signal');
+        } catch (e) {
+          console.error('[IframeMessenger] Failed to send deferred ready signal:', e);
+        }
+      }
+    }
+  }
+
+  // Register a callback to be called when origin is verified
+  onOriginVerified(callback: (origin: string) => void): void {
+    if (this.verifiedResponseOrigin !== null) {
+      // Origin already verified, call immediately
+      callback(this.verifiedResponseOrigin);
+    } else {
+      // Defer until origin is verified
+      this.onOriginVerifiedCallbacks.push(callback);
+    }
+  }
+
+  // Verify that we're locked to an origin
+  isOriginLocked(): boolean {
+    return this.verifiedResponseOrigin !== null;
+  }
+
+  // Get the locked parent origin
+  getParentOrigin(): string | null {
+    return this.verifiedResponseOrigin;
   }
 }
 

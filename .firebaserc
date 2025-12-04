@@ -2,6 +2,17 @@
   "projects": {
     "default": "nostrpass"
   },
-  "targets": {},
+  "targets": {
+    "nostrpass": {
+      "hosting": {
+        "vault": [
+          "vault-nostrpass"
+        ],
+        "website": [
+          "nostrpass"
+        ]
+      }
+    }
+  },
   "etags": {}
 }

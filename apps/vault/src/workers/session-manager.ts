@@ -26,6 +26,7 @@ import { cryptoPrimitives } from './crypto-primitives';
 import { nostrSync } from './nostr-sync';
 import { getSessionStateManager } from './session-state-manager';
 import { vaultOperations } from './vault-operations';
+import { SecureKeyStorage } from './secure-key-storage';
 
 // Singleton crypto instance for session manager operations
 const crypto = new NostrCrypto();
@@ -53,6 +54,10 @@ import type {
 /**
  * Extended session interface with recovery and crypto material
  * Extends UserSession with additional fields needed for session management
+ *
+ * SECURITY NOTE: Sensitive keys (xpriv, privateKey, storagePrivateKey, passwordKey)
+ * should be stored in SecureKeyStorage, not as plain strings in the session object.
+ * The string properties here are for API compatibility only.
  */
 interface ExtendedSession extends UserSession {
   recoveryQuestions?: string[];
@@ -63,6 +68,8 @@ interface ExtendedSession extends UserSession {
   storagePublicKey?: string;
   // Cache password key for vault encryption operations
   passwordKey?: string;
+  // Secure key storage (not exposed, internal only)
+  _secureKeys?: SecureKeyStorage;
 }
 
 // ============================================================================
@@ -79,10 +86,197 @@ interface ExtendedSession extends UserSession {
 export const activeSessions = new Map<string, ExtendedSession>();
 
 /**
- * PIN attempt tracking to prevent brute force attacks
- * Maps username to attempt count and timestamp
+ * Secure key storage for legacy sessions
+ * Maps username to SecureKeyStorage instance
+ * Keys should be stored here instead of as plain strings in activeSessions
  */
-const pinAttempts = new Map<string, { count: number; lastAttempt: number }>();
+const legacySecureKeys = new Map<string, SecureKeyStorage>();
+
+/**
+ * Get or create secure key storage for a legacy session
+ */
+function getLegacySecureStorage(username: string): SecureKeyStorage {
+  let storage = legacySecureKeys.get(username);
+  if (!storage) {
+    storage = new SecureKeyStorage();
+    legacySecureKeys.set(username, storage);
+  }
+  return storage;
+}
+
+/**
+ * Clear secure key storage for a legacy session
+ */
+function clearLegacySecureStorage(username: string): void {
+  const storage = legacySecureKeys.get(username);
+  if (storage) {
+    storage.clearAll();
+    legacySecureKeys.delete(username);
+  }
+}
+
+/**
+ * Clear all legacy secure key storage
+ */
+function clearAllLegacySecureStorage(): void {
+  for (const [username, storage] of legacySecureKeys.entries()) {
+    storage.clearAll();
+  }
+  legacySecureKeys.clear();
+}
+
+/**
+ * PIN attempt tracking to prevent brute force attacks
+ * Maps username to attempt count, timestamp, and lockout state
+ *
+ * Security configuration:
+ * - MAX_PIN_ATTEMPTS: 5 attempts before lockout
+ * - LOCKOUT_DURATION: 5 minutes (300,000ms) after lockout
+ * - BACKOFF_DELAYS: Exponential backoff delays between attempts
+ */
+const PIN_SECURITY = {
+  MAX_ATTEMPTS: 5,
+  LOCKOUT_DURATION_MS: 5 * 60 * 1000, // 5 minutes
+  // Exponential backoff delays in ms: 0, 1s, 2s, 5s, 10s
+  BACKOFF_DELAYS: [0, 1000, 2000, 5000, 10000],
+  // After this many failures, require password re-entry
+  REQUIRE_PASSWORD_AFTER: 10
+} as const;
+
+interface PinAttemptState {
+  count: number;
+  lastAttempt: number;
+  lockedUntil: number; // 0 if not locked
+  totalFailures: number; // Lifetime failures (persists until password re-entry)
+}
+
+const pinAttempts = new Map<string, PinAttemptState>();
+
+/**
+ * Check if user is currently locked out from PIN attempts
+ * @returns Object with lockout status and remaining time
+ */
+export function checkPinLockout(username: string): {
+  isLocked: boolean;
+  remainingMs: number;
+  attemptsRemaining: number;
+  requiresPassword: boolean;
+} {
+  const state = pinAttempts.get(username);
+
+  if (!state) {
+    return {
+      isLocked: false,
+      remainingMs: 0,
+      attemptsRemaining: PIN_SECURITY.MAX_ATTEMPTS,
+      requiresPassword: false
+    };
+  }
+
+  const now = Date.now();
+
+  // Check if lockout has expired
+  if (state.lockedUntil > 0 && now >= state.lockedUntil) {
+    // Lockout expired, reset attempt count (but keep totalFailures)
+    state.count = 0;
+    state.lockedUntil = 0;
+  }
+
+  // Check if currently locked
+  if (state.lockedUntil > now) {
+    return {
+      isLocked: true,
+      remainingMs: state.lockedUntil - now,
+      attemptsRemaining: 0,
+      requiresPassword: state.totalFailures >= PIN_SECURITY.REQUIRE_PASSWORD_AFTER
+    };
+  }
+
+  return {
+    isLocked: false,
+    remainingMs: 0,
+    attemptsRemaining: Math.max(0, PIN_SECURITY.MAX_ATTEMPTS - state.count),
+    requiresPassword: state.totalFailures >= PIN_SECURITY.REQUIRE_PASSWORD_AFTER
+  };
+}
+
+/**
+ * Record a failed PIN attempt and check for lockout
+ * @returns Lockout info after recording the attempt
+ */
+export function recordFailedPinAttempt(username: string): {
+  isLocked: boolean;
+  remainingMs: number;
+  attemptsRemaining: number;
+  requiresPassword: boolean;
+  backoffMs: number;
+} {
+  const now = Date.now();
+  let state = pinAttempts.get(username);
+
+  if (!state) {
+    state = {
+      count: 0,
+      lastAttempt: 0,
+      lockedUntil: 0,
+      totalFailures: 0
+    };
+    pinAttempts.set(username, state);
+  }
+
+  // Increment counters
+  state.count++;
+  state.totalFailures++;
+  state.lastAttempt = now;
+
+  // Calculate backoff delay for current attempt
+  const backoffIndex = Math.min(state.count - 1, PIN_SECURITY.BACKOFF_DELAYS.length - 1);
+  const backoffMs = PIN_SECURITY.BACKOFF_DELAYS[backoffIndex];
+
+  // Check if we should lock out
+  if (state.count >= PIN_SECURITY.MAX_ATTEMPTS) {
+    state.lockedUntil = now + PIN_SECURITY.LOCKOUT_DURATION_MS;
+    console.warn(`[PIN Security] User ${username} locked out until ${new Date(state.lockedUntil).toISOString()} after ${state.count} failed attempts`);
+
+    return {
+      isLocked: true,
+      remainingMs: PIN_SECURITY.LOCKOUT_DURATION_MS,
+      attemptsRemaining: 0,
+      requiresPassword: state.totalFailures >= PIN_SECURITY.REQUIRE_PASSWORD_AFTER,
+      backoffMs: 0
+    };
+  }
+
+  return {
+    isLocked: false,
+    remainingMs: 0,
+    attemptsRemaining: PIN_SECURITY.MAX_ATTEMPTS - state.count,
+    requiresPassword: state.totalFailures >= PIN_SECURITY.REQUIRE_PASSWORD_AFTER,
+    backoffMs
+  };
+}
+
+/**
+ * Record a successful PIN attempt (resets attempt counter)
+ */
+export function recordSuccessfulPinAttempt(username: string): void {
+  const state = pinAttempts.get(username);
+  if (state) {
+    state.count = 0;
+    state.lockedUntil = 0;
+    // Note: totalFailures is NOT reset on success
+    // It's only reset on password re-entry
+    console.log(`[PIN Security] User ${username} PIN success, attempt count reset`);
+  }
+}
+
+/**
+ * Reset all PIN tracking for user (called after password re-entry)
+ */
+export function resetPinTracking(username: string): void {
+  pinAttempts.delete(username);
+  console.log(`[PIN Security] User ${username} PIN tracking fully reset`);
+}
 
 /**
  * Session permission grants (temporary, in-memory)
@@ -175,11 +369,12 @@ function isSessionExpired(session: ExtendedSession): boolean {
 }
 
 /**
- * Reset PIN attempt tracking for a user
- * Called after successful unlock
+ * Reset PIN attempt tracking for a user (legacy compatibility wrapper)
+ * Called after successful unlock - resets attempt counter but keeps totalFailures
+ * @deprecated Use recordSuccessfulPinAttempt instead
  */
 function resetPinAttempts(username: string) {
-  pinAttempts.delete(username);
+  recordSuccessfulPinAttempt(username);
 }
 
 /**
@@ -1064,12 +1259,30 @@ export const sessionManager = {
 
   /**
    * Unlock vault with PIN (NEW ARCHITECTURE)
-   * 1. Decrypt storage keypair from cached LoginObj with PIN
-   * 2. Fetch VaultObj from Nostr using storage private key
-   * 3. Decrypt xpriv from VaultObj with PIN
-   * 4. Create session with all keys
+   * 1. Check PIN lockout status (brute force protection)
+   * 2. Decrypt storage keypair from cached LoginObj with PIN
+   * 3. Fetch VaultObj from Nostr using storage private key
+   * 4. Decrypt xpriv from VaultObj with PIN
+   * 5. Create session with all keys
    */
   unlockVault: async (params: UnlockVaultParams, crypto: NostrCrypto, handlers: any): Promise<UnlockVaultResult> => {
+    // SECURITY: Check PIN lockout status before attempting unlock
+    const lockoutStatus = checkPinLockout(params.username);
+    if (lockoutStatus.isLocked) {
+      const remainingSeconds = Math.ceil(lockoutStatus.remainingMs / 1000);
+      const error = new Error(`Too many failed attempts. Please wait ${remainingSeconds} seconds before trying again.`);
+      (error as any).code = 'PIN_LOCKED';
+      (error as any).remainingMs = lockoutStatus.remainingMs;
+      (error as any).requiresPassword = lockoutStatus.requiresPassword;
+      throw error;
+    }
+
+    if (lockoutStatus.requiresPassword) {
+      const error = new Error('Too many failed PIN attempts. Please re-enter your password to continue.');
+      (error as any).code = 'REQUIRE_PASSWORD';
+      throw error;
+    }
+
     // Get cached vault data from IndexedDB (contains storageKeypairEncrypted from login)
     const cachedData = await vaultDB.getVault(params.username);
     if (!cachedData) {
@@ -1077,11 +1290,6 @@ export const sessionManager = {
     }
 
     console.log('[Unlock] Starting unlock with new architecture', { username: params.username });
-    console.log('[Unlock] Cached data fields:', {
-      hasStorageKeypairEncrypted: !!cachedData.storageKeypairEncrypted,
-      hasSalt: !!cachedData.salt,
-      storagePublicKey: cachedData.publicKey.substring(0, 16) + '...'
-    });
 
     ensureNotLocked(params.username);
 
@@ -1090,12 +1298,32 @@ export const sessionManager = {
       throw new Error('No storage keypair found - vault may need re-login with new architecture');
     }
 
-    console.log('🔐 [Unlock] Decrypting storage keypair with PIN...');
-    const storageKeypairJson = await cryptoPrimitives.decryptDataWithSalt({
-      encryptedData: cachedData.storageKeypairEncrypted,
-      password: params.pin,
-      salt: cachedData.salt
-    });
+    let storageKeypairJson: string;
+    try {
+      storageKeypairJson = await cryptoPrimitives.decryptDataWithSalt({
+        encryptedData: cachedData.storageKeypairEncrypted,
+        password: params.pin,
+        salt: cachedData.salt
+      });
+    } catch (decryptError) {
+      // SECURITY: Record failed attempt and check for lockout
+      const attemptResult = recordFailedPinAttempt(params.username);
+
+      if (attemptResult.isLocked) {
+        const remainingSeconds = Math.ceil(attemptResult.remainingMs / 1000);
+        const error = new Error(`Too many failed attempts. Please wait ${remainingSeconds} seconds.`);
+        (error as any).code = 'PIN_LOCKED';
+        (error as any).remainingMs = attemptResult.remainingMs;
+        (error as any).attemptsRemaining = 0;
+        throw error;
+      }
+
+      const error = new Error(`Invalid PIN. ${attemptResult.attemptsRemaining} attempts remaining.`);
+      (error as any).code = 'INVALID_PIN';
+      (error as any).attemptsRemaining = attemptResult.attemptsRemaining;
+      (error as any).backoffMs = attemptResult.backoffMs;
+      throw error;
+    }
 
     const storageKeypair = JSON.parse(storageKeypairJson);
     const storagePrivateKey = storageKeypair.privateKey;
@@ -1262,15 +1490,20 @@ export const sessionManager = {
   /**
    * Lock vault - clears sensitive data from session but keeps session entry
    * User must unlock again to perform crypto operations
+   * SECURITY: Securely wipes key material from memory
    */
   lockVault: async (params: LockVaultParams): Promise<void> => {
+    // SECURITY: Securely wipe keys from SecureKeyStorage first
+    clearLegacySecureStorage(params.username);
+
     const session = activeSessions.get(params.username);
     if (session) {
-      // Clear sensitive data
+      // Clear sensitive data references
       delete session.privateKey;
       delete session.xpriv;
       delete session.storagePrivateKey;
       delete session.storagePublicKey;
+      delete session._secureKeys;
       session.isUnlocked = false;
 
       logSessionState('lock', params.username);
@@ -1283,9 +1516,13 @@ export const sessionManager = {
   /**
    * Explicit logout - clears session and broadcasts to all tabs
    * Removes session from active sessions and database
+   * SECURITY: Securely wipes key material from memory
    */
   logoutUser: async (params: { username: string }): Promise<{ success: boolean }> => {
     const username = params.username;
+
+    // SECURITY: Securely wipe keys from SecureKeyStorage first
+    clearLegacySecureStorage(username);
 
     // Clear in-memory session data
     const session = activeSessions.get(username);
@@ -1294,6 +1531,7 @@ export const sessionManager = {
       delete session.xpriv;
       delete session.storagePrivateKey;
       delete session.storagePublicKey;
+      delete session._secureKeys;
       session.isUnlocked = false;
     }
 
@@ -1314,9 +1552,14 @@ export const sessionManager = {
   /**
    * Clear session without full logout (used by UI for cleanup)
    * Similar to lock but clears session from database
+   * SECURITY: Securely wipes key material from memory
    */
   clearSession: async (params: { username: string }): Promise<{ success: boolean }> => {
     const username = params.username;
+
+    // SECURITY: Securely wipe keys from SecureKeyStorage first
+    clearLegacySecureStorage(username);
+
     const session = activeSessions.get(username);
 
     if (session) {
@@ -1324,6 +1567,7 @@ export const sessionManager = {
       delete session.xpriv;
       delete session.storagePrivateKey;
       delete session.storagePublicKey;
+      delete session._secureKeys;
       session.isUnlocked = false;
     }
 

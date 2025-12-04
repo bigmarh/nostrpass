@@ -96,15 +96,11 @@ export function getNamespace(): string {
 /**
  * Get the environment name
  *
- * @returns Current environment (e.g., 'production', 'development')
+ * @returns Current environment (e.g., 'production', 'development', 'demo')
  */
 export function getEnvironment(): string {
-  // Check runtime environment first
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV) {
-    return process.env.NODE_ENV;
-  }
-
-  // Fall back to configured environment
+  // ALWAYS use configured environment if set (this is the storage environment)
+  // This allows production builds to use custom storage environments like 'demo' or 'test'
   return globalConfig.environment;
 }
 

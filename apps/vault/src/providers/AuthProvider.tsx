@@ -351,6 +351,19 @@ export const AuthProvider: ParentComponent = (props) => {
         username: state.user.username
       });
 
+      // Notify embassy about logout and request vault close
+      if (messenger) {
+        console.log('[AuthProvider] Sending logout message to embassy');
+        messenger.send('nostrpass:logout', {
+          username: state.user.username,
+          timestamp: Date.now()
+        });
+
+        // Request embassy to close/hide the vault
+        console.log('[AuthProvider] Requesting embassy to hide vault');
+        messenger.send('HIDE_VAULT', {});
+      }
+
       // State will be updated via AUTH_STATE_CHANGED event
       showSuccessToast('Logged out successfully');
     } catch (error) {

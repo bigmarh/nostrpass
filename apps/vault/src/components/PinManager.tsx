@@ -38,6 +38,9 @@ export const PinManager: Component<PinManagerProps> = (props) => {
   const [showPasswordPrompt, setShowPasswordPrompt] = createSignal(false);
   const [passwordForReset, setPasswordForReset] = createSignal('');
 
+  // Ref for PIN pad to control it
+  let pinPadRef: any;
+
   // Handle PIN unlock
   const handlePinUnlock = async (pin: string) => {
     setIsUnlocking(true);
@@ -56,6 +59,10 @@ export const PinManager: Component<PinManagerProps> = (props) => {
         setTempNewPin('');
       } else {
         setPinUnlockError('Incorrect PIN. Please try again.');
+        // Clear the PIN input so user can try again
+        if (pinPadRef && pinPadRef.shakeAndClear) {
+          pinPadRef.shakeAndClear();
+        }
       }
     } catch (error) {
       // Check if the error indicates we need to login again
@@ -157,6 +164,7 @@ export const PinManager: Component<PinManagerProps> = (props) => {
               {/* PIN Entry */}
               <div class="mb-6">
                 <PinPad
+                  ref={(ref) => { pinPadRef = ref; }}
                   onComplete={handlePinUnlock}
                   disabled={isUnlocking()}
                 />

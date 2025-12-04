@@ -1,11 +1,12 @@
 {
   "name": "@nostrpass/embassy",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --port 3000 & vite --port 3200",
+    "dev": "pnpm build && (vite --port 3000 & vite --port 3200 & npx http-server dist -p 3002 --cors)",
     "dev:single": "vite",
+    "dev:serve": "npx http-server dist -p 3002 --cors",
     "build": "tsc && vite build",
     "build:lib": "vite build --config vite.config.lib.ts",
     "preview": "vite preview",

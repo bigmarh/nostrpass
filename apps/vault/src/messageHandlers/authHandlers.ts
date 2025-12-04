@@ -613,7 +613,7 @@ export const authHandlers: MessageHandler[] = [
         // Get active identity from localStorage, not from vaultData
         const activeIdentityIndex = getActiveIdentity(currentUser.profile?.username, appOrigin);
 
-        // Return all identities with their authorization status
+        // Return all identities with their authorization status (exclude archived)
         const identities = vaultData.identities
           .map((identity: any, index: number) => ({
             index,
@@ -622,8 +622,10 @@ export const authHandlers: MessageHandler[] = [
             npub: identity.npub,
             createdAt: identity.createdAt,
             isActive: activeIdentityIndex === index,
-            isAuthorized: !!(identity.appPermissions && identity.appPermissions[appKey])
-          }));
+            isAuthorized: !!(identity.appPermissions && identity.appPermissions[appKey]),
+            archived: identity.archived || false
+          }))
+          .filter((identity: any) => !identity.archived); // Filter out archived identities
 
         return {
           identities,
@@ -758,6 +760,36 @@ export const authHandlers: MessageHandler[] = [
         return { success: true };
       } catch (error) {
         console.error('[LOGOUT] Logout failed:', error);
+        throw error;
+      }
+    }
+  },
+
+  {
+    route: 'LOCK_VAULT',
+    handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
+      const currentUser = deps.getUser();
+      const cryptoWorker = deps.getCryptoWorker();
+
+      console.log('[LOCK_VAULT] Locking vault...');
+
+      if (!currentUser) {
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated');
+      }
+
+      if (!cryptoWorker) {
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Crypto worker not ready');
+      }
+
+      try {
+        await cryptoWorker.lockSession({
+          username: currentUser.profile.username
+        });
+
+        console.log('[LOCK_VAULT] Vault locked successfully');
+        return { success: true, locked: true };
+      } catch (error) {
+        console.error('[LOCK_VAULT] Lock failed:', error);
         throw error;
       }
     }

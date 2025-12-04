@@ -72,12 +72,15 @@ export const QuickUnlock: Component = () => {
         // No need to dispatch events here anymore
 
         if (nextAction === 'permission-prompt') {
-            // Trigger permission prompt
+            // After PIN unlock, we need to ensure iframe resizes to 'tall' for permission page
+            // The permission page will be opened by permissionPromptManager, but we want to
+            // make sure the resize happens smoothly
             const requestId = searchParams.requestId;
-            console.log('[QuickUnlock] Triggering permission prompt for request:', requestId);
+            console.log('[QuickUnlock] Permission prompt needed after unlock, request:', requestId);
 
             if (requestId) {
-                // Dispatch permission ready event
+                // Dispatch permission ready event - this will trigger the permission flow
+                // The permissionPromptManager will send OPEN_PERMISSION_PAGE which resizes to 'tall'
                 window.dispatchEvent(new CustomEvent('vault-unlocked-for-permission', {
                     detail: { requestId }
                 }));

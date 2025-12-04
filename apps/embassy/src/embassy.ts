@@ -397,11 +397,13 @@ class NostrPassEmbassy {
       trustedOrigins: config.trustedOrigins, // Keep as-is, will handle defaults in initializeMessenger
       theme: config.theme || 'auto',
       debug: config.debug || false,
-      parentPinOverlay: config.parentPinOverlay ?? false
+      parentPinOverlay: config.parentPinOverlay ?? false,
+      storageEnvironment: config.storageEnvironment,
+      namespace: config.namespace
     };
 
     // Log version info with vault URL
-    console.log('🚀 NostrPass Embassy v1.0.1 | Vault:', this.config.vaultUrl);
+    console.log('🚀 NostrPass Embassy v1.0.2 | Vault:', this.config.vaultUrl);
 
     // Disable console.log in production unless debug is enabled
     if (import.meta.env.PROD && !this.config.debug) {
@@ -505,6 +507,17 @@ class NostrPassEmbassy {
         // Give the vault a moment to initialize its handlers
         setTimeout(() => {
           if (this.config.debug) console.log('Iframe initialization period complete');
+          // Send handshake message to establish connection and verify origin
+          // This triggers the vault to lock onto our origin and respond
+          if (this.messenger) {
+            this.messenger.send('EMBASSY_HANDSHAKE', {
+              origin: window.location.origin,
+              appName: this.config.appName,
+              appDomain: this.config.appDomain,
+              timestamp: Date.now()
+            });
+            console.log('[Embassy] Sent handshake to vault');
+          }
           resolve();
         }, 100);
       };
@@ -836,7 +849,6 @@ class NostrPassEmbassy {
         background: transparent !important;
         z-index: 2147483647 !important;
         overflow: hidden !important;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
       }
 
       @media (max-width: 500px) {
@@ -884,7 +896,6 @@ class NostrPassEmbassy {
         transition: opacity 0.2s ease, visibility 0.2s ease !important;
         z-index: 2147483646 !important;
         overflow: hidden !important;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
       }
 
       @media (max-width: 500px) {
@@ -910,7 +921,6 @@ class NostrPassEmbassy {
         border-radius: 12px !important;
         background: transparent !important;
         background-color: transparent !important;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
         z-index: 2147483647 !important; /* Maximum z-index */
         color-scheme: light dark; /* Support both themes */
       }
@@ -970,7 +980,6 @@ class NostrPassEmbassy {
         pointer-events: auto !important;
         border: 2px solid red !important;
         z-index: 999999 !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
       }
 
       .nostrpass-account-button {
@@ -1190,6 +1199,33 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+
+        // After unlock, check if we still need permission prompt
+        try {
+          const recheckPreflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+            action: 'getPublicKey',
+            identityIndex
+          });
+          if (recheckPreflight?.needsPrompt === true) {
+            console.log('⏳ Permission required after unlock, showing permission prompt...');
+            permissionPromise = this.waitForPermission();
+
+            // Open permission page with tall size directly
+            const requestId = `${this.config.appDomain}-getPublicKey-${Date.now()}`;
+            const queryParams = {
+              appOrigin: this.config.appDomain || window.location.host,
+              appName: this.config.appName || document.title,
+              action: 'getPublicKey',
+              identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+              requestId
+            };
+
+            this.openPage('permission', { size: 'tall', queryParams });
+          }
+        } catch (error) {
+          console.warn('Failed to recheck permission after unlock:', error);
+          // Continue anyway, the actual operation will handle permission errors
+        }
       }
 
       // If we set up a permission wait, now wait for it
@@ -1314,6 +1350,36 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+
+        // After unlock, check if we still need permission prompt
+        try {
+          const recheckPreflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+            action: 'signEvent',
+            eventKind: event?.kind,
+            identityIndex
+          });
+          if (recheckPreflight?.needsPrompt === true) {
+            console.log('⏳ Permission required after unlock, showing permission prompt...');
+            permissionPromise = this.waitForPermission();
+
+            // Open permission page with tall size directly
+            const requestId = `${this.config.appDomain}-signEvent-${Date.now()}`;
+            const queryParams = {
+              appOrigin: this.config.appDomain || window.location.host,
+              appName: this.config.appName || document.title,
+              action: 'signEvent',
+              identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+              requestId,
+              eventKind: (event?.kind || 0).toString(),
+              event: JSON.stringify(event)
+            };
+
+            this.openPage('permission', { size: 'tall', queryParams });
+          }
+        } catch (error) {
+          console.warn('Failed to recheck permission after unlock:', error);
+          // Continue anyway, the actual operation will handle permission errors
+        }
       }
 
       // If we set up a permission wait, now wait for it
@@ -1481,6 +1547,34 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+
+        // After unlock, check if we still need permission prompt
+        try {
+          const recheckPreflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+            action: 'signData',
+            identityIndex
+          });
+          if (recheckPreflight?.needsPrompt === true) {
+            console.log('⏳ Permission required after unlock, showing permission prompt...');
+            permissionPromise = this.waitForPermission();
+
+            // Tell vault to open permission page with tall size
+            const requestId = `${this.config.appDomain}-signData-${Date.now()}`;
+            const queryParams = {
+              appOrigin: this.config.appDomain || window.location.host,
+              appName: this.config.appName || document.title,
+              action: 'signData',
+              identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+              requestId,
+              data: message
+            };
+
+            this.openPage('permission', { size: 'tall', queryParams });
+          }
+        } catch (error) {
+          console.warn('Failed to recheck permission after unlock:', error);
+          // Continue anyway, the actual operation will handle permission errors
+        }
       }
 
       // If we set up a permission wait, now wait for it
@@ -1624,6 +1718,35 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+
+        // After unlock, check if we still need permission prompt
+        try {
+          const recheckPreflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+            action: 'nip04',
+            identityIndex
+          });
+          if (recheckPreflight?.needsPrompt === true) {
+            console.log('⏳ Permission required after unlock, showing permission prompt...');
+            permissionPromise = this.waitForPermission();
+
+            // Tell vault to open permission page with tall size
+            const requestId = `${this.config.appDomain}-nip04-encrypt-${Date.now()}`;
+            const queryParams = {
+              appOrigin: this.config.appDomain || window.location.host,
+              appName: this.config.appName || document.title,
+              action: 'nip04',
+              identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+              requestId,
+              pubkey,
+              plaintext
+            };
+
+            this.openPage('permission', { size: 'tall', queryParams });
+          }
+        } catch (error) {
+          console.warn('Failed to recheck permission after unlock:', error);
+          // Continue anyway, the actual operation will handle permission errors
+        }
       }
 
       // If we set up a permission wait, now wait for it
@@ -1768,6 +1891,35 @@ class NostrPassEmbassy {
         console.log('⏳ Waiting for vault unlock...');
         await unlockPromise;
         console.log('✅ Vault unlocked, continuing operation');
+
+        // After unlock, check if we still need permission prompt
+        try {
+          const recheckPreflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+            action: 'nip04',
+            identityIndex
+          });
+          if (recheckPreflight?.needsPrompt === true) {
+            console.log('⏳ Permission required after unlock, showing permission prompt...');
+            permissionPromise = this.waitForPermission();
+
+            // Tell vault to open permission page with tall size
+            const requestId = `${this.config.appDomain}-nip04-decrypt-${Date.now()}`;
+            const queryParams = {
+              appOrigin: this.config.appDomain || window.location.host,
+              appName: this.config.appName || document.title,
+              action: 'nip04',
+              identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+              requestId,
+              pubkey,
+              ciphertext
+            };
+
+            this.openPage('permission', { size: 'tall', queryParams });
+          }
+        } catch (error) {
+          console.warn('Failed to recheck permission after unlock:', error);
+          // Continue anyway, the actual operation will handle permission errors
+        }
       }
 
       // If we set up a permission wait, now wait for it
@@ -1976,6 +2128,14 @@ class NostrPassEmbassy {
   // Public utility methods
   public isReady(): boolean {
     return this._isReady;
+  }
+
+  /**
+   * Get the vault origin URL
+   * @returns The origin of the vault (e.g., 'https://vault.nostrpass.com')
+   */
+  public getVaultOrigin(): string {
+    return new URL(this.config.vaultUrl!).origin;
   }
 
   public async waitForReady(): Promise<void> {

@@ -114,6 +114,20 @@ export const MessengerProvider: ParentComponent = (props) => {
       isInIframe: window.parent !== window
     });
 
+    // Handle embassy handshake - this establishes the secure connection
+    messengerInstance.route('EMBASSY_HANDSHAKE', {
+      handler: (data: any) => {
+        console.log('🤝 Embassy handshake received from:', data?.origin);
+        // The handshake message triggers origin verification in the messenger
+        // This allows VAULT_READY to be sent back once handlers are ready
+        return {
+          acknowledged: true,
+          vaultOrigin: window.location.origin,
+          timestamp: Date.now()
+        };
+      }
+    });
+
     // Handle show/hide vault commands
     messengerInstance.route('SHOW_VAULT_RESPONSE', {
       handler: (data: any) => {
@@ -284,8 +298,14 @@ export const MessengerProvider: ParentComponent = (props) => {
     setupMessageHandlers(m, deps);
     setHandlersRegistered(true);
 
-    // Inform parent handlers are ready
-    if (window.parent !== window) sendVaultReady();
+    // Inform parent handlers are ready - defer until origin is verified
+    if (window.parent !== window) {
+      // Use onOriginVerified callback to defer VAULT_READY until connection is established
+      m.onOriginVerified(() => {
+        console.log('📤 Origin verified, sending VAULT_READY signal');
+        sendVaultReady();
+      });
+    }
   };
 
   const send = (type: string, data?: any) => {
