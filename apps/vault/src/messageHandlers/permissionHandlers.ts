@@ -1,4 +1,4 @@
-import { MessageHandler, MessageHandlerDependencies } from './index';
+import { MessageHandler, MessageHandlerDependencies } from './types';
 import { Msg } from '@nostrpass/types';
 import { vaultError, ErrorCode } from './errors';
 

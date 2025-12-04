@@ -1,4 +1,4 @@
-import { MessageHandler, MessageHandlerDependencies } from './index';
+import { MessageHandler, MessageHandlerDependencies } from './types';
 import { Msg } from '@nostrpass/types';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { nip19 } from 'nostr-tools';
