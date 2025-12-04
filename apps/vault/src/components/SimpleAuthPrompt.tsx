@@ -32,6 +32,22 @@ export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
     }
   };
 
+  const getDisplayName = () => {
+    // If appName is provided and not empty, use it
+    if (props.appName && props.appName.trim()) {
+      return props.appName;
+    }
+
+    // Otherwise, extract hostname from appOrigin
+    try {
+      const url = new URL(props.appOrigin);
+      return url.hostname;
+    } catch {
+      // If parsing fails, return the origin as-is
+      return props.appOrigin;
+    }
+  };
+
   const getNpub = (identity: Identity) => {
     try {
       const npub = nip19.npubEncode(identity.publicKey);
@@ -72,7 +88,7 @@ export const SimpleAuthPrompt: Component<SimpleAuthPromptProps> = (props) => {
               Connect Account?
             </h2>
             <p class="text-sm text-gray-600 dark:text-gray-400">
-              <strong>{props.appName || props.appOrigin}</strong> wants to connect with
+              <strong>{getDisplayName()}</strong> wants to connect with
             </p>
           </div>
 
