@@ -17,6 +17,9 @@ interface IdentityManagerProps {
   onRefresh: () => void;
   cryptoWorker: any;
   onShowPinUnlock: () => void;
+  triggerAddIdentity?: number;
+  hideHeader?: boolean;
+  searchQuery?: string;
 }
 
 export const IdentityManager: Component<IdentityManagerProps> = (props) => {
@@ -35,8 +38,23 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   const [isRefreshing, setIsRefreshing] = createSignal(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = createSignal(false);
   const [identityToArchive, setIdentityToArchive] = createSignal<{index: number, nickname: string} | null>(null);
+  // BYOK (Bring Your Own Key) state
+  const [addIdentityMode, setAddIdentityMode] = createSignal<'generate' | 'import'>('generate');
+  const [byokNsec, setByokNsec] = createSignal('');
+  const [byokPin, setByokPin] = createSignal('');
+  const [byokError, setByokError] = createSignal<string | null>(null);
+  const [isImportingBYOK, setIsImportingBYOK] = createSignal(false);
+  const [byokPreview, setByokPreview] = createSignal<{ npub: string } | null>(null);
 
   const permissionService = PermissionService.getInstance();
+
+  // Watch for trigger to show add identity modal
+  createEffect(() => {
+    const trigger = props.triggerAddIdentity;
+    if (trigger && trigger > 0) {
+      setShowAddIdentityModal(true);
+    }
+  });
 
   // Helper to get app origin from appId (sanitized domain)
   const getAppOrigin = (appId: string): string => {
@@ -133,7 +151,8 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
           hasAppPermissions,
           connectedApps,
           otherConnectedApps,
-          index: originalIndex  // Use original index from full vault array
+          index: originalIndex,  // Use original index from full vault array
+          isImported: identity.isImported || false  // BYOK flag
         };
       });
   });
@@ -148,7 +167,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   });
 
   const filteredIdentities = createMemo(() => {
-    const query = searchQuery().toLowerCase();
+    const query = (props.searchQuery || searchQuery()).toLowerCase();
     let results = identities();
 
     if (query) {
@@ -160,7 +179,18 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       });
     }
 
-    return results;
+    // Sort: active first, then authorized, then others
+    return results.sort((a: any, b: any) => {
+      // Active identity always first
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+
+      // Among non-active, authorized identities come before unauthorized
+      if (a.hasAppPermissions && !b.hasAppPermissions) return -1;
+      if (!a.hasAppPermissions && b.hasAppPermissions) return 1;
+
+      return 0;
+    });
   });
 
   // Note: appPermissions is now a reactive createMemo() that automatically
@@ -683,43 +713,169 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     }
   };
 
+  // Handle BYOK nsec input change - validate and preview
+  const handleNsecInput = async (nsec: string) => {
+    setByokNsec(nsec);
+    setByokError(null);
+    setByokPreview(null);
+
+    if (!nsec.trim()) return;
+
+    // Quick format validation
+    if (!nsec.startsWith('nsec1')) {
+      setByokError('Must start with nsec1');
+      return;
+    }
+
+    try {
+      // Validate and get pubkey preview
+      const { publicKey } = await props.cryptoWorker.validateAndDecodeNsec({ nsec: nsec.trim() });
+      const npub = nip19.npubEncode(publicKey);
+      setByokPreview({ npub });
+    } catch (e) {
+      setByokError('Invalid nsec format');
+    }
+  };
+
+  // Handle import BYOK identity
+  const handleImportBYOK = async () => {
+    try {
+      setIsImportingBYOK(true);
+      setByokError(null);
+
+      if (props.isVaultLocked) {
+        props.onShowPinUnlock();
+        return;
+      }
+
+      const nsec = byokNsec().trim();
+      if (!nsec) {
+        setByokError('Please enter your nsec');
+        return;
+      }
+
+      // Check crypto worker
+      if (!props.cryptoWorker) {
+        throw new Error('Crypto worker not ready');
+      }
+
+      // Check if vault is unlocked
+      const status: any = await props.cryptoWorker.hasKeysInSession({ username: props.username });
+      if (!status?.hasXpriv) {
+        console.warn('No xpriv in session, requesting unlock');
+        props.onShowPinUnlock();
+        return;
+      }
+
+      // Validate nsec and get public key
+      const { publicKey } = await props.cryptoWorker.validateAndDecodeNsec({ nsec });
+
+      // Check if this pubkey already exists
+      const existingIdentity = props.vaultData?.identities?.find((id: any) => id.publicKey === publicKey);
+      if (existingIdentity) {
+        setByokError(`This key already exists as "${existingIdentity.nickname || 'Unknown'}"`);
+        return;
+      }
+
+      // Get vault salt for encryption
+      const vaultSalt = props.vaultData?.salt;
+      if (!vaultSalt) {
+        throw new Error('Vault salt not found');
+      }
+
+      // PIN is required to encrypt the nsec
+      const pin = byokPin().trim();
+      if (!pin) {
+        setByokError('Please enter your PIN to encrypt the key');
+        return;
+      }
+
+      // Encrypt the nsec with the user's PIN (same salt as xpriv)
+      const encryptedNsec = await props.cryptoWorker.encryptNsecForBYOK({
+        nsec,
+        pin,
+        salt: vaultSalt
+      });
+
+      // Build BYOK identity object
+      const nextIndex = (props.vaultData?.identities?.length ?? 0);
+      const identity = {
+        nickname: newIdentityNickname().trim() || 'Imported',
+        publicKey,
+        index: nextIndex,
+        isImported: true,
+        encryptedNsec,
+        importedAt: Date.now(),
+        createdAt: Date.now()
+      } as any;
+
+      // Save (automatically syncs to Nostr)
+      await props.onUpdateVaultData((curr) => ({
+        identities: [...(curr.identities || []), identity]
+      }));
+
+      console.log('✅ [Import BYOK] Identity imported and auto-synced to Nostr');
+
+      // Reset modal state
+      closeAddIdentityModal();
+    } catch (e) {
+      console.error('Failed to import BYOK identity:', e);
+      setByokError(e instanceof Error ? e.message : 'Failed to import key');
+    } finally {
+      setIsImportingBYOK(false);
+    }
+  };
+
+  // Reset modal state when closing
+  const closeAddIdentityModal = () => {
+    setShowAddIdentityModal(false);
+    setNewIdentityNickname('');
+    setByokNsec('');
+    setByokPin('');
+    setByokError(null);
+    setByokPreview(null);
+    setAddIdentityMode('generate');
+  };
+
   return (
     <>
       {/* Identity list */}
-      <div class="flex flex-col gap-2 relative flex-1 min-h-0">
-        <header class="flex justify-between items-center shrink-0">
-          <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
-          <div class="flex gap-2">
-            <button
-              class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300"
-              onClick={() => {
-                setIsRefreshing(true);
-                props.onRefresh();
-                setTimeout(() => setIsRefreshing(false), 2000);
-              }}
-              title="Refresh vault data"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-            <button class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
-              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-              </svg>
-            </button>
-          </div>
-        </header>
+      <div class="flex flex-col gap-2 relative">
+        <Show when={!props.hideHeader}>
+          <header class="flex justify-between items-center shrink-0">
+            <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
+            <div class="flex gap-2">
+              <button
+                class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300"
+                onClick={() => {
+                  setIsRefreshing(true);
+                  props.onRefresh();
+                  setTimeout(() => setIsRefreshing(false), 2000);
+                }}
+                title="Refresh vault data"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <button class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                </svg>
+              </button>
+            </div>
+          </header>
 
-        {/* Search input - only show when more than 4 identities */}
-        <Show when={showSearch()}>
-          <input
-            type="text"
-            placeholder="Search identities..."
-            value={searchQuery()}
-            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm shrink-0"
-          />
+          {/* Search input - only show when more than 4 identities */}
+          <Show when={showSearch()}>
+            <input
+              type="text"
+              placeholder="Search identities..."
+              value={searchQuery()}
+              onInput={(e) => setSearchQuery(e.currentTarget.value)}
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm shrink-0"
+            />
+          </Show>
         </Show>
 
         {/* Lock overlay when vault is locked */}
@@ -747,137 +903,109 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
           </div>
         </Show>
 
-        {/* Scrollable identity list - stretches to fill space */}
-        <div class="overflow-y-auto space-y-2 flex-1 min-h-0">
+        {/* Identity list */}
+        <div class="space-y-2 bg-gray-50 dark:bg-gray-950 px-4 py-3" style="padding-bottom: calc(6rem + env(safe-area-inset-bottom));">
           <For each={filteredIdentities()}>
           {(identity) => (
             <div
-              class={`flex flex-col border rounded-lg p-4 justify-between items-center hover:shadow-md dark:hover:shadow-lg transition-all ${identity.isActive ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              class={`flex items-center justify-between border rounded-lg px-4 py-3.5 transition-all ${
+                identity.isImported
+                  ? 'border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-950/50'
+                  : identity.isActive
+                    ? 'border-gray-700 dark:border-gray-500 bg-gray-200 dark:bg-gray-700'
+                    : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
             >
-              <div class="flex flex-row justify-between w-full items-center ">
-                <div class="flex flex-col justify-start gap-2">
-                  <div class="flex items-center gap-2">
-                    <span class="font-medium text-gray-900 dark:text-gray-100">{identity.nickname}</span>
-                    <Show when={identity.isActive}>
-                      <span class="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900 px-1.5 py-0.5 rounded">
-                        Active
-                      </span>
-                    </Show>
-                  </div>
-                  <span class="text-gray-500 dark:text-gray-400 text-xs font-mono">
-                    ({identity.npub.substring(0, 8)}...)
-                  </span>
-                </div>
-
-                <div class="flex flex-col justify-end items-end gap-3">
-                  <div class="flex items-center gap-2">
-                    {/* Slide switch */}
-                    <Show when={!props.isVaultLocked}>
-                      <button
-                        onClick={() => {
-                          if (identity.isActive) {
-                            // Toggle off = just unset active; keep authorization
-                            handleUnsetActiveIdentityForApp();
-                          } else if (identity.hasAppPermissions) {
-                            // Toggle on = set as active if authorized
-                            handleSetActiveIdentityForApp(identity.index);
-                          } else {
-                            // Not authorized: open settings to authorize first
-                            setSelectedIdentityKey(identity.publicKey);
-                            setShowSettingsPanel(true);
-                          }
-                        }}
-                        class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'
-                          } hover:opacity-80`}
-                        title={identity.isActive ? 'Active identity for this app' : (identity.hasAppPermissions ? 'Make active for this app' : 'Authorize before making active')}
-                      >
-                        <span class={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-gray-100 transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
-                          }`} />
-                      </button>
-                    </Show>
-                    <Show when={props.isVaultLocked}>
-                      <div class="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 dark:bg-gray-700 opacity-50">
-                        <span class="inline-block h-4 w-4 transform rounded-full bg-white dark:bg-gray-100 translate-x-1" />
-                      </div>
-                    </Show>
-
-
-                  </div>
-
-                </div>
-              </div>
-              {/* Connected to */}
-              <div class="flex flex-row justify-between w-full mt-4 items-center">
-                <div>
-                  <Show when={identity.hasAppPermissions}>
-                    <span class="text-green-600 dark:text-green-400 text-xs font-medium">
-                      Authorized for {desanitizeDomain(props.appId!)}
-                    </span>
-                  </Show>
-                  <Show when={!identity.hasAppPermissions && props.appId && !props.isVaultLocked}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedIdentityKey(identity.publicKey);
-                        setShowSettingsPanel(true);
-                      }}
-                      class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                      title={`Authorize ${identity.nickname} for ${desanitizeDomain(props.appId!)}`}
-                    >
-                      Use this ID with {desanitizeDomain(props.appId!)}
-
-                    </button>
-                  </Show>
-                  <Show when={!identity.hasAppPermissions && props.appId && props.isVaultLocked}>
-                    <span class="text-gray-400 dark:text-gray-500 text-xs">
-                      Unlock vault to authorize
-                    </span>
-                  </Show>
-                </div>
+              {/* Left: Identity name with key icon and status */}
+              <div class="flex flex-col gap-1.5 min-w-0 flex-1">
                 <div class="flex items-center gap-2">
-                  {/* Archive button */}
-                  <Show when={!props.isVaultLocked}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        confirmArchiveIdentity(identity.index);
-                      }}
-                      class="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors border border-gray-200 dark:border-gray-600 hover:border-red-300 dark:hover:border-red-800"
-                      title="Archive Identity"
-                    >
-                      <svg class="w-4 h-4 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                      </svg>
-                    </button>
+                  <Show when={identity.isImported}>
+                    <svg class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                    </svg>
                   </Show>
-                  {/* Settings button */}
-                  <Show when={!props.isVaultLocked}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        console.log('⚙️ [Settings] Opening settings for identity:', identity.nickname, identity.publicKey);
+                  <span class="font-medium text-gray-900 dark:text-gray-100 text-base truncate">{identity.nickname}</span>
+                </div>
+                <Show when={identity.hasAppPermissions}>
+                  <span class="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900 px-2 py-0.5 rounded self-start">
+                    Authorized
+                  </span>
+                </Show>
+                <Show when={!identity.hasAppPermissions && props.appId && !props.isVaultLocked}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedIdentityKey(identity.publicKey);
+                      setShowSettingsPanel(true);
+                    }}
+                    class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium self-start"
+                  >
+                    Connect to this app →
+                  </button>
+                </Show>
+              </div>
+
+              {/* Right: Actions */}
+              <div class="flex items-center gap-2 shrink-0">
+                {/* Settings button */}
+                <Show when={!props.isVaultLocked}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedIdentityKey(identity.publicKey);
+                      setShowSettingsPanel(true);
+                    }}
+                    class="p-2 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors"
+                    title="Settings"
+                  >
+                    <svg class="w-5 h-5 text-gray-600 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                </Show>
+
+                {/* Archive button */}
+                <Show when={!props.isVaultLocked}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      confirmArchiveIdentity(identity.index);
+                    }}
+                    class="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                    title="Archive"
+                  >
+                    <svg class="w-5 h-5 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                  </button>
+                </Show>
+
+                {/* Toggle switch - furthest right */}
+                <Show when={!props.isVaultLocked}>
+                  <button
+                    onClick={() => {
+                      if (identity.isActive) {
+                        handleUnsetActiveIdentityForApp();
+                      } else if (identity.hasAppPermissions) {
+                        handleSetActiveIdentityForApp(identity.index);
+                      } else {
                         setSelectedIdentityKey(identity.publicKey);
                         setShowSettingsPanel(true);
-                        console.log('⚙️ [Settings] Panel should be open, showSettingsPanel:', showSettingsPanel());
-                      }}
-                      class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors border border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500"
-                      title="Settings"
-                    >
-                      <svg class="w-4 h-4 text-gray-600 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-                      </svg>
-                    </button>
-                  </Show>
-                  <Show when={props.isVaultLocked}>
-                    <div class="p-1 rounded border border-gray-200 opacity-50">
-                      <svg class="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-                      </svg>
-                    </div>
-                  </Show>
-                </div>
-
+                      }
+                    }}
+                    class={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${identity.isActive ? 'bg-gray-700 dark:bg-gray-600' : 'bg-gray-300 dark:bg-gray-600'
+                      } hover:opacity-80`}
+                    title={identity.isActive ? 'Active' : (identity.hasAppPermissions ? 'Make active' : 'Authorize first')}
+                  >
+                    <span class={`inline-block h-5 w-5 transform rounded-full bg-white dark:bg-gray-100 transition-transform ${identity.isActive ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                  </button>
+                </Show>
+                <Show when={props.isVaultLocked}>
+                  <div class="relative inline-flex h-7 w-12 items-center rounded-full bg-gray-200 dark:bg-gray-700 opacity-50">
+                    <span class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-gray-100 translate-x-1" />
+                  </div>
+                </Show>
               </div>
             </div>
           )}
@@ -968,38 +1096,149 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       {/* Add Identity Modal */}
       <Show when={showAddIdentityModal()}>
         <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-gray-300 dark:border-gray-600 p-6 text-center relative max-w-md w-full mx-4">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Add New Identity</h2>
-            <div class="mb-4 text-left">
-              <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Nickname</label>
-              <input
-                type="text"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                placeholder="e.g., Work, Social, Trading"
-                value={newIdentityNickname()}
-                onInput={(e) => setNewIdentityNickname(e.currentTarget.value)}
-              />
-            </div>
-            <div class="flex gap-3">
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-gray-300 dark:border-gray-600 p-6 relative max-w-md w-full mx-4">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100 text-center">Add New Identity</h2>
+
+            {/* Mode selector tabs */}
+            <div class="flex mb-4 border-b border-gray-200 dark:border-gray-600">
               <button
-                class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
-                onClick={() => {
-                  setShowAddIdentityModal(false);
-                  setNewIdentityNickname('');
-                }}
+                class={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  addIdentityMode() === 'generate'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+                onClick={() => setAddIdentityMode('generate')}
               >
-                Cancel
+                Generate New
               </button>
               <button
-                class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors font-medium"
-                disabled={!newIdentityNickname() || props.isVaultLocked}
-                onClick={handleAddIdentity}
+                class={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  addIdentityMode() === 'import'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+                onClick={() => setAddIdentityMode('import')}
               >
-                Add Identity
+                Import Key (BYOK)
               </button>
             </div>
+
+            {/* Generate mode */}
+            <Show when={addIdentityMode() === 'generate'}>
+              <div class="mb-4 text-left">
+                <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Nickname</label>
+                <input
+                  type="text"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                  placeholder="e.g., Work, Social, Trading"
+                  value={newIdentityNickname()}
+                  onInput={(e) => setNewIdentityNickname(e.currentTarget.value)}
+                />
+              </div>
+              <div class="flex gap-3">
+                <button
+                  class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
+                  onClick={closeAddIdentityModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors font-medium"
+                  disabled={!newIdentityNickname() || props.isVaultLocked}
+                  onClick={handleAddIdentity}
+                >
+                  Generate
+                </button>
+              </div>
+            </Show>
+
+            {/* Import mode (BYOK) */}
+            <Show when={addIdentityMode() === 'import'}>
+              <div class="space-y-4 text-left">
+                {/* BYOK Warning */}
+                <div class="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <p class="text-xs text-amber-800 dark:text-amber-200">
+                    <strong>BYOK (Bring Your Own Key):</strong> You are responsible for backing up this key. It will NOT be recoverable from your seed phrase.
+                  </p>
+                </div>
+
+                {/* Nickname */}
+                <div>
+                  <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Nickname</label>
+                  <input
+                    type="text"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    placeholder="e.g., Legacy Key, Old Account"
+                    value={newIdentityNickname()}
+                    onInput={(e) => setNewIdentityNickname(e.currentTarget.value)}
+                  />
+                </div>
+
+                {/* nsec input */}
+                <div>
+                  <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Private Key (nsec)</label>
+                  <input
+                    type="password"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 font-mono text-sm"
+                    placeholder="nsec1..."
+                    value={byokNsec()}
+                    onInput={(e) => handleNsecInput(e.currentTarget.value)}
+                  />
+                </div>
+
+                {/* Preview npub */}
+                <Show when={byokPreview()}>
+                  <div class="p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <p class="text-xs text-green-800 dark:text-green-200">
+                      <span class="font-medium">Public Key:</span>{' '}
+                      <span class="font-mono">{byokPreview()!.npub.slice(0, 20)}...</span>
+                    </p>
+                  </div>
+                </Show>
+
+                {/* PIN input */}
+                <div>
+                  <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">Confirm PIN</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    placeholder="Enter your PIN to encrypt the key"
+                    value={byokPin()}
+                    onInput={(e) => setByokPin(e.currentTarget.value)}
+                  />
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Your PIN encrypts the imported key for secure storage.
+                  </p>
+                </div>
+
+                {/* Error message */}
+                <Show when={byokError()}>
+                  <div class="p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p class="text-xs text-red-700 dark:text-red-300">{byokError()}</p>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="flex gap-3 mt-4">
+                <button
+                  class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
+                  onClick={closeAddIdentityModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors font-medium"
+                  disabled={!byokNsec() || !byokPin() || !byokPreview() || isImportingBYOK() || props.isVaultLocked}
+                  onClick={handleImportBYOK}
+                >
+                  {isImportingBYOK() ? 'Importing...' : 'Import Key'}
+                </button>
+              </div>
+            </Show>
+
             <Show when={props.isVaultLocked}>
-              <p class="text-xs text-gray-500 mt-3">Unlock your vault to add a new identity.</p>
+              <p class="text-xs text-gray-500 mt-3 text-center">Unlock your vault to add a new identity.</p>
             </Show>
           </div>
         </div>

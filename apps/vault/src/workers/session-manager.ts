@@ -2063,4 +2063,32 @@ export const sessionManager = {
 
     return { success: true };
   },
+
+  // ========================================
+  // BYOK (Bring Your Own Key) Operations
+  // ========================================
+
+  /**
+   * Validate and decode an nsec (bech32-encoded private key)
+   * Returns the hex private key and derived public key
+   */
+  validateAndDecodeNsec: async (params: { nsec: string }): Promise<{ privateKey: string; publicKey: string }> => {
+    return cryptoPrimitives.validateAndDecodeNsec(params);
+  },
+
+  /**
+   * Encrypt an nsec for BYOK storage
+   * Uses the same salt as xpriv for consistency
+   */
+  encryptNsecForBYOK: async (params: { nsec: string; pin: string; salt: string }): Promise<string> => {
+    return cryptoPrimitives.encryptNsecForBYOK(params);
+  },
+
+  /**
+   * Decrypt an nsec from BYOK storage
+   * Returns the hex private key (not nsec format)
+   */
+  decryptNsecFromBYOK: async (params: { encryptedNsec: string; pin: string; salt: string }): Promise<string> => {
+    return cryptoPrimitives.decryptNsecFromBYOK(params);
+  },
 };

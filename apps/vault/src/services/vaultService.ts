@@ -88,7 +88,7 @@ export class VaultService {
       identities: [{
         index: 0,
         publicKey: masterKeypair.publicKey,
-        name: 'Master',
+        nickname: 'Personal',
         createdAt: Date.now()
       }],
       currentIdentityIndex: 0,

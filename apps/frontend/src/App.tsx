@@ -30,10 +30,12 @@ function App() {
     if (showDemo && !nostrPassReady) {
       const script = document.createElement('script')
       // Use local embassy in development, CDN in production
-      const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      const isDevelopment = window.location.hostname === 'localhost' ||
+                            window.location.hostname === '127.0.0.1' ||
+                            window.location.hostname === '192.168.1.220'
       script.src = isDevelopment
-        ? 'http://localhost:3002/embassy.iife.js'  // Local embassy IIFE build
-        : 'https://cdn.nostrpass.com/embassy.js?v=1.0.2'
+        ? `https://${window.location.hostname}:3002/embassy.iife.js`  // Local embassy IIFE build (HTTPS)
+        : 'https://cdn.nostrpass.com/embassy.js'
       script.async = true
       script.setAttribute('data-manual-init', 'true') // Disable auto-init, we'll manually initialize
       script.onload = () => {
@@ -43,8 +45,8 @@ function App() {
             appName: 'NostrPass Demo',
             storageEnvironment: 'demo',
             theme: 'light',
-            // Use local vault in development
-            vaultUrl: isDevelopment ? 'http://localhost:3001' : undefined
+            // Use local vault in development (with HTTPS)
+            vaultUrl: isDevelopment ? `https://${window.location.hostname}:3001` : undefined
           })
           console.log('✅ NostrPass initialized and overriding browser extension')
           setNostrPassReady(true)
@@ -175,14 +177,14 @@ function App() {
           <div className="flex flex-col justify-center">
             <h2 className="text-gray-800 md:text-6xl font-bold text-4xl mb-2 tracking-tight">NostrPass</h2>
             <h3 className=" md:text-xl text-gray-600 mb-6 tracking-tight">
-              Have App, Will Travel</h3>
+              Built by developers, for developers</h3>
             <h1 className=" text-[1.85rem] leading-[1.85rem] md:text-5xl font-bold mb-6 tracking-tight">
               Authentication for the
               <br />modern decentralized web
             </h1>
 
             <p className="text-center text-sm md:text-xl text-gray-600 leading-relaxed mb-8">
-              Drop-in authentication for Nostr apps.<br/>
+              Drop-in authentication for Decentralized applications.<br/>
               Add secure, privacy-first auth to your application
               in minutes, not days.
             </p>

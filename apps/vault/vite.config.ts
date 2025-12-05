@@ -2,7 +2,9 @@ import { defineConfig } from 'vite';
 import solid from 'vite-plugin-solid';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
+import fs from 'fs';
 import { wasmPlugin } from './vite-plugin-wasm';
+import { serviceWorkerPlugin } from './vite-plugin-service-worker';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -10,6 +12,7 @@ export default defineConfig({
     tailwindcss(),
     solid(),
     wasmPlugin(),
+    serviceWorkerPlugin(),
   ],
   resolve: {
     alias: {
@@ -18,17 +21,35 @@ export default defineConfig({
   },
   server: {
     port: 3001,
-    host: true,
+    host: '0.0.0.0', // Listen on all network interfaces
+    https: {
+      key: fs.readFileSync('./localhost+2-key.pem'),
+      cert: fs.readFileSync('./localhost+2.pem'),
+    },
+    fs: {
+      allow: ['.']
+    }
   },
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        'service-worker': path.resolve(__dirname, 'src/service-worker.ts'),
+      },
+      output: {
+        entryFileNames: (chunkInfo) => {
+          return chunkInfo.name === 'service-worker' ? 'service-worker.js' : 'assets/[name]-[hash].js';
+        },
+      },
+    },
   },
   worker: {
     format: 'es',
     plugins: () => [wasmPlugin()],
   },
   optimizeDeps: {
-    exclude: ['@nostrpass/worker-messenger'],
+    exclude: ['@nostrpass/worker-messenger', 'react', 'react-dom'],
   },
 }); 

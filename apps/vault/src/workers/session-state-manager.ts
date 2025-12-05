@@ -380,6 +380,27 @@ export class SessionStateManager {
       });
       console.log('[SessionStateManager] Keys stored in SecureKeyStorage');
 
+      // Step 5.5: Decrypt BYOK identity keys
+      const byokIdentities = vaultData.identities?.filter((id: any) => id.isImported && id.encryptedNsec) || [];
+      if (byokIdentities.length > 0) {
+        console.log(`[SessionStateManager] Decrypting ${byokIdentities.length} BYOK identity keys...`);
+        for (const identity of byokIdentities) {
+          try {
+            const byokPrivateKey = await params.cryptoPrimitives.decryptNsecFromBYOK({
+              encryptedNsec: identity.encryptedNsec,
+              pin: params.pin,
+              salt: vaultData.salt
+            });
+            secureStorage.setBYOKKey(identity.publicKey, byokPrivateKey);
+            console.log(`[SessionStateManager] BYOK key decrypted for identity: ${identity.nickname || identity.publicKey.slice(0, 8)}`);
+          } catch (error) {
+            // Log error but don't fail the whole unlock - other identities may still work
+            console.error(`[SessionStateManager] Failed to decrypt BYOK key for ${identity.publicKey.slice(0, 8)}:`, error);
+          }
+        }
+        console.log('[SessionStateManager] BYOK keys decrypted');
+      }
+
       // Step 6: Update session atomically (without storing keys as strings)
       const now = Date.now();
       session.isUnlocked = true;

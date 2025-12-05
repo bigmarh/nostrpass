@@ -10,6 +10,7 @@ import { embassyMessageHandlers } from './embassyMessageHandlers';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import { Msg } from '../../../packages/types/src/messages';
 import { NostrPassButton, NostrPassButtonConfig, UserInfo } from './NostrPassButton';
+import { createTransport, VaultTransport } from './transports';
 
 interface EmbassyConfig {
   appName?: string;
@@ -29,6 +30,7 @@ interface EmbassyConfig {
   theme?: 'light' | 'dark' | 'auto';
   debug?: boolean;
   parentPinOverlay?: boolean; // if true, show parent PIN UI (default false)
+  useDirectWorker?: boolean; // if true, use direct worker communication via transport layer (opt-in, experimental)
 }
 
 interface NostrEvent {
@@ -138,6 +140,7 @@ class NostrPassEmbassy {
   private styleElement: HTMLStyleElement | null = null;
   private backdropEl: HTMLDivElement | null = null;
   private messenger: ParentMessenger | null = null;
+  private transport: VaultTransport | null = null;
   private handlers: string[] = [];
   private isPromptOpen = false;
   // Reserved for future cooldown logic; intentionally unused for now
@@ -403,7 +406,7 @@ class NostrPassEmbassy {
     };
 
     // Log version info with vault URL
-    console.log('🚀 NostrPass Embassy v1.0.2 | Vault:', this.config.vaultUrl);
+    console.log('🚀 NostrPass Embassy v1.0.3 | Vault:', this.config.vaultUrl);
 
     // Disable console.log in production unless debug is enabled
     if (import.meta.env.PROD && !this.config.debug) {
@@ -543,7 +546,41 @@ class NostrPassEmbassy {
       document.body.appendChild(this.iframe);
 
       if (this.config.debug) console.log('Iframe created and added to DOM');
+
+      // Initialize transport layer if enabled (experimental)
+      this.initializeTransport();
     });
+  }
+
+  /**
+   * Initialize direct worker transport layer (experimental)
+   * This allows embassy to communicate directly with the vault worker
+   * instead of going through the iframe messenger
+   */
+  private async initializeTransport(): Promise<void> {
+    // Only initialize if useDirectWorker is enabled
+    if (!this.config.useDirectWorker) {
+      if (this.config.debug) console.log('🔌 Transport layer disabled (useDirectWorker: false)');
+      return;
+    }
+
+    try {
+      if (this.config.debug) console.log('🔌 Initializing transport layer...');
+      this.transport = await createTransport();
+      await this.transport.connect();
+      if (this.config.debug) console.log('✅ Transport layer connected:', this.transport?.constructor.name);
+    } catch (error) {
+      console.error('❌ Failed to initialize transport layer:', error);
+      this.transport = null;
+    }
+  }
+
+  /**
+   * Check if we should use transport layer for this request
+   * Returns true if transport is connected and useDirectWorker is enabled
+   */
+  private useTransportForRequest(): boolean {
+    return !!(this.config.useDirectWorker && this.transport?.isConnected());
   }
 
   /**
@@ -1235,12 +1272,22 @@ class NostrPassEmbassy {
         console.log('✅ Permission granted, continuing operation');
       }
 
-      // Send request to vault using messenger
-      const response = await this.messenger!.request(Msg.GET_PUBLIC_KEY, {
-        appName: this.config.appName,
-        appDomain: this.config.appDomain,
-        identityIndex
-      });
+      // Send request to vault using transport or messenger
+      let response;
+      if (this.useTransportForRequest()) {
+        if (this.config.debug) console.log('🔌 Using transport layer for getPublicKey');
+        response = await this.transport!.request('GET_PUBLIC_KEY', {
+          appName: this.config.appName,
+          appDomain: this.config.appDomain,
+          identityIndex
+        });
+      } else {
+        response = await this.messenger!.request(Msg.GET_PUBLIC_KEY, {
+          appName: this.config.appName,
+          appDomain: this.config.appDomain,
+          identityIndex
+        });
+      }
 
       if (this.config.debug) console.log('Public key received:', response);
 
@@ -1389,13 +1436,25 @@ class NostrPassEmbassy {
         console.log('✅ Permission granted, continuing operation');
       }
 
-      // Send request to vault using messenger
-      const send = async () => this.messenger!.request(Msg.SIGN_EVENT, {
-        event,
-        appName: this.config.appName,
-        appDomain: this.config.appDomain,
-        identityIndex
-      });
+      // Send request to vault using transport or messenger
+      const send = async () => {
+        if (this.useTransportForRequest()) {
+          if (this.config.debug) console.log('🔌 Using transport layer for signEvent');
+          return this.transport!.request('SIGN_EVENT', {
+            event,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        } else {
+          return this.messenger!.request(Msg.SIGN_EVENT, {
+            event,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        }
+      };
 
       try {
         const response = await send();
@@ -1584,12 +1643,24 @@ class NostrPassEmbassy {
         console.log('✅ Permission granted, continuing operation');
       }
 
-      const doSign = async () => this.messenger!.request(Msg.SIGN_DATA, {
-        data: message,
-        appName: this.config.appName,
-        appDomain: this.config.appDomain,
-        identityIndex
-      });
+      const doSign = async () => {
+        if (this.useTransportForRequest()) {
+          if (this.config.debug) console.log('🔌 Using transport layer for signData');
+          return this.transport!.request('SIGN_DATA', {
+            data: message,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        } else {
+          return this.messenger!.request(Msg.SIGN_DATA, {
+            data: message,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        }
+      };
 
       try {
         const resp = await doSign();
@@ -1756,14 +1827,27 @@ class NostrPassEmbassy {
         console.log('✅ Permission granted, continuing operation');
       }
 
-      // Send request to vault using messenger
-      const doEncrypt = async () => this.messenger!.request(Msg.ENCRYPT, {
-        plaintext,
-        recipientPubkey: pubkey,
-        appName: this.config.appName,
-        appDomain: this.config.appDomain,
-        identityIndex
-      });
+      // Send request to vault using transport or messenger
+      const doEncrypt = async () => {
+        if (this.useTransportForRequest()) {
+          if (this.config.debug) console.log('🔌 Using transport layer for encrypt');
+          return this.transport!.request('ENCRYPT', {
+            plaintext,
+            recipientPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        } else {
+          return this.messenger!.request(Msg.ENCRYPT, {
+            plaintext,
+            recipientPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        }
+      };
 
       try {
         const ciphertext = await doEncrypt();
@@ -1929,14 +2013,27 @@ class NostrPassEmbassy {
         console.log('✅ Permission granted, continuing operation');
       }
 
-      // Send request to vault using messenger
-      const doDecrypt = async () => this.messenger!.request(Msg.DECRYPT, {
-        ciphertext,
-        senderPubkey: pubkey,
-        appName: this.config.appName,
-        appDomain: this.config.appDomain,
-        identityIndex
-      });
+      // Send request to vault using transport or messenger
+      const doDecrypt = async () => {
+        if (this.useTransportForRequest()) {
+          if (this.config.debug) console.log('🔌 Using transport layer for decrypt');
+          return this.transport!.request('DECRYPT', {
+            ciphertext,
+            senderPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        } else {
+          return this.messenger!.request(Msg.DECRYPT, {
+            ciphertext,
+            senderPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        }
+      };
 
       try {
         const plaintext = await doDecrypt();

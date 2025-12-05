@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm build && (vite --port 3000 & vite --port 3200 & npx http-server dist -p 3002 --cors)",
+    "dev": "pnpm build && (vite --port 3000 & vite --port 3200 & npx http-server dist -p 3002 --cors -S -C localhost+2.pem -K localhost+2-key.pem)",
     "dev:single": "vite",
-    "dev:serve": "npx http-server dist -p 3002 --cors",
+    "dev:serve": "npx http-server dist -p 3002 --cors -S -C localhost+2.pem -K localhost+2-key.pem",
     "build": "tsc && vite build",
     "build:lib": "vite build --config vite.config.lib.ts",
     "preview": "vite preview",

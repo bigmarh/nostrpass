@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NostrPass Embassy Bridge</title>
+</head>
+<body>
+  <script>
+    /**
+     * Embassy Bridge for Direct Worker Communication
+     *
+     * This page runs in a hidden iframe from the vault origin.
+     * It creates a Dedicated Worker and acts as a bridge between
+     * the embassy SDK and the crypto worker.
+     *
+     * Flow: Embassy → postMessage → Bridge → Worker → Bridge → postMessage → Embassy
+     */
+
+    console.log('[EmbassyBridge] Initializing...');
+
+    // Create Dedicated Worker for crypto operations
+    let worker = null;
+    let workerReady = false;
+    const pendingRequests = new Map();
+
+    // Initialize worker
+    function initWorker() {
+      try {
+        // Use the same worker as the vault uses
+        worker = new Worker('/crypto.worker.js', {
+          name: 'nostrpass-embassy-bridge-worker'
+        });
+
+        console.log('[EmbassyBridge] Dedicated Worker created');
+
+        // Handle messages from worker
+        worker.onmessage = (event) => {
+          console.log('[EmbassyBridge] Worker response:', event.data);
+
+          const { id, result, error } = event.data;
+
+          // Forward response back to embassy via parent window
+          if (window.parent !== window) {
+            window.parent.postMessage({
+              type: 'WORKER_RESPONSE',
+              id,
+              result,
+              error
+            }, '*'); // Embassy will verify origin
+          }
+
+          // Clean up pending request
+          if (id && pendingRequests.has(id)) {
+            clearTimeout(pendingRequests.get(id));
+            pendingRequests.delete(id);
+          }
+        };
+
+        worker.onerror = (error) => {
+          console.error('[EmbassyBridge] Worker error:', error);
+
+          // Notify embassy of worker error
+          if (window.parent !== window) {
+            window.parent.postMessage({
+              type: 'WORKER_ERROR',
+              error: {
+                message: error.message || 'Worker error',
+                code: 'WORKER_ERROR'
+              }
+            }, '*');
+          }
+        };
+
+        workerReady = true;
+        console.log('[EmbassyBridge] Ready to receive requests');
+
+      } catch (error) {
+        console.error('[EmbassyBridge] Failed to create worker:', error);
+
+        // Notify embassy of initialization failure
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'WORKER_ERROR',
+            error: {
+              message: error.message || 'Failed to initialize worker',
+              code: 'INIT_FAILED'
+            }
+          }, '*');
+        }
+      }
+    }
+
+    // Handle messages from embassy
+    window.addEventListener('message', (event) => {
+      // Accept messages from any origin (worker will validate permissions)
+      const { type, id, method, params } = event.data;
+
+      if (type !== 'WORKER_REQUEST') {
+        return;
+      }
+
+      console.log('[EmbassyBridge] Received request:', { id, method, params });
+
+      if (!workerReady || !worker) {
+        // Worker not ready, send error response
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'WORKER_RESPONSE',
+            id,
+            error: {
+              message: 'Worker not initialized',
+              code: 'WORKER_NOT_READY'
+            }
+          }, event.origin);
+        }
+        return;
+      }
+
+      // Set timeout for request (30 seconds)
+      const timeout = setTimeout(() => {
+        console.error('[EmbassyBridge] Request timeout:', id);
+        pendingRequests.delete(id);
+
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'WORKER_RESPONSE',
+            id,
+            error: {
+              message: 'Request timeout',
+              code: 'TIMEOUT'
+            }
+          }, event.origin);
+        }
+      }, 30000);
+
+      pendingRequests.set(id, timeout);
+
+      // Forward request to worker
+      worker.postMessage({
+        id,
+        type: 'request',
+        method,
+        params
+      });
+    });
+
+    // Initialize worker on load
+    initWorker();
+
+    console.log('[EmbassyBridge] Initialization complete');
+  </script>
+</body>
+</html>
