@@ -406,7 +406,7 @@ class NostrPassEmbassy {
     };
 
     // Log version info with vault URL
-    console.log('🚀 NostrPass Embassy v1.0.2 | Vault:', this.config.vaultUrl);
+    console.log('🚀 NostrPass Embassy v1.0.3 | Vault:', this.config.vaultUrl);
 
     // Disable console.log in production unless debug is enabled
     if (import.meta.env.PROD && !this.config.debug) {
