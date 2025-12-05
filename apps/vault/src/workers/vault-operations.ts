@@ -107,7 +107,8 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
       passwordVerifier: (vaultData as any).passwordVerifier,
       identities: vaultData.identities || [],
       storagePublicKey: vaultData.publicKey,
-      // NOTE: activeIdentityByApp removed - now stored in localStorage per-browser
+      // SECURITY: activeIdentityByApp maps app → publicKey (source of truth for active identity)
+      activeIdentityByApp: (vaultData as any).activeIdentityByApp || {},
       recovery: (vaultData as any).recovery,
       lastSyncedAt: vaultData.lastSyncedAt,
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
