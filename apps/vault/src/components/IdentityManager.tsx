@@ -17,6 +17,9 @@ interface IdentityManagerProps {
   onRefresh: () => void;
   cryptoWorker: any;
   onShowPinUnlock: () => void;
+  triggerAddIdentity?: number;
+  hideHeader?: boolean;
+  searchQuery?: string;
 }
 
 export const IdentityManager: Component<IdentityManagerProps> = (props) => {
@@ -44,6 +47,14 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   const [byokPreview, setByokPreview] = createSignal<{ npub: string } | null>(null);
 
   const permissionService = PermissionService.getInstance();
+
+  // Watch for trigger to show add identity modal
+  createEffect(() => {
+    const trigger = props.triggerAddIdentity;
+    if (trigger && trigger > 0) {
+      setShowAddIdentityModal(true);
+    }
+  });
 
   // Helper to get app origin from appId (sanitized domain)
   const getAppOrigin = (appId: string): string => {
@@ -156,7 +167,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   });
 
   const filteredIdentities = createMemo(() => {
-    const query = searchQuery().toLowerCase();
+    const query = (props.searchQuery || searchQuery()).toLowerCase();
     let results = identities();
 
     if (query) {
@@ -829,40 +840,42 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   return (
     <>
       {/* Identity list */}
-      <div class="flex flex-col gap-2 relative flex-1 min-h-0">
-        <header class="flex justify-between items-center shrink-0">
-          <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
-          <div class="flex gap-2">
-            <button
-              class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300"
-              onClick={() => {
-                setIsRefreshing(true);
-                props.onRefresh();
-                setTimeout(() => setIsRefreshing(false), 2000);
-              }}
-              title="Refresh vault data"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-            <button class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
-              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-              </svg>
-            </button>
-          </div>
-        </header>
+      <div class="flex flex-col gap-2 relative">
+        <Show when={!props.hideHeader}>
+          <header class="flex justify-between items-center shrink-0">
+            <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
+            <div class="flex gap-2">
+              <button
+                class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300"
+                onClick={() => {
+                  setIsRefreshing(true);
+                  props.onRefresh();
+                  setTimeout(() => setIsRefreshing(false), 2000);
+                }}
+                title="Refresh vault data"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <button class="text-gray-500 dark:text-gray-400 text-sm font-bold hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowAddIdentityModal(true)} title="Add Identity">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                </svg>
+              </button>
+            </div>
+          </header>
 
-        {/* Search input - only show when more than 4 identities */}
-        <Show when={showSearch()}>
-          <input
-            type="text"
-            placeholder="Search identities..."
-            value={searchQuery()}
-            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm shrink-0"
-          />
+          {/* Search input - only show when more than 4 identities */}
+          <Show when={showSearch()}>
+            <input
+              type="text"
+              placeholder="Search identities..."
+              value={searchQuery()}
+              onInput={(e) => setSearchQuery(e.currentTarget.value)}
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm shrink-0"
+            />
+          </Show>
         </Show>
 
         {/* Lock overlay when vault is locked */}
@@ -890,8 +903,8 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
           </div>
         </Show>
 
-        {/* Scrollable identity list - stretches to fill space */}
-        <div class="overflow-y-auto space-y-2 flex-1 min-h-0">
+        {/* Identity list */}
+        <div class="space-y-2 bg-gray-50 dark:bg-gray-950 px-4 py-3" style="padding-bottom: calc(6rem + env(safe-area-inset-bottom));">
           <For each={filteredIdentities()}>
           {(identity) => (
             <div
