@@ -1677,33 +1677,55 @@ export class NostrPassButton {
         console.log('[NostrPassButton] Checking auth status...');
         const authStatus = await this.embassy.getAuthStatus();
         console.log('[NostrPassButton] Auth status response:', authStatus);
-        if (authStatus?.isAuthenticated && authStatus?.user) {
-          // User is logged in (possibly locked)
-          console.log('[NostrPassButton] User is authenticated, showing user button');
-          this.currentUser = {
-            identityIndex: authStatus.user.identityIndex || 0,
-            publicKey: authStatus.user.publicKey || '',
-            npub: authStatus.user.npub,
-            nickname: authStatus.user.nickname,
-            authorized: authStatus.user.authorized || false
-          };
-          this.isCheckingAuth = false;
-          this.saveSession(this.currentUser);
-          this.render();
+        if (authStatus?.isAuthenticated) {
+          if (authStatus.user) {
+            // User is logged in and vault is unlocked - we have active identity info
+            console.log('[NostrPassButton] User is authenticated with identity info');
+            this.currentUser = {
+              identityIndex: authStatus.user.identityIndex || 0,
+              publicKey: authStatus.user.publicKey || '',
+              npub: authStatus.user.npub,
+              nickname: authStatus.user.nickname,
+              authorized: authStatus.user.authorized || false
+            };
+            this.isCheckingAuth = false;
+            this.saveSession(this.currentUser);
+            this.render();
 
-          // Call onLogin callback if provided (session restored)
-          if (this.config.onLogin) {
-            this.config.onLogin(this.currentUser);
+            // Call onLogin callback if provided (session restored)
+            if (this.config.onLogin) {
+              this.config.onLogin(this.currentUser);
+            }
+
+            return true;
+          } else if (authStatus.isLocked) {
+            // Vault is locked - try to restore from saved session, but show sign-in if no session
+            console.log('[NostrPassButton] Vault is locked, checking for saved session');
+            const savedSession = localStorage.getItem('nostrpass_session');
+            if (savedSession) {
+              try {
+                this.currentUser = JSON.parse(savedSession);
+                this.isCheckingAuth = false;
+                this.render();
+                console.log('[NostrPassButton] Restored session from localStorage while vault locked');
+                return true;
+              } catch (e) {
+                console.error('[NostrPassButton] Failed to parse saved session:', e);
+              }
+            }
+            // No saved session - show sign in
+            console.log('[NostrPassButton] No saved session available');
+            this.isCheckingAuth = false;
+            this.clearSession();
+            return false;
           }
-
-          return true;
-        } else {
-          // User is not authenticated - clear any stale session
-          console.log('[NostrPassButton] Not authenticated - clearing stale session');
-          this.isCheckingAuth = false;
-          this.clearSession();
-          return false;
         }
+
+        // User is not authenticated - clear any stale session
+        console.log('[NostrPassButton] Not authenticated - clearing stale session');
+        this.isCheckingAuth = false;
+        this.clearSession();
+        return false;
       } catch (authError) {
         console.log('[NostrPassButton] Could not get auth status:', authError);
         // If we can't get auth status, clear session to be safe

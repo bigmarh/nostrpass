@@ -561,20 +561,15 @@ export const authHandlers: MessageHandler[] = [
         return response;
       } catch (error) {
         console.error('[AUTH_STATUS] Error getting vault data:', error);
-        // If we can't get vault data (e.g., vault locked), still return basic auth status
+        // If we can't get vault data (e.g., vault locked), we can't determine the active identity
+        // Return a minimal response indicating the vault is locked
         const errorResponse = {
           isAuthenticated: true,
-          isLocked: true, // If we can't get vault data, it's likely locked
+          isLocked: true,
           username: currentUser.profile?.username,
-          user: {
-            identityIndex: 0,
-            publicKey: currentUser.publicKey,
-            npub: null,
-            nickname: currentUser.profile?.username,
-            authorized: false
-          }
+          user: null // Don't return identity info when vault is locked - we don't know which is active
         };
-        console.log('[AUTH_STATUS] Returning error response (locked):', errorResponse);
+        console.log('[AUTH_STATUS] Returning error response (vault locked or inaccessible):', errorResponse);
         return errorResponse;
       }
     }
