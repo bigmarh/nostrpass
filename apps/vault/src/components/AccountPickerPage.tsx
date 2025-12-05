@@ -159,17 +159,22 @@ export const AccountPickerPage: Component = () => {
       await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
 
       // SECURITY: Update vault data with new active identity (source of truth)
+      console.log('[AccountPickerPage] Updating vault data with active identity:', { appKey, identityIndex });
       const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
       if (vaultData) {
         const updatedActiveIdentityByApp = {
           ...(vaultData.activeIdentityByApp || {}),
           [appKey]: identityIndex
         };
+        console.log('[AccountPickerPage] Updated activeIdentityByApp:', updatedActiveIdentityByApp);
         await vaultDataService.updateVaultData(
           currentUser.profile.username,
           { activeIdentityByApp: updatedActiveIdentityByApp },
           { updateTimestamp: true }
         );
+        console.log('[AccountPickerPage] ✅ Vault data updated successfully');
+      } else {
+        console.error('[AccountPickerPage] ❌ No vault data found to update');
       }
 
       // Notify embassy of identity change so NostrPassButton can update
