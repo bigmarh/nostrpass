@@ -523,10 +523,6 @@ export const authHandlers: MessageHandler[] = [
         const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
         const appOrigin = context?.origin;
 
-        // Get the active identity index for this app from localStorage, default to 0
-        const activeIdentityIndex = getActiveIdentity(currentUser.profile?.username, appOrigin) ?? 0;
-        const activeIdentity = vaultData?.identities?.[activeIdentityIndex];
-
         // Get app key for permission check
         let appKey = appOrigin;
         try {
@@ -534,6 +530,16 @@ export const authHandlers: MessageHandler[] = [
           appKey = sanitizeDomain(new URL(appOrigin).host || appOrigin);
         } catch {
           // appKey already set to appOrigin
+        }
+
+        // SECURITY: Get the active identity index from vault data (source of truth), not localStorage
+        // LocalStorage can be manipulated by malicious scripts
+        const activeIdentityIndex = vaultData?.activeIdentityByApp?.[appKey] ?? 0;
+        const activeIdentity = vaultData?.identities?.[activeIdentityIndex];
+
+        // Validate identity exists and is not archived
+        if (activeIdentity?.archived) {
+          throw new Error('Active identity is archived');
         }
 
         // Check if this identity is authorized for the app
@@ -610,8 +616,8 @@ export const authHandlers: MessageHandler[] = [
           // appKey already set to appOrigin
         }
 
-        // Get active identity from localStorage, not from vaultData
-        const activeIdentityIndex = getActiveIdentity(currentUser.profile?.username, appOrigin);
+        // SECURITY: Get active identity from vault data (source of truth), not localStorage
+        const activeIdentityIndex = vaultData.activeIdentityByApp?.[appKey] ?? null;
 
         // Return all identities with their authorization status (exclude archived)
         const identities = vaultData.identities

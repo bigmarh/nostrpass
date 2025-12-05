@@ -155,8 +155,22 @@ export const AccountPickerPage: Component = () => {
     console.log('[AccountPickerPage] handleSelect called:', { identityIndex, isAuthorized, selectedIdentityData });
 
     try {
-      // Update active identity in localStorage (per-browser, not synced)
+      // Update active identity in localStorage (per-browser, for UI hints)
       await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
+
+      // SECURITY: Update vault data with new active identity (source of truth)
+      const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
+      if (vaultData) {
+        const updatedActiveIdentityByApp = {
+          ...(vaultData.activeIdentityByApp || {}),
+          [appKey]: identityIndex
+        };
+        await vaultDataService.updateVaultData(
+          currentUser.profile.username,
+          { activeIdentityByApp: updatedActiveIdentityByApp },
+          { updateTimestamp: true }
+        );
+      }
 
       // Notify embassy of identity change so NostrPassButton can update
       send('VAULT_DATA_UPDATED', {
