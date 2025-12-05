@@ -164,6 +164,11 @@ export const AccountPickerPage: Component = () => {
         timestamp: Date.now()
       });
 
+      // Dispatch event for vault components to refresh and show active identity change
+      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
+        detail: { username: currentUser.profile.username, source: 'account-picker' }
+      }));
+
       if (isAuthorized) {
         // Identity is already authorized - send message to parent and close
         if (requestId) {
