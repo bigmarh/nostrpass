@@ -31,7 +31,8 @@ export interface VaultObj {
   identities: any[];
   xprivEncrypted: string; // Master xpriv encrypted with PIN (for signing operations)
   salt: string; // Salt for PIN-based key derivation (same as pinSalt in LoginObj)
-  activeIdentityByApp?: Record<string, number | null>;
+  // Changed from index (number) to publicKey (string) for stability across identity reordering/deletion
+  activeIdentityByApp?: Record<string, string | null>;
   appPermissions?: Record<string, any>; // App-specific permissions
   recovery?: {
     questions: string[];

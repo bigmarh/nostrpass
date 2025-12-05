@@ -142,10 +142,16 @@ export async function getAppIdentityIndexForOrigin(
   }
 
   const appKey = appKeyFromOrigin(origin);
-  let activeIndex = (vaultData as any).activeIdentityByApp?.[appKey];
+  // Changed from index to publicKey for stability across identity reordering/deletion
+  const activePublicKey = (vaultData as any).activeIdentityByApp?.[appKey];
 
-  // Try to find identity with permissions for this app
-  if (activeIndex === undefined || activeIndex === null) {
+  // Find identity by publicKey
+  let activeIndex = activePublicKey
+    ? (vaultData as any).identities.findIndex((id: any) => id.publicKey === activePublicKey)
+    : -1;
+
+  // Try to find identity with permissions for this app if no active set
+  if (activeIndex === -1) {
     activeIndex = (vaultData as any).identities.findIndex(
       (id: any) => id?.appPermissions && id.appPermissions[appKey]
     );

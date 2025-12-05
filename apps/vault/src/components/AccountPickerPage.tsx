@@ -151,20 +151,27 @@ export const AccountPickerPage: Component = () => {
 
     const selectedIdentityData = identities().find((item: any) => item.index === identityIndex);
     const isAuthorized = selectedIdentityData?.isAuthorized || false;
+    const selectedPublicKey = selectedIdentityData?.publicKey;
 
-    console.log('[AccountPickerPage] handleSelect called:', { identityIndex, isAuthorized, selectedIdentityData });
+    console.log('[AccountPickerPage] handleSelect called:', { identityIndex, selectedPublicKey, isAuthorized, selectedIdentityData });
+
+    if (!selectedPublicKey) {
+      console.error('[AccountPickerPage] ❌ No publicKey found for selected identity');
+      return;
+    }
 
     try {
       // Update active identity in localStorage (per-browser, for UI hints)
       await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
 
       // SECURITY: Update vault data with new active identity (source of truth)
-      console.log('[AccountPickerPage] Updating vault data with active identity:', { appKey, identityIndex });
+      // Changed to store publicKey instead of index for stability across identity reordering/deletion
+      console.log('[AccountPickerPage] Updating vault data with active identity:', { appKey, publicKey: selectedPublicKey });
       const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
       if (vaultData) {
         const updatedActiveIdentityByApp = {
           ...(vaultData.activeIdentityByApp || {}),
-          [appKey]: identityIndex
+          [appKey]: selectedPublicKey
         };
         console.log('[AccountPickerPage] Updated activeIdentityByApp:', updatedActiveIdentityByApp);
         await vaultDataService.updateVaultData(
@@ -185,6 +192,7 @@ export const AccountPickerPage: Component = () => {
         username: currentUser.profile.username,
         timestamp: Date.now(),
         activeIdentityIndex: identityIndex,
+        activePublicKey: selectedPublicKey,
         appKey
       });
 
@@ -193,7 +201,8 @@ export const AccountPickerPage: Component = () => {
         detail: {
           username: currentUser.profile.username,
           source: 'account-picker',
-          activeIdentityIndex: identityIndex
+          activeIdentityIndex: identityIndex,
+          activePublicKey: selectedPublicKey
         }
       }));
 

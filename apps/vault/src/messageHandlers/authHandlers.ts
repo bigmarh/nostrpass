@@ -532,13 +532,24 @@ export const authHandlers: MessageHandler[] = [
           // appKey already set to appOrigin
         }
 
-        // SECURITY: Get the active identity index from vault data (source of truth), not localStorage
+        // SECURITY: Get the active identity publicKey from vault data (source of truth), not localStorage
         // LocalStorage can be manipulated by malicious scripts
-        const activeIdentityIndex = vaultData?.activeIdentityByApp?.[appKey] ?? 0;
-        const activeIdentity = vaultData?.identities?.[activeIdentityIndex];
+        // Changed from index to publicKey for stability across identity reordering/deletion
+        const activePublicKey = vaultData?.activeIdentityByApp?.[appKey];
+
+        // Find identity by publicKey
+        let activeIdentity = activePublicKey
+          ? vaultData?.identities?.find((id: any) => id.publicKey === activePublicKey)
+          : vaultData?.identities?.[0]; // Fallback to first identity if no active set
+
+        // Get the index for backwards compatibility with embassy
+        const activeIdentityIndex = activeIdentity
+          ? vaultData.identities.indexOf(activeIdentity)
+          : 0;
 
         console.log('[AUTH_STATUS] Active identity lookup:', {
           appKey,
+          activePublicKey,
           activeIdentityIndex,
           activeIdentityByApp: vaultData?.activeIdentityByApp,
           identityExists: !!activeIdentity,
@@ -549,13 +560,13 @@ export const authHandlers: MessageHandler[] = [
         // If active identity is archived or doesn't exist, find the first non-archived authorized identity
         if (!activeIdentity || activeIdentity?.archived) {
           console.warn('[AUTH_STATUS] Active identity is archived or missing, finding alternative:', {
-            index: activeIdentityIndex,
+            publicKey: activePublicKey,
             nickname: activeIdentity?.nickname,
             appKey
           });
 
           // Find first non-archived identity that's authorized for this app
-          const firstAuthorizedIdentity = vaultData?.identities?.find((id: any, idx: number) =>
+          const firstAuthorizedIdentity = vaultData?.identities?.find((id: any) =>
             !id.archived && id.appPermissions && id.appPermissions[appKey]
           );
 
@@ -563,6 +574,7 @@ export const authHandlers: MessageHandler[] = [
             const newIndex = vaultData.identities.indexOf(firstAuthorizedIdentity);
             console.log('[AUTH_STATUS] Found alternative authorized identity:', {
               newIndex,
+              publicKey: firstAuthorizedIdentity.publicKey,
               nickname: firstAuthorizedIdentity.nickname
             });
 
@@ -662,8 +674,14 @@ export const authHandlers: MessageHandler[] = [
           // appKey already set to appOrigin
         }
 
-        // SECURITY: Get active identity from vault data (source of truth), not localStorage
-        const activeIdentityIndex = vaultData.activeIdentityByApp?.[appKey] ?? null;
+        // SECURITY: Get active identity publicKey from vault data (source of truth), not localStorage
+        // Changed from index to publicKey for stability across identity reordering/deletion
+        const activePublicKey = vaultData.activeIdentityByApp?.[appKey];
+
+        // Find the index of the active identity (for backwards compatibility with embassy)
+        const activeIdentityIndex = activePublicKey
+          ? vaultData.identities.findIndex((id: any) => id.publicKey === activePublicKey)
+          : null;
 
         // Return all identities with their authorization status (exclude archived)
         const identities = vaultData.identities

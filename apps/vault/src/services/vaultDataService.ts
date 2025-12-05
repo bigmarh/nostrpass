@@ -51,12 +51,48 @@ export class VaultDataService {
 
     try {
       const vaultData = await cryptoWorker.getVaultData({ username });
-      
+
       if (vaultData) {
+        // MIGRATION: Convert activeIdentityByApp from index to publicKey
+        if (vaultData.activeIdentityByApp && vaultData.identities) {
+          let needsMigration = false;
+          const migratedActiveIdentityByApp: Record<string, string | null> = {};
+
+          for (const [appKey, value] of Object.entries(vaultData.activeIdentityByApp)) {
+            if (typeof value === 'number') {
+              // Old format: index
+              needsMigration = true;
+              const identity = vaultData.identities[value];
+              if (identity?.publicKey) {
+                migratedActiveIdentityByApp[appKey] = identity.publicKey;
+                console.log(`[VaultDataService] Migrated activeIdentityByApp for ${appKey}: index ${value} → publicKey ${identity.publicKey.slice(0, 8)}...`);
+              } else {
+                migratedActiveIdentityByApp[appKey] = null;
+                console.warn(`[VaultDataService] Could not migrate activeIdentityByApp for ${appKey}: identity at index ${value} not found`);
+              }
+            } else if (typeof value === 'string' || value === null) {
+              // New format: publicKey or null
+              migratedActiveIdentityByApp[appKey] = value;
+            }
+          }
+
+          if (needsMigration) {
+            console.log('[VaultDataService] Migrating activeIdentityByApp from index to publicKey');
+            vaultData.activeIdentityByApp = migratedActiveIdentityByApp;
+
+            // Persist the migration
+            await cryptoWorker.updateVaultData({
+              username,
+              updates: { activeIdentityByApp: migratedActiveIdentityByApp },
+              options: { updateTimestamp: true }
+            });
+          }
+        }
+
         // Cache the result
         this.cache.set(username, { data: vaultData, timestamp: Date.now() });
       }
-      
+
       return vaultData;
     } catch (error) {
       console.error('Failed to get vault data:', error);
