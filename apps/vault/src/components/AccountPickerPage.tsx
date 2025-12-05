@@ -90,12 +90,14 @@ export const AccountPickerPage: Component = () => {
 
       if (vaultData?.identities && vaultData.identities.length > 0) {
         console.log('[AccountPickerPage] Found', vaultData.identities.length, 'identities');
-        // Show ALL identities with their indices
-        const allIdentities = vaultData.identities.map((identity: any, index: number) => ({
-          identity,
-          index,
-          isAuthorized: !!(identity?.appPermissions && identity.appPermissions[appKey])
-        }));
+        // Filter out archived identities and map with their original indices
+        const allIdentities = vaultData.identities
+          .map((identity: any, index: number) => ({
+            identity,
+            index,
+            isAuthorized: !!(identity?.appPermissions && identity.appPermissions[appKey])
+          }))
+          .filter(({ identity }) => !identity.archived);
 
         console.log('[AccountPickerPage] Processed identities:', allIdentities);
         // Use batch to ensure both updates happen together
