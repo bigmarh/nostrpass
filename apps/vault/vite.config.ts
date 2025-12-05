@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import fs from 'fs';
 import { wasmPlugin } from './vite-plugin-wasm';
+import { serviceWorkerPlugin } from './vite-plugin-service-worker';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -11,6 +12,7 @@ export default defineConfig({
     tailwindcss(),
     solid(),
     wasmPlugin(),
+    serviceWorkerPlugin(),
   ],
   resolve: {
     alias: {
@@ -24,6 +26,9 @@ export default defineConfig({
       key: fs.readFileSync('./localhost+2-key.pem'),
       cert: fs.readFileSync('./localhost+2.pem'),
     },
+    fs: {
+      allow: ['.']
+    }
   },
   build: {
     outDir: 'dist',
@@ -45,6 +50,6 @@ export default defineConfig({
     plugins: () => [wasmPlugin()],
   },
   optimizeDeps: {
-    exclude: ['@nostrpass/worker-messenger'],
+    exclude: ['@nostrpass/worker-messenger', 'react', 'react-dom'],
   },
 }); 
