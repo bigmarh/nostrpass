@@ -34,7 +34,7 @@ function App() {
                             window.location.hostname === '127.0.0.1' ||
                             window.location.hostname === '192.168.1.220'
       script.src = isDevelopment
-        ? `http://${window.location.hostname}:3002/embassy.iife.js`  // Local embassy IIFE build
+        ? `https://${window.location.hostname}:3002/embassy.iife.js`  // Local embassy IIFE build (HTTPS)
         : 'https://cdn.nostrpass.com/embassy.js'
       script.async = true
       script.setAttribute('data-manual-init', 'true') // Disable auto-init, we'll manually initialize
