@@ -537,9 +537,32 @@ export const authHandlers: MessageHandler[] = [
         const activeIdentityIndex = vaultData?.activeIdentityByApp?.[appKey] ?? 0;
         const activeIdentity = vaultData?.identities?.[activeIdentityIndex];
 
+        console.log('[AUTH_STATUS] Active identity lookup:', {
+          appKey,
+          activeIdentityIndex,
+          activeIdentityByApp: vaultData?.activeIdentityByApp,
+          identityExists: !!activeIdentity,
+          identityArchived: activeIdentity?.archived,
+          identityNickname: activeIdentity?.nickname
+        });
+
         // Validate identity exists and is not archived
         if (activeIdentity?.archived) {
-          throw new Error('Active identity is archived');
+          console.error('[AUTH_STATUS] Active identity is archived:', {
+            index: activeIdentityIndex,
+            nickname: activeIdentity.nickname,
+            appKey
+          });
+          throw new Error(`Active identity (index ${activeIdentityIndex}) is archived`);
+        }
+
+        if (!activeIdentity) {
+          console.error('[AUTH_STATUS] Active identity not found:', {
+            index: activeIdentityIndex,
+            totalIdentities: vaultData?.identities?.length,
+            appKey
+          });
+          throw new Error(`Active identity (index ${activeIdentityIndex}) not found`);
         }
 
         // Check if this identity is authorized for the app
