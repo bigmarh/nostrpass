@@ -335,7 +335,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
       // Set active identity in localStorage (per-browser, not synced)
       const appOrigin = getAppOrigin(props.appId);
-      setActiveIdentity(props.username, appOrigin, identityIndex);
+      await setActiveIdentity(props.username, appOrigin, identityIndex);
 
       const updatedActive = {
         ...(currentVault.activeIdentityByApp || {}),
@@ -534,7 +534,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     try {
       // Set active identity in localStorage (per-browser, not synced)
       const appOrigin = getAppOrigin(props.appId);
-      setActiveIdentity(props.username, appOrigin, identityIndex);
+      await setActiveIdentity(props.username, appOrigin, identityIndex);
 
       const updatedActive = {
         ...(currentVault.activeIdentityByApp || {}),

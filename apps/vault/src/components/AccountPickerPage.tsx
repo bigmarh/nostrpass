@@ -156,7 +156,7 @@ export const AccountPickerPage: Component = () => {
 
     try {
       // Update active identity in localStorage (per-browser, not synced)
-      setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
+      await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
 
       // Notify embassy of identity change so NostrPassButton can update
       send('VAULT_DATA_UPDATED', {

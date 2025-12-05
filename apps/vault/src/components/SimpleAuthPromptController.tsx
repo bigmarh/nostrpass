@@ -123,7 +123,7 @@ export const SimpleAuthPromptController: Component = () => {
       );
 
       // Set this identity as the active identity for this app (per-browser, not synced)
-      setActiveIdentity(currentUser.profile.username, d.appOrigin, d.identityIndex);
+      await setActiveIdentity(currentUser.profile.username, d.appOrigin, d.identityIndex);
 
       // Trigger vault data refresh event to notify embassy
       console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');

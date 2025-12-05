@@ -6,6 +6,7 @@
  */
 
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { vaultDataService } from '../services/vaultDataService';
 
 const STORAGE_PREFIX = 'nostrpass:activeIdentity';
 
@@ -53,14 +54,26 @@ export function getActiveIdentity(username: string, appOrigin: string): number |
 
 /**
  * Set the active identity index for a specific app and user
+ * Validates that the identity exists and is not archived
  */
-export function setActiveIdentity(username: string, appOrigin: string, identityIndex: number): void {
+export async function setActiveIdentity(username: string, appOrigin: string, identityIndex: number): Promise<void> {
   const appKey = originToAppKey(appOrigin);
   const storageKey = `${STORAGE_PREFIX}:${username}:${appKey}`;
 
   try {
     if (identityIndex < 0) {
       throw new Error('Identity index must be >= 0');
+    }
+
+    // Validate that identity exists and is not archived
+    const identity = await vaultDataService.getIdentity(username, identityIndex);
+
+    if (!identity) {
+      throw new Error(`Identity at index ${identityIndex} does not exist`);
+    }
+
+    if (identity.archived) {
+      throw new Error(`Cannot set archived identity (index ${identityIndex}) as active`);
     }
 
     localStorage.setItem(storageKey, identityIndex.toString());

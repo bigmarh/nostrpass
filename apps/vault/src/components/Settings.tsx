@@ -148,8 +148,8 @@ export const Settings: Component = () => {
           return appKey.startsWith('http') ? appKey : `https://${appKey}`;
         }
       })();
-      setActiveIdentity(currentUser.profile.username, appOrigin, index);
-      
+      await setActiveIdentity(currentUser.profile.username, appOrigin, index);
+
       const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
       (vaultData as any).activeIdentityByApp = (vaultData as any).activeIdentityByApp || {};
       (vaultData as any).activeIdentityByApp[appKey] = index;

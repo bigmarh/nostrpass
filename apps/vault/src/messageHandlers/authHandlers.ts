@@ -693,7 +693,7 @@ export const authHandlers: MessageHandler[] = [
         }
 
         // Update active identity in localStorage (per-browser, per-origin)
-        setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
+        await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
 
         // Notify parent window about identity switch (NOT vault data update)
         try {

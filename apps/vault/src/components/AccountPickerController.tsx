@@ -51,7 +51,7 @@ export const AccountPickerController: Component = () => {
           console.log('🔵 [AccountPicker] Only one identity - auto-selecting index 0');
 
           // Update active identity in localStorage (per-browser, not synced)
-          setActiveIdentity(currentUser.profile.username, appOrigin, 0);
+          await setActiveIdentity(currentUser.profile.username, appOrigin, 0);
 
           const isAuthorized = allIdentities[0].isAuthorized;
 
@@ -197,7 +197,7 @@ export const AccountPickerController: Component = () => {
 
     try {
       // Update active identity in localStorage (per-browser, not synced)
-      setActiveIdentity(currentUser.profile.username, d.appOrigin, identityIndex);
+      await setActiveIdentity(currentUser.profile.username, d.appOrigin, identityIndex);
 
       if (isAuthorized) {
         // Identity is already authorized - just dispatch success
