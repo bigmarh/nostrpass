@@ -152,14 +152,17 @@ export class NostrPassButton {
         console.log('[NostrPassButton] Current user exists, fetching updated identities...');
 
         // Small delay to ensure vault data has been persisted
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 150));
 
         // Re-fetch the current identity to check authorization status
         try {
           const response = await this.embassy.getAllIdentities();
           console.log('[NostrPassButton] getAllIdentities response:', response);
           const allIdentities = response?.identities || [];
-          const activeIdentityIndex = response?.activeIdentityIndex;
+
+          // Use activeIdentityIndex from event detail if available (faster), otherwise from response
+          const customEvent = event as CustomEvent;
+          const activeIdentityIndex = customEvent.detail?.activeIdentityIndex ?? response?.activeIdentityIndex;
 
           // If no identities returned, user might have logged out - clear session
           if (allIdentities.length === 0) {

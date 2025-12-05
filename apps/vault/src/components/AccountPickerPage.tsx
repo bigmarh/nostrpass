@@ -173,6 +173,9 @@ export const AccountPickerPage: Component = () => {
           { updateTimestamp: true }
         );
         console.log('[AccountPickerPage] ✅ Vault data updated successfully');
+
+        // Small delay to ensure vault data is fully persisted to IndexedDB
+        await new Promise(resolve => setTimeout(resolve, 50));
       } else {
         console.error('[AccountPickerPage] ❌ No vault data found to update');
       }
@@ -180,12 +183,18 @@ export const AccountPickerPage: Component = () => {
       // Notify embassy of identity change so NostrPassButton can update
       send('VAULT_DATA_UPDATED', {
         username: currentUser.profile.username,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        activeIdentityIndex: identityIndex,
+        appKey
       });
 
       // Dispatch event for vault components to refresh and show active identity change
       window.dispatchEvent(new CustomEvent('vault-data-refresh', {
-        detail: { username: currentUser.profile.username, source: 'account-picker' }
+        detail: {
+          username: currentUser.profile.username,
+          source: 'account-picker',
+          activeIdentityIndex: identityIndex
+        }
       }));
 
       if (isAuthorized) {
