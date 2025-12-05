@@ -151,7 +151,7 @@ export const AccountPickerPage: Component = () => {
 
     const selectedIdentityData = identities().find((item: any) => item.index === identityIndex);
     const isAuthorized = selectedIdentityData?.isAuthorized || false;
-    const selectedPublicKey = selectedIdentityData?.publicKey;
+    const selectedPublicKey = selectedIdentityData?.identity?.publicKey;
 
     console.log('[AccountPickerPage] handleSelect called:', { identityIndex, selectedPublicKey, isAuthorized, selectedIdentityData });
 
@@ -211,18 +211,18 @@ export const AccountPickerPage: Component = () => {
         if (requestId) {
           // Dispatch event for internal vault listeners
           window.dispatchEvent(new CustomEvent('account-picker-selected', {
-            detail: { requestId, identityIndex, identity: selectedIdentityData }
+            detail: { requestId, identityIndex, identity: selectedIdentityData?.identity }
           }));
           // Send message to parent window (embassy/NostrPassButton)
           send('ACCOUNT_PICKER_SELECTED', {
             requestId,
             identityIndex,
             identity: {
-              publicKey: selectedIdentityData?.publicKey,
-              npub: selectedIdentityData?.npub,
-              nickname: selectedIdentityData?.nickname,
+              publicKey: selectedIdentityData?.identity?.publicKey,
+              npub: selectedIdentityData?.identity?.npub,
+              nickname: selectedIdentityData?.identity?.nickname,
               authorized: true,
-              avatar: selectedIdentityData?.avatar
+              avatar: selectedIdentityData?.identity?.avatar
             }
           });
         }
