@@ -546,23 +546,51 @@ export const authHandlers: MessageHandler[] = [
           identityNickname: activeIdentity?.nickname
         });
 
-        // Validate identity exists and is not archived
-        if (activeIdentity?.archived) {
-          console.error('[AUTH_STATUS] Active identity is archived:', {
+        // If active identity is archived or doesn't exist, find the first non-archived authorized identity
+        if (!activeIdentity || activeIdentity?.archived) {
+          console.warn('[AUTH_STATUS] Active identity is archived or missing, finding alternative:', {
             index: activeIdentityIndex,
-            nickname: activeIdentity.nickname,
+            nickname: activeIdentity?.nickname,
             appKey
           });
-          throw new Error(`Active identity (index ${activeIdentityIndex}) is archived`);
-        }
 
-        if (!activeIdentity) {
-          console.error('[AUTH_STATUS] Active identity not found:', {
-            index: activeIdentityIndex,
-            totalIdentities: vaultData?.identities?.length,
-            appKey
-          });
-          throw new Error(`Active identity (index ${activeIdentityIndex}) not found`);
+          // Find first non-archived identity that's authorized for this app
+          const firstAuthorizedIdentity = vaultData?.identities?.find((id: any, idx: number) =>
+            !id.archived && id.appPermissions && id.appPermissions[appKey]
+          );
+
+          if (firstAuthorizedIdentity) {
+            const newIndex = vaultData.identities.indexOf(firstAuthorizedIdentity);
+            console.log('[AUTH_STATUS] Found alternative authorized identity:', {
+              newIndex,
+              nickname: firstAuthorizedIdentity.nickname
+            });
+
+            // Use this identity as active (update in-memory, don't persist yet)
+            const response = {
+              isAuthenticated: true,
+              isLocked,
+              username: currentUser.profile?.username,
+              user: {
+                identityIndex: newIndex,
+                publicKey: firstAuthorizedIdentity.publicKey,
+                npub: firstAuthorizedIdentity.npub,
+                nickname: firstAuthorizedIdentity.nickname,
+                authorized: true
+              }
+            };
+            console.log('[AUTH_STATUS] Returning alternative identity response');
+            return response;
+          }
+
+          // No authorized non-archived identity found - return no user
+          console.warn('[AUTH_STATUS] No authorized non-archived identity found for app');
+          return {
+            isAuthenticated: true,
+            isLocked,
+            username: currentUser.profile?.username,
+            user: null
+          };
         }
 
         // Check if this identity is authorized for the app
