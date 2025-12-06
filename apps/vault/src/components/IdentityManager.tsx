@@ -1274,7 +1274,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
           />
 
           {/* Side Panel */}
-          <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+          <div class={`fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto ${showSettingsPanel() ? 'translate-x-0' : 'translate-x-full'}`}>
             {/* Panel Header */}
             <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
               <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Identity Settings</h2>
