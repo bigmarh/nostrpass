@@ -97,10 +97,16 @@ export const Dashboard: Component = () => {
             setTimeout(() => setIsRefreshing(false), 2000);
         };
 
+        const handleOpenProfileEditor = () => {
+            openProfileEditor();
+        };
+
         window.addEventListener('vault-data-refresh', handleVaultDataRefresh);
+        window.addEventListener('open-profile-editor', handleOpenProfileEditor);
 
         return () => {
             window.removeEventListener('vault-data-refresh', handleVaultDataRefresh);
+            window.removeEventListener('open-profile-editor', handleOpenProfileEditor);
         };
     });
 
