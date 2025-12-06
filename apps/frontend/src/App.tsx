@@ -527,12 +527,38 @@ function App() {
 
           <div className="grid md:grid-cols-2 gap-8 mb-12">
             {/* Code Example */}
-            <div className="bg-gray-900 rounded-xl p-4 sm:p-6 text-white overflow-hidden">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                <span className="text-gray-400 text-sm ml-2">index.html</span>
+            <div className="bg-gray-900 rounded-xl p-4 sm:p-6 text-white overflow-hidden relative">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                  <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                  <span className="text-gray-400 text-sm ml-2">index.html</span>
+                </div>
+                <button
+                  onClick={() => {
+                    const code = `<!-- That's it. Seriously. -->
+<script src="https://cdn.nostrpass.com/embassy.js"></script>
+
+<script>
+  // Get user's public key
+  const pubkey = await window.nostr.getPublicKey();
+
+  // Sign events
+  const signed = await window.nostr.signEvent(event);
+</script>`;
+                    navigator.clipboard.writeText(code);
+                    const btn = document.getElementById('copy-btn');
+                    if (btn) {
+                      btn.textContent = 'Copied!';
+                      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+                    }
+                  }}
+                  id="copy-btn"
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors min-h-[32px]"
+                >
+                  Copy
+                </button>
               </div>
               <pre className="text-xs sm:text-sm overflow-x-auto max-w-full">
                 <code className="text-green-400">{`<!-- That's it. Seriously. -->`}</code>
