@@ -41,7 +41,8 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
   };
 
   const getDisplayName = (identity: Identity, originalIndex: number) => {
-    return identity.nickname || `Identity ${originalIndex + 1}`;
+    // Prioritize profile name over nickname
+    return identity.profile?.name || identity.nickname || `Identity ${originalIndex + 1}`;
   };
 
   const getNpub = (identity: Identity) => {
@@ -50,6 +51,11 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
     } catch {
       return identity.publicKey.slice(0, 16) + '...';
     }
+  };
+
+  const getInitials = (identity: Identity, originalIndex: number) => {
+    const name = identity.profile?.name || identity.nickname || `Identity ${originalIndex + 1}`;
+    return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
   };
 
   return (
@@ -107,6 +113,22 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
                         <div class="w-full h-full rounded-full bg-white transform scale-50" />
                       )}
                     </div>
+
+                    {/* Profile Picture or Initials */}
+                    <Show when={item.identity.profile?.picture} fallback={
+                      <div class="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
+                        <span class="text-white dark:text-gray-100 text-sm font-bold">
+                          {getInitials(item.identity, item.index)}
+                        </span>
+                      </div>
+                    }>
+                      <img
+                        src={item.identity.profile!.picture}
+                        alt={getDisplayName(item.identity, item.index)}
+                        class="w-10 h-10 rounded-full object-cover flex-shrink-0 border border-gray-300 dark:border-gray-600"
+                      />
+                    </Show>
+
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center gap-2">
                         <div class="font-medium text-gray-900 dark:text-white">

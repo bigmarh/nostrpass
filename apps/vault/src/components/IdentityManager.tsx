@@ -916,15 +916,35 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
             >
-              {/* Left: Identity name with key icon and status */}
+              {/* Left: Identity name with key icon, profile picture and status */}
               <div class="flex flex-col gap-1.5 min-w-0 flex-1">
                 <div class="flex items-center gap-2">
+                  {/* Profile Picture or Initials */}
+                  <Show when={identity.profile?.picture} fallback={
+                    <div class="w-8 h-8 bg-gray-900 dark:bg-gray-700 rounded-full flex items-center justify-center shrink-0">
+                      <span class="text-white dark:text-gray-100 text-xs font-bold">
+                        {(() => {
+                          const name = identity.profile?.name || identity.nickname || 'ID';
+                          return name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase();
+                        })()}
+                      </span>
+                    </div>
+                  }>
+                    <img
+                      src={identity.profile!.picture}
+                      alt={identity.profile?.name || identity.nickname}
+                      class="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-300 dark:border-gray-600"
+                    />
+                  </Show>
+
                   <Show when={identity.isImported}>
                     <svg class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                     </svg>
                   </Show>
-                  <span class="font-medium text-gray-900 dark:text-gray-100 text-base truncate">{identity.nickname}</span>
+                  <span class="font-medium text-gray-900 dark:text-gray-100 text-base truncate">
+                    {identity.profile?.name || identity.nickname}
+                  </span>
                 </div>
                 <Show when={identity.hasAppPermissions}>
                   <span class="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900 px-2 py-0.5 rounded self-start">
