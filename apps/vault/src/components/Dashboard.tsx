@@ -132,7 +132,7 @@ export const Dashboard: Component = () => {
                     return {
                         ...id,
                         profile: {
-                            ...id.profile,
+                            ...(id.profile || {}),
                             [field]: value
                         }
                     };
@@ -140,7 +140,10 @@ export const Dashboard: Component = () => {
                 return id;
             });
 
-            await updateVaultData({ identities: updatedIdentities });
+            await updateVaultData({
+                ...currentVault,
+                identities: updatedIdentities
+            });
         } catch (e) {
             console.error('Failed to update profile field:', e);
             setProfileError('Failed to update profile');
@@ -172,7 +175,7 @@ export const Dashboard: Component = () => {
                         return {
                             ...id,
                             profile: {
-                                ...id.profile,
+                                ...(id.profile || {}),
                                 picture: dataUrl
                             }
                         };
@@ -180,7 +183,10 @@ export const Dashboard: Component = () => {
                     return id;
                 });
 
-                await updateVaultData({ identities: updatedIdentities });
+                await updateVaultData({
+                    ...currentVault,
+                    identities: updatedIdentities
+                });
             };
 
             reader.readAsDataURL(file);
@@ -203,13 +209,16 @@ export const Dashboard: Component = () => {
                     const { picture, ...restProfile } = id.profile || {};
                     return {
                         ...id,
-                        profile: restProfile
+                        profile: Object.keys(restProfile).length > 0 ? restProfile : undefined
                     };
                 }
                 return id;
             });
 
-            await updateVaultData({ identities: updatedIdentities });
+            await updateVaultData({
+                ...currentVault,
+                identities: updatedIdentities
+            });
         } catch (e) {
             console.error('Failed to remove profile picture:', e);
             setProfileError('Failed to remove picture');
