@@ -80,11 +80,11 @@ export class VaultDataService {
             console.log('[VaultDataService] Migrating activeIdentityByApp from index to publicKey');
             vaultData.activeIdentityByApp = migratedActiveIdentityByApp;
 
-            // Persist the migration
+            // Persist the migration - pass full vaultData, not partial updates
             await cryptoWorker.updateVaultData({
               username,
-              updates: { activeIdentityByApp: migratedActiveIdentityByApp },
-              options: { updateTimestamp: true }
+              vaultData: { ...vaultData, activeIdentityByApp: migratedActiveIdentityByApp },
+              options: { updateTimestamp: true, syncToNostr: true }
             });
           }
         }
