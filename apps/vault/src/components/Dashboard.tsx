@@ -21,6 +21,8 @@ export const Dashboard: Component = () => {
     const [triggerAddIdentity, setTriggerAddIdentity] = createSignal(0);
     const [searchQuery, setSearchQuery] = createSignal('');
     const [showMenu, setShowMenu] = createSignal(false);
+    const [showProfileEditor, setShowProfileEditor] = createSignal(false);
+    const [profileError, setProfileError] = createSignal<string | null>(null);
 
     const cryptoWorker = useCryptoWorker();
 
@@ -93,6 +95,125 @@ export const Dashboard: Component = () => {
             console.log('✅ HIDE_VAULT message sent successfully');
         } catch (error) {
             console.error('❌ Failed to send HIDE_VAULT message:', error);
+        }
+    };
+
+    // Get active identity index
+    const getActiveIdentityIndex = () => {
+        const vault = vaultData();
+        if (!vault?.identities) return 0;
+
+        const appOrigin = params.app ? (() => {
+            try {
+                const domain = desanitizeDomain(params.app);
+                if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
+                    return `http://${domain}`;
+                }
+                return `https://${domain}`;
+            } catch {
+                return params.app.startsWith('http') ? params.app : `https://${params.app}`;
+            }
+        })() : null;
+
+        return appOrigin
+            ? (getActiveIdentity(user()?.profile.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
+            : 0;
+    };
+
+    // Handle profile field changes
+    const handleProfileFieldChange = async (field: string, value: string) => {
+        try {
+            const currentVault = vaultData();
+            if (!currentVault) return;
+
+            const identityIndex = getActiveIdentityIndex();
+            const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
+                if (idx === identityIndex) {
+                    return {
+                        ...id,
+                        profile: {
+                            ...id.profile,
+                            [field]: value
+                        }
+                    };
+                }
+                return id;
+            });
+
+            await updateVaultData({ identities: updatedIdentities });
+        } catch (e) {
+            console.error('Failed to update profile field:', e);
+            setProfileError('Failed to update profile');
+            setTimeout(() => setProfileError(null), 5000);
+        }
+    };
+
+    // Handle profile picture upload
+    const handleProfilePictureUpload = async (file: File) => {
+        try {
+            // Validate file size (max 500KB to keep data URL reasonable)
+            if (file.size > 500 * 1024) {
+                setProfileError('Image too large. Please use an image under 500KB.');
+                setTimeout(() => setProfileError(null), 5000);
+                return;
+            }
+
+            // Convert to data URL
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const dataUrl = e.target?.result as string;
+
+                const currentVault = vaultData();
+                if (!currentVault) return;
+
+                const identityIndex = getActiveIdentityIndex();
+                const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
+                    if (idx === identityIndex) {
+                        return {
+                            ...id,
+                            profile: {
+                                ...id.profile,
+                                picture: dataUrl
+                            }
+                        };
+                    }
+                    return id;
+                });
+
+                await updateVaultData({ identities: updatedIdentities });
+            };
+
+            reader.readAsDataURL(file);
+        } catch (e) {
+            console.error('Failed to upload profile picture:', e);
+            setProfileError('Failed to upload picture');
+            setTimeout(() => setProfileError(null), 5000);
+        }
+    };
+
+    // Handle remove profile picture
+    const handleRemoveProfilePicture = async () => {
+        try {
+            const currentVault = vaultData();
+            if (!currentVault) return;
+
+            const identityIndex = getActiveIdentityIndex();
+            const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
+                if (idx === identityIndex) {
+                    const { picture, ...restProfile } = id.profile || {};
+                    return {
+                        ...id,
+                        profile: restProfile
+                    };
+                }
+                return id;
+            });
+
+            await updateVaultData({ identities: updatedIdentities });
+        } catch (e) {
+            console.error('Failed to remove profile picture:', e);
+            setProfileError('Failed to remove picture');
+            setTimeout(() => setProfileError(null), 5000);
         }
     };
 
@@ -381,6 +502,17 @@ export const Dashboard: Component = () => {
                                 })()}
                             </Show>
                         </div>
+
+                        {/* Edit Profile Button */}
+                        <button
+                            onClick={() => setShowProfileEditor(true)}
+                            class="mt-3 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            Edit Profile
+                        </button>
                     </div>
 
                     {/* Identities Section Header */}
@@ -457,6 +589,175 @@ export const Dashboard: Component = () => {
                 onLock={lockVault}
                 username={user()?.profile.username || ''}
             />
+
+            {/* Profile Editor Sidebar */}
+            <Show when={showProfileEditor()}>
+                <div class="fixed inset-0 z-50 overflow-hidden">
+                    {/* Backdrop */}
+                    <div
+                        class="fixed inset-0 bg-black/50 transition-opacity"
+                        onClick={() => setShowProfileEditor(false)}
+                    />
+
+                    {/* Sidebar - slides from left */}
+                    <div class="fixed left-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+                        {/* Header */}
+                        <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Edit Profile</h2>
+                            <button
+                                onClick={() => setShowProfileEditor(false)}
+                                class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                            >
+                                <svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div class="p-6">
+                            <Show when={(() => {
+                                const vault = vaultData();
+                                if (!vault?.identities) return null;
+                                const activeIndex = getActiveIdentityIndex();
+                                return vault.identities[activeIndex];
+                            })()}>
+                                {(activeIdentity) => (
+                                    <div class="space-y-6">
+                                        {/* Profile Picture */}
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                                Profile Picture
+                                            </label>
+                                            <div class="flex items-center gap-4">
+                                                <Show when={activeIdentity().profile?.picture} fallback={
+                                                    <div class="w-24 h-24 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
+                                                        <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                        </svg>
+                                                    </div>
+                                                }>
+                                                    <img
+                                                        src={activeIdentity().profile!.picture}
+                                                        alt="Profile"
+                                                        class="w-24 h-24 rounded-full object-cover border-2 border-gray-300 dark:border-gray-600"
+                                                    />
+                                                </Show>
+                                                <div class="flex-1">
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        id="profile-picture-upload"
+                                                        class="hidden"
+                                                        onChange={async (e) => {
+                                                            const file = e.target.files?.[0];
+                                                            if (file) {
+                                                                await handleProfilePictureUpload(file);
+                                                            }
+                                                        }}
+                                                    />
+                                                    <label
+                                                        for="profile-picture-upload"
+                                                        class="inline-block px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer transition-colors"
+                                                    >
+                                                        Upload Picture
+                                                    </label>
+                                                    <Show when={activeIdentity().profile?.picture}>
+                                                        <button
+                                                            onClick={handleRemoveProfilePicture}
+                                                            class="ml-2 px-4 py-2 text-sm bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </Show>
+                                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Max size: 500KB</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Display Name */}
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                Display Name
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={activeIdentity().profile?.name || ''}
+                                                onInput={(e) => handleProfileFieldChange('name', e.currentTarget.value)}
+                                                placeholder="Your display name"
+                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        {/* About */}
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                About
+                                            </label>
+                                            <textarea
+                                                value={activeIdentity().profile?.about || ''}
+                                                onInput={(e) => handleProfileFieldChange('about', e.currentTarget.value)}
+                                                placeholder="Tell us about yourself..."
+                                                rows="4"
+                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        {/* NIP-05 */}
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                NIP-05 Identifier
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={activeIdentity().profile?.nip05 || ''}
+                                                onInput={(e) => handleProfileFieldChange('nip05', e.currentTarget.value)}
+                                                placeholder="name@domain.com"
+                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        {/* Website */}
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                Website
+                                            </label>
+                                            <input
+                                                type="url"
+                                                value={activeIdentity().profile?.website || ''}
+                                                onInput={(e) => handleProfileFieldChange('website', e.currentTarget.value)}
+                                                placeholder="https://yourwebsite.com"
+                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        {/* Lightning Address */}
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                Lightning Address
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={activeIdentity().profile?.lud16 || ''}
+                                                onInput={(e) => handleProfileFieldChange('lud16', e.currentTarget.value)}
+                                                placeholder="you@getalby.com"
+                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        {/* Error Message */}
+                                        <Show when={profileError()}>
+                                            <div class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                                                <p class="text-sm text-red-700 dark:text-red-400">{profileError()}</p>
+                                            </div>
+                                        </Show>
+                                    </div>
+                                )}
+                            </Show>
+                        </div>
+                    </div>
+                </div>
+            </Show>
 
             {/* Global Settings Modal */}
             <Show when={showGlobalSettings()}>

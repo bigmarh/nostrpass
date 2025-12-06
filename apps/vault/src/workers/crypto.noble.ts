@@ -9,7 +9,7 @@
 
 import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 import { HDKey } from '@scure/bip32';
-import { generateMnemonic, mnemonicToSeedSync } from '@scure/bip39';
+import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { sha256 } from '@noble/hashes/sha256';
 import { pbkdf2 } from '@noble/hashes/pbkdf2';
@@ -252,13 +252,62 @@ export class NostrCrypto {
   generateXpriv(): string {
     // Generate 24-word mnemonic (256 bits entropy)
     const mnemonic = generateMnemonic(wordlist, 256);
-    
+
     // Convert to seed
     const seed = mnemonicToSeedSync(mnemonic);
-    
+
     // Create HDKey from seed
     const hdKey = HDKey.fromMasterSeed(seed);
-    
+
+    return hdKey.privateExtendedKey;
+  }
+
+  /**
+   * Generate a 12-word recovery phrase (mnemonic)
+   * Returns both the mnemonic and derived xpriv
+   */
+  generateRecoveryPhrase(): { mnemonic: string; xpriv: string } {
+    // Generate 12-word mnemonic (128 bits entropy)
+    const mnemonic = generateMnemonic(wordlist, 128);
+
+    // Convert to seed
+    const seed = mnemonicToSeedSync(mnemonic);
+
+    // Create HDKey from seed
+    const hdKey = HDKey.fromMasterSeed(seed);
+
+    return {
+      mnemonic,
+      xpriv: hdKey.privateExtendedKey
+    };
+  }
+
+  /**
+   * Validate a recovery phrase (mnemonic)
+   */
+  validateRecoveryPhrase(mnemonic: string): boolean {
+    try {
+      return validateMnemonic(mnemonic, wordlist);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Convert recovery phrase (mnemonic) to xpriv
+   */
+  recoveryPhraseToXpriv(mnemonic: string): string {
+    // Validate mnemonic first
+    if (!this.validateRecoveryPhrase(mnemonic)) {
+      throw new Error('Invalid recovery phrase');
+    }
+
+    // Convert to seed
+    const seed = mnemonicToSeedSync(mnemonic);
+
+    // Create HDKey from seed
+    const hdKey = HDKey.fromMasterSeed(seed);
+
     return hdKey.privateExtendedKey;
   }
 

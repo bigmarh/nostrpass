@@ -1,6 +1,7 @@
 import { Component, Show, JSX, For, createSignal, createResource, onCleanup, createEffect } from 'solid-js';
 import { nip19 } from 'nostr-tools';
 import RelaySettings from './RelaySettings';
+import RecoveryPhraseBackup from './RecoveryPhraseBackup';
 import type { VaultData } from '../workers/db';
 import { getCryptoWorker } from '../services/cryptoWorkerSingleton';
 
@@ -27,6 +28,9 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
   const [loadingVersions, setLoadingVersions] = createSignal(false);
   const [expandedVersionId, setExpandedVersionId] = createSignal<string | null>(null);
   const [liveVersions, setLiveVersions] = createSignal<any[]>([]);
+  const [showBackupModal, setShowBackupModal] = createSignal(false);
+  const [recoveryPhrase, setRecoveryPhrase] = createSignal<string[]>([]);
+  const [showRecoveryPhrase, setShowRecoveryPhrase] = createSignal(false);
 
   // Fetch initial vault version history
   const [vaultVersions, { refetch: refetchVersions }] = createResource(
@@ -140,6 +144,39 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
     }
   };
 
+  const handleViewRecoveryPhrase = async () => {
+    setShowBackupModal(true);
+    try {
+      const worker = getCryptoWorker();
+      if (!worker) {
+        throw new Error('Crypto worker not initialized');
+      }
+
+      // Generate recovery phrase from current session
+      const result = await worker.generateRecoveryPhrase();
+      const words = result.mnemonic.split(' ');
+      setRecoveryPhrase(words);
+    } catch (error) {
+      console.error('Failed to generate recovery phrase:', error);
+    }
+  };
+
+  const handleExportVault = () => {
+    if (!props.vaultData) return;
+
+    // Export vault as JSON file
+    const vaultJson = JSON.stringify(props.vaultData, null, 2);
+    const blob = new Blob([vaultJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nostrpass-vault-${props.username}-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <Show when={props.isOpen}>
       <div class="fixed inset-0 z-50 overflow-hidden">
@@ -192,6 +229,52 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
             {/* Relay Settings */}
             <div>
               <RelaySettings />
+            </div>
+
+            {/* Backup & Recovery */}
+            <div>
+              <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Backup & Recovery</h3>
+              <div class="space-y-3">
+                <button
+                  onClick={handleViewRecoveryPhrase}
+                  class="w-full flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="text-blue-600 dark:text-blue-400">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                      </svg>
+                    </div>
+                    <div class="text-left">
+                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">View Recovery Phrase</div>
+                      <div class="text-xs text-gray-600 dark:text-gray-400">12-word backup phrase</div>
+                    </div>
+                  </div>
+                  <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+
+                <button
+                  onClick={handleExportVault}
+                  class="w-full flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="text-gray-600 dark:text-gray-400">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    </div>
+                    <div class="text-left">
+                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">Export Vault File</div>
+                      <div class="text-xs text-gray-600 dark:text-gray-400">Download encrypted backup</div>
+                    </div>
+                  </div>
+                  <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             {/* Vault Version History */}
@@ -299,6 +382,75 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
             </Show>
           </div>
         </div>
+
+        {/* Recovery Phrase Backup Modal */}
+        <Show when={showBackupModal()}>
+          <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-gray-300 dark:border-gray-600 p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Recovery Phrase</h2>
+                <button
+                  onClick={() => {
+                    setShowBackupModal(false);
+                    setShowRecoveryPhrase(false);
+                    setRecoveryPhrase([]);
+                  }}
+                  class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <Show when={!showRecoveryPhrase()}>
+                <div class="mb-6">
+                  <p class="text-gray-700 dark:text-gray-300 mb-4">
+                    Your recovery phrase is a 12-word backup that can restore your account if you lose access.
+                  </p>
+                  <div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg mb-4">
+                    <p class="text-sm text-yellow-800 dark:text-yellow-400 font-medium mb-2">
+                      ⚠️ Security Warning
+                    </p>
+                    <ul class="text-sm text-yellow-700 dark:text-yellow-400 list-disc list-inside space-y-1">
+                      <li>Never share your recovery phrase with anyone</li>
+                      <li>Anyone with these words can access your account</li>
+                      <li>Store offline in a secure location</li>
+                    </ul>
+                  </div>
+                  <button
+                    onClick={() => setShowRecoveryPhrase(true)}
+                    class="w-full px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-md hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors font-medium"
+                  >
+                    Reveal Recovery Phrase
+                  </button>
+                </div>
+              </Show>
+
+              <Show when={showRecoveryPhrase()}>
+                <div class="mb-4">
+                  <div class="bg-gray-50 dark:bg-gray-900 border-2 border-gray-300 dark:border-gray-600 rounded-lg p-4 mb-4">
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <For each={recoveryPhrase()}>
+                        {(word, index) => (
+                          <div class="flex items-center gap-2 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded">
+                            <span class="text-sm text-gray-500 dark:text-gray-400 w-6">{index() + 1}.</span>
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{word}</span>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                  <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p class="text-sm text-blue-800 dark:text-blue-400">
+                      <strong>Write these words down</strong> on paper in order (1-12). Store in a safe, fireproof location. Never store digitally.
+                    </p>
+                  </div>
+                </div>
+              </Show>
+            </div>
+          </div>
+        </Show>
 
         {/* Restore Confirmation Modal */}
         <Show when={showRestoreConfirm()}>

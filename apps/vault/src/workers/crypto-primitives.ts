@@ -382,6 +382,34 @@ export const cryptoPrimitives = {
     const crypto = await ensureCryptoReady();
     return crypto.decryptNsecFromBYOK(params.encryptedNsec, params.pin, params.salt);
   },
+
+  // ========================================
+  // Recovery Phrase (Mnemonic) Operations
+  // ========================================
+
+  /**
+   * Generate a 12-word recovery phrase and derived xpriv
+   */
+  generateRecoveryPhrase: async (): Promise<{ mnemonic: string; xpriv: string }> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.generateRecoveryPhrase();
+  },
+
+  /**
+   * Validate a recovery phrase (mnemonic)
+   */
+  validateRecoveryPhrase: async (params: { mnemonic: string }): Promise<boolean> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.validateRecoveryPhrase(params.mnemonic);
+  },
+
+  /**
+   * Convert recovery phrase (mnemonic) to xpriv
+   */
+  recoveryPhraseToXpriv: async (params: { mnemonic: string }): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.recoveryPhraseToXpriv(params.mnemonic);
+  },
 };
 
 // Export the ensureCryptoReady function for use by other modules if needed
