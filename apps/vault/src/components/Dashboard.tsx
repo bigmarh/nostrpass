@@ -24,7 +24,47 @@ export const Dashboard: Component = () => {
     const [showProfileEditor, setShowProfileEditor] = createSignal(false);
     const [profileError, setProfileError] = createSignal<string | null>(null);
 
+    // Local state for profile form to prevent re-renders during typing
+    const [profileFormData, setProfileFormData] = createSignal<{
+        name?: string;
+        about?: string;
+        nip05?: string;
+        website?: string;
+        lud16?: string;
+    }>({});
+
+    // Debounce timer for profile updates
+    let profileUpdateTimer: number | null = null;
+
     const cryptoWorker = useCryptoWorker();
+
+    // Helper to get profile field value (local form data takes precedence)
+    const getProfileFieldValue = (field: 'name' | 'about' | 'nip05' | 'website' | 'lud16'): string => {
+        const formValue = profileFormData()[field];
+        if (formValue !== undefined) return formValue;
+
+        const vault = vaultData();
+        if (!vault?.identities) return '';
+        const activeIndex = getActiveIdentityIndex();
+        return vault.identities[activeIndex]?.profile?.[field] || '';
+    };
+
+    // Initialize form data when opening profile editor
+    const openProfileEditor = () => {
+        const vault = vaultData();
+        if (vault?.identities) {
+            const activeIndex = getActiveIdentityIndex();
+            const identity = vault.identities[activeIndex];
+            setProfileFormData({
+                name: identity?.profile?.name || '',
+                about: identity?.profile?.about || '',
+                nip05: identity?.profile?.nip05 || '',
+                website: identity?.profile?.website || '',
+                lud16: identity?.profile?.lud16 || ''
+            });
+        }
+        setShowProfileEditor(true);
+    };
 
     // Use the vault data hook
     const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
@@ -120,20 +160,30 @@ export const Dashboard: Component = () => {
             : 0;
     };
 
-    // Handle profile field changes
-    const handleProfileFieldChange = async (field: string, value: string) => {
+    // Handle profile field changes - just update local state
+    const handleProfileFieldChange = (field: string, value: string) => {
+        setProfileFormData({
+            ...profileFormData(),
+            [field]: value
+        });
+    };
+
+    // Save profile changes to vault
+    const saveProfileChanges = async () => {
         try {
             const currentVault = vaultData();
             if (!currentVault) return;
 
             const identityIndex = getActiveIdentityIndex();
+            const formData = profileFormData();
+
             const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
                 if (idx === identityIndex) {
                     return {
                         ...id,
                         profile: {
                             ...(id.profile || {}),
-                            [field]: value
+                            ...formData
                         }
                     };
                 }
@@ -144,9 +194,13 @@ export const Dashboard: Component = () => {
                 ...currentVault,
                 identities: updatedIdentities
             });
+
+            // Close the editor after saving
+            setShowProfileEditor(false);
+            setProfileFormData({});
         } catch (e) {
-            console.error('Failed to update profile field:', e);
-            setProfileError('Failed to update profile');
+            console.error('Failed to save profile:', e);
+            setProfileError('Failed to save profile');
             setTimeout(() => setProfileError(null), 5000);
         }
     };
@@ -514,7 +568,7 @@ export const Dashboard: Component = () => {
 
                         {/* Edit Profile Button */}
                         <button
-                            onClick={() => setShowProfileEditor(true)}
+                            onClick={openProfileEditor}
                             class="mt-3 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center justify-center gap-2"
                         >
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -691,7 +745,7 @@ export const Dashboard: Component = () => {
                                             </label>
                                             <input
                                                 type="text"
-                                                value={activeIdentity().profile?.name || ''}
+                                                value={getProfileFieldValue('name')}
                                                 onInput={(e) => handleProfileFieldChange('name', e.currentTarget.value)}
                                                 placeholder="Your display name"
                                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -704,7 +758,7 @@ export const Dashboard: Component = () => {
                                                 About
                                             </label>
                                             <textarea
-                                                value={activeIdentity().profile?.about || ''}
+                                                value={getProfileFieldValue('about')}
                                                 onInput={(e) => handleProfileFieldChange('about', e.currentTarget.value)}
                                                 placeholder="Tell us about yourself..."
                                                 rows="4"
@@ -719,7 +773,7 @@ export const Dashboard: Component = () => {
                                             </label>
                                             <input
                                                 type="text"
-                                                value={activeIdentity().profile?.nip05 || ''}
+                                                value={getProfileFieldValue('nip05')}
                                                 onInput={(e) => handleProfileFieldChange('nip05', e.currentTarget.value)}
                                                 placeholder="name@domain.com"
                                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -733,7 +787,7 @@ export const Dashboard: Component = () => {
                                             </label>
                                             <input
                                                 type="url"
-                                                value={activeIdentity().profile?.website || ''}
+                                                value={getProfileFieldValue('website')}
                                                 onInput={(e) => handleProfileFieldChange('website', e.currentTarget.value)}
                                                 placeholder="https://yourwebsite.com"
                                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -747,7 +801,7 @@ export const Dashboard: Component = () => {
                                             </label>
                                             <input
                                                 type="text"
-                                                value={activeIdentity().profile?.lud16 || ''}
+                                                value={getProfileFieldValue('lud16')}
                                                 onInput={(e) => handleProfileFieldChange('lud16', e.currentTarget.value)}
                                                 placeholder="you@getalby.com"
                                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -760,6 +814,25 @@ export const Dashboard: Component = () => {
                                                 <p class="text-sm text-red-700 dark:text-red-400">{profileError()}</p>
                                             </div>
                                         </Show>
+
+                                        {/* Save Button */}
+                                        <div class="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                            <button
+                                                onClick={() => {
+                                                    setShowProfileEditor(false);
+                                                    setProfileFormData({});
+                                                }}
+                                                class="flex-1 px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={saveProfileChanges}
+                                                class="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                                            >
+                                                Save Changes
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </Show>
