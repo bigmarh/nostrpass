@@ -5,6 +5,10 @@ import './index.css';
 import { getCryptoWorker } from './services/cryptoWorkerSingleton';
 import { setupServiceWorkerBridge } from './services/serviceWorkerBridge';
 
+// Log vault version for debugging
+const VAULT_VERSION = '0.1.5'; // TODO: Auto-sync with package.json
+console.log(`🔐 NostrPass Vault v${VAULT_VERSION}`);
+
 // Ensure backgrounds follow Tailwind dark/light classes (no forced transparency)
 
 const root = document.getElementById('root');
