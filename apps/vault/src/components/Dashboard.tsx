@@ -321,15 +321,19 @@ export const Dashboard: Component = () => {
                                                     </div>
                                                 </div>
 
-                                                {/* Right section: VISA column spanning full height */}
+                                                {/* Right section: VISA column spanning full height - hidden on mobile */}
                                                 <Show when={params.app}>
-                                                    <div class="flex items-center justify-center border-l border-gray-300 dark:border-gray-700 w-16 bg-green-50 dark:bg-green-950">
-                                                        <div class="transform -rotate-90 whitespace-nowrap text-center">
+                                                    <div class="hidden sm:flex items-center justify-center border-l border-gray-300 dark:border-gray-700 w-16 bg-green-50 dark:bg-green-950">
+                                                        <div class="transform -rotate-90 whitespace-nowrap text-center max-w-32 overflow-hidden text-ellipsis">
                                                             <div class="text-[11px] uppercase text-gray-600 dark:text-gray-400 tracking-wider">
                                                                 VISA FOR
                                                             </div>
-                                                            <div class="text-[11px] font-bold text-gray-900 dark:text-gray-100 mt-1">
-                                                                {desanitizeDomain(params.app!).toUpperCase()}
+                                                            <div class="text-[11px] font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                                                                {(() => {
+                                                                    const domain = desanitizeDomain(params.app!).toUpperCase();
+                                                                    // Truncate long domains for rotated display
+                                                                    return domain.length > 20 ? domain.substring(0, 17) + '...' : domain;
+                                                                })()}
                                                             </div>
                                                         </div>
                                                     </div>
