@@ -765,6 +765,19 @@ export const authHandlers: MessageHandler[] = [
         // Update active identity in localStorage (per-browser, per-origin)
         await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
 
+        // SECURITY: Update vault data with new active identity (source of truth)
+        // Store publicKey instead of index for stability across identity reordering/deletion
+        console.log('[SWITCH_IDENTITY] Updating vault data with active identity:', { appKey, publicKey: identity.publicKey });
+        const updatedActiveIdentityByApp = {
+          ...(vaultData.activeIdentityByApp || {}),
+          [appKey]: identity.publicKey
+        };
+        await vaultDataService.updateVaultData(
+          currentUser.profile.username,
+          { activeIdentityByApp: updatedActiveIdentityByApp }
+        );
+        console.log('[SWITCH_IDENTITY] Updated activeIdentityByApp:', updatedActiveIdentityByApp);
+
         // Notify parent window about identity switch (NOT vault data update)
         try {
           const { getMessenger } = await import('../providers/MessengerProvider');
