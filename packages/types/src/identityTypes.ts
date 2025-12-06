@@ -48,6 +48,26 @@ export interface Identity {
     preferences?: Record<string, any>;
   };
 
+  /** Nostr profile metadata (NIP-01 kind 0) */
+  profile?: {
+    /** Display name */
+    name?: string;
+    /** Profile picture as data URL (e.g., data:image/png;base64,...) */
+    picture?: string;
+    /** About/bio text */
+    about?: string;
+    /** NIP-05 identifier (name@domain.com) */
+    nip05?: string;
+    /** Banner image as data URL */
+    banner?: string;
+    /** Website URL */
+    website?: string;
+    /** Lightning address or LNURL */
+    lud16?: string;
+    /** Display name */
+    display_name?: string;
+  };
+
   /** When identity was created (HD) or imported (BYOK) */
   createdAt?: number;
 

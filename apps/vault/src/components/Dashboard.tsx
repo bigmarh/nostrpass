@@ -291,18 +291,28 @@ export const Dashboard: Component = () => {
                                                     <div class="flex items-center gap-3 px-4 pt-3 pb-2">
                                                         {/* Column 1: Profile photo only */}
                                                         <div class="flex flex-col items-center justify-center shrink-0 border-r border-gray-300 dark:border-gray-700 pr-3">
-                                                            <div class="w-20 h-20 bg-gray-900 dark:bg-gray-700 rounded-full border-2 border-gray-900 dark:border-gray-600 flex items-center justify-center shadow-sm">
-                                                                <span class="text-white dark:text-gray-100 text-3xl font-bold">
-                                                                    {identityInitials}
-                                                                </span>
-                                                            </div>
+                                                            <Show when={activeIdentity.profile?.picture} fallback={
+                                                                <div class="w-20 h-20 bg-gray-900 dark:bg-gray-700 rounded-full border-2 border-gray-900 dark:border-gray-600 flex items-center justify-center shadow-sm">
+                                                                    <span class="text-white dark:text-gray-100 text-3xl font-bold">
+                                                                        {identityInitials}
+                                                                    </span>
+                                                                </div>
+                                                            }>
+                                                                <img
+                                                                    src={activeIdentity.profile!.picture}
+                                                                    alt={activeIdentity.nickname || 'Profile'}
+                                                                    class="w-20 h-20 rounded-full object-cover border-2 border-gray-900 dark:border-gray-600 shadow-sm"
+                                                                />
+                                                            </Show>
                                                         </div>
 
                                                         {/* Column 2: Name and ID Details */}
                                                         <div class="flex-1 flex flex-col gap-2">
                                                             {/* Name section */}
                                                             <div>
-                                                                <h1 class="text-base font-bold tracking-tight text-gray-900 dark:text-white break-words">{activeIdentity.nickname || 'Personal'}</h1>
+                                                                <h1 class="text-base font-bold tracking-tight text-gray-900 dark:text-white break-words">
+                                                                    {activeIdentity.profile?.name || activeIdentity.nickname || 'Personal'}
+                                                                </h1>
                                                                 <div class="text-xs text-gray-600 dark:text-gray-400">
                                                                     {user()?.profile.username}
                                                                 </div>
