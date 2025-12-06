@@ -6,6 +6,7 @@ import { showErrorToast, showSuccessToast } from '../components/Toast';
 import { addAuditEvent } from '../components/AuditLog';
 import { permissionPromptManager } from '../utils/permissionPromptManager';
 import { getActiveIdentity, setActiveIdentity } from '../utils/activeIdentityManager';
+import { vaultDataService } from '../services/vaultDataService';
 
 function originToAppKey(origin: string): string {
   try {
