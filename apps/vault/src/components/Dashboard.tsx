@@ -104,12 +104,26 @@ export const Dashboard: Component = () => {
                     {/* Top bar - Logo and Menu */}
                     <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-800">
                         <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
+                            {/* Close X Button - Left */}
+                            <Show when={params.app} fallback={<div class="w-10"></div>}>
+                                <button
+                                    onClick={backToApp}
+                                    class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+                                    aria-label="Close"
+                                >
+                                    <svg class="w-6 h-6 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </Show>
+
+                            {/* Logo and Title - Center */}
+                            <div class="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2">
                                 <img src="/logo.svg" alt="NostrPass" class="w-6 h-6" />
                                 <div class="text-gray-900 dark:text-white text-sm font-bold">NOSTRPASS</div>
                             </div>
 
-                            {/* Hamburger Menu Button */}
+                            {/* Hamburger Menu Button - Right */}
                             <button
                                 onClick={() => setShowMenu(!showMenu())}
                                 class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
@@ -184,11 +198,28 @@ export const Dashboard: Component = () => {
                                     </Show>
                                     <span class="text-base text-gray-900 dark:text-white">{isDarkMode() ? 'Light Mode' : 'Dark Mode'}</span>
                                 </button>
+
+                                {/* Divider */}
+                                <div class="border-t border-gray-200 dark:border-gray-800 my-2"></div>
+
+                                {/* Logout */}
+                                <button
+                                    onClick={() => {
+                                        handleLogout();
+                                        setShowMenu(false);
+                                    }}
+                                    class="w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors text-red-600 dark:text-red-400"
+                                >
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                    </svg>
+                                    <span class="text-base font-medium">Logout</span>
+                                </button>
                             </div>
                         </Show>
                     </div>
 
-                    <div class="px-4 pt-2.5 pb-2">
+                    <div class="px-4 py-4">
                         {/* Digital ID Card */}
                         <div class="relative bg-white dark:bg-gray-900 border-2 border-gray-900 dark:border-gray-600 rounded-lg shadow-lg overflow-hidden">
                             {/* Background watermark logo */}
@@ -257,11 +288,11 @@ export const Dashboard: Component = () => {
                                                 <div class="flex flex-col">
 
                                                     {/* Top: Profile and Details */}
-                                                    <div class="flex items-start gap-3 px-4 pt-3 pb-2">
+                                                    <div class="flex items-center gap-3 px-4 pt-3 pb-2">
                                                         {/* Column 1: Profile photo only */}
-                                                        <div class="flex flex-col items-center shrink-0 border-r border-gray-300 dark:border-gray-700 pr-3">
-                                                            <div class="w-16 h-16 bg-gray-900 dark:bg-gray-700 rounded-full border-2 border-gray-900 dark:border-gray-600 flex items-center justify-center shadow-sm">
-                                                                <span class="text-white dark:text-gray-100 text-2xl font-bold">
+                                                        <div class="flex flex-col items-center justify-center shrink-0 border-r border-gray-300 dark:border-gray-700 pr-3">
+                                                            <div class="w-20 h-20 bg-gray-900 dark:bg-gray-700 rounded-full border-2 border-gray-900 dark:border-gray-600 flex items-center justify-center shadow-sm">
+                                                                <span class="text-white dark:text-gray-100 text-3xl font-bold">
                                                                     {identityInitials}
                                                                 </span>
                                                             </div>
@@ -315,25 +346,21 @@ export const Dashboard: Component = () => {
                                                     {/* Bottom: Passport npub */}
                                                     <div class="px-4 pb-3 pt-2 border-t border-gray-300 dark:border-gray-700">
                                                         <div class="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-500 mb-1">Passport npub</div>
-                                                        <div class="text-xs font-mono text-gray-900 dark:text-gray-100 break-all leading-tight">
+                                                        <div class="text-[7px] font-mono text-gray-900 dark:text-gray-100 break-all leading-tight">
                                                             {nip19.npubEncode(activeIdentity.publicKey)}
                                                         </div>
                                                     </div>
                                                 </div>
 
-                                                {/* Right section: VISA column spanning full height - hidden on mobile */}
+                                                {/* Right section: VISA column spanning full height */}
                                                 <Show when={params.app}>
-                                                    <div class="hidden sm:flex items-center justify-center border-l border-gray-300 dark:border-gray-700 w-16 bg-green-50 dark:bg-green-950">
-                                                        <div class="transform -rotate-90 whitespace-nowrap text-center max-w-32 overflow-hidden text-ellipsis">
+                                                    <div class="flex items-center justify-center border-l border-gray-300 dark:border-gray-700 w-16 bg-green-50 dark:bg-green-950">
+                                                        <div class="transform -rotate-90 whitespace-nowrap text-center">
                                                             <div class="text-[11px] uppercase text-gray-600 dark:text-gray-400 tracking-wider">
                                                                 VISA FOR
                                                             </div>
-                                                            <div class="text-[11px] font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
-                                                                {(() => {
-                                                                    const domain = desanitizeDomain(params.app!).toUpperCase();
-                                                                    // Truncate long domains for rotated display
-                                                                    return domain.length > 20 ? domain.substring(0, 17) + '...' : domain;
-                                                                })()}
+                                                            <div class="text-[11px] font-bold text-gray-900 dark:text-gray-100 mt-1">
+                                                                {desanitizeDomain(params.app!).toUpperCase()}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -344,37 +371,10 @@ export const Dashboard: Component = () => {
                                 })()}
                             </Show>
                         </div>
-
-                        {/* Back to app and logout row */}
-                        <div class="flex items-center justify-between mt-3">
-                            {/* Back to App button */}
-                            {params.app && (
-                                <button
-                                    onClick={backToApp}
-                                    class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors min-h-[44px]"
-                                >
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                                    </svg>
-                                    <span>{desanitizeDomain(params.app)}</span>
-                                </button>
-                            )}
-
-                            {/* Logout button */}
-                            <button
-                                onClick={handleLogout}
-                                class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors min-h-[44px]"
-                            >
-                                <span>Logout</span>
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                                </svg>
-                            </button>
-                        </div>
                     </div>
 
                     {/* Identities Section Header */}
-                    <div class="px-4 py-3 border-t border-gray-200 dark:border-gray-800">
+                    <div class="px-4 pt-3 pb-0 border-t border-gray-200 dark:border-gray-800">
                         <div class="flex justify-between items-center mb-3">
                             <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
                             <div class="flex gap-2">
