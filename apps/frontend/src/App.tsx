@@ -168,22 +168,23 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-gray-900">
-      <div className="min-h-screen flex pt-20 md:pt-0 md:items-center justify-center px-6">
-        <div className="text-center flex md:flex-row flex-col m-w-4xl mx-auto">
+    <div className="bg-white text-gray-900">
+      {/* Hero Section - Not full height */}
+      <div className="py-16 md:py-24 px-6">
+        <div className="text-center flex md:flex-row flex-col max-w-4xl mx-auto">
           <div className="flex justify-center md:justify-end">
-            <img src="/logo.svg" alt="NostrPass" className="w-[220px] md:w-[320px]" />
+            <img src="/logo.svg" alt="NostrPass" className="w-[180px] md:w-[280px]" />
           </div>
           <div className="flex flex-col justify-center">
-            <h2 className="text-gray-800 md:text-6xl font-bold text-4xl mb-2 tracking-tight">NostrPass</h2>
-            <h3 className=" md:text-xl text-gray-600 mb-6 tracking-tight">
+            <h2 className="text-gray-800 md:text-5xl font-bold text-3xl mb-2 tracking-tight">NostrPass</h2>
+            <h3 className="md:text-lg text-gray-600 mb-4 tracking-tight">
               Built by developers, for developers</h3>
-            <h1 className=" text-[1.85rem] leading-[1.85rem] md:text-5xl font-bold mb-6 tracking-tight">
+            <h1 className="text-2xl leading-tight md:text-4xl font-bold mb-4 tracking-tight">
               Authentication for the
               <br />modern decentralized web
             </h1>
 
-            <p className="text-center text-sm md:text-xl text-gray-600 leading-relaxed mb-8">
+            <p className="text-center text-sm md:text-lg text-gray-600 leading-relaxed mb-6">
               Drop-in authentication for Decentralized applications.<br/>
               Add secure, privacy-first auth to your application
               in minutes, not days.
@@ -208,7 +209,440 @@ function App() {
           </div>
         </div>
       </div>
-      <footer className="flex text-xs fixed w-full bottom-0 justify-center items-center">
+
+      {/* Feature Cards Section - Passport Theme */}
+      <div className="bg-gray-50 py-16 px-6">
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 tracking-tight">Your Identity, Everywhere</h2>
+          <p className="text-gray-600 text-center mb-12 max-w-2xl mx-auto">
+            Like a passport for the decentralized web. One identity that works across every app, every device, every corner of the Nostr universe.
+          </p>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Card 1 - Multi-Identity (Tokyo) */}
+            <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group">
+              <div className="h-40 bg-gradient-to-br from-rose-100 to-orange-50 relative overflow-hidden">
+                {/* Tokyo Scene */}
+                <svg viewBox="0 0 400 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                  {/* Sky gradient */}
+                  <defs>
+                    <linearGradient id="tokyoSky" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#fce7f3" />
+                      <stop offset="100%" stopColor="#fed7aa" />
+                    </linearGradient>
+                  </defs>
+                  <rect width="400" height="160" fill="url(#tokyoSky)" />
+
+                  {/* Mount Fuji */}
+                  <polygon points="320,160 400,160 400,80 360,40 320,80" fill="#6366f1" opacity="0.3" />
+                  <polygon points="340,60 360,40 380,60" fill="#fff" opacity="0.8" />
+
+                  {/* Tokyo Tower */}
+                  <polygon points="80,160 95,50 110,160" fill="#dc2626" />
+                  <rect x="85" y="70" width="20" height="5" fill="#fff" />
+                  <rect x="87" y="90" width="16" height="4" fill="#fff" />
+                  <rect x="89" y="110" width="12" height="3" fill="#fff" />
+
+                  {/* City buildings */}
+                  <rect x="130" y="100" width="30" height="60" fill="#374151" />
+                  <rect x="165" y="80" width="25" height="80" fill="#4b5563" />
+                  <rect x="195" y="110" width="35" height="50" fill="#374151" />
+                  <rect x="235" y="90" width="28" height="70" fill="#4b5563" />
+                  <rect x="268" y="105" width="32" height="55" fill="#374151" />
+
+                  {/* Cherry blossoms */}
+                  <circle cx="40" cy="120" r="25" fill="#fda4af" opacity="0.8" />
+                  <circle cx="55" cy="105" r="20" fill="#fb7185" opacity="0.7" />
+                  <circle cx="25" cy="110" r="18" fill="#fda4af" opacity="0.6" />
+                  <rect x="38" y="120" width="4" height="40" fill="#78350f" />
+                </svg>
+
+                {/* NostrPass Logo Stamp */}
+                <div className="absolute bottom-2 right-2 w-14 h-14 group-hover:scale-110 transition-transform drop-shadow-lg">
+                  <img src="/logo.svg" alt="NostrPass" className="w-full h-full" />
+                </div>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">Multiple Identities</h3>
+                <p className="text-gray-600 text-sm">Create unlimited personas from one seed. Personal, work, anonymous — switch instantly, recover everything with a single phrase.</p>
+              </div>
+            </div>
+
+            {/* Card 2 - No Servers (Paris) */}
+            <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group">
+              <div className="h-40 bg-gradient-to-br from-blue-100 to-indigo-50 relative overflow-hidden">
+                {/* Paris Scene */}
+                <svg viewBox="0 0 400 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <linearGradient id="parisSky" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#dbeafe" />
+                      <stop offset="100%" stopColor="#e0e7ff" />
+                    </linearGradient>
+                  </defs>
+                  <rect width="400" height="160" fill="url(#parisSky)" />
+
+                  {/* Eiffel Tower */}
+                  <polygon points="200,160 185,160 195,80 200,10 205,80 215,160" fill="#374151" />
+                  <polygon points="180,160 175,130 195,100 200,80 205,100 225,130 220,160" fill="#4b5563" />
+                  <rect x="190" y="50" width="20" height="8" fill="#374151" />
+                  <rect x="185" y="80" width="30" height="6" fill="#374151" />
+                  <rect x="175" y="115" width="50" height="8" fill="#374151" />
+
+                  {/* Parisian buildings */}
+                  <rect x="30" y="100" width="50" height="60" fill="#e5e7eb" />
+                  <rect x="35" y="105" width="10" height="15" fill="#93c5fd" />
+                  <rect x="50" y="105" width="10" height="15" fill="#93c5fd" />
+                  <rect x="65" y="105" width="10" height="15" fill="#93c5fd" />
+                  <polygon points="30,100 55,75 80,100" fill="#374151" />
+
+                  <rect x="300" y="90" width="60" height="70" fill="#e5e7eb" />
+                  <rect x="310" y="100" width="12" height="18" fill="#93c5fd" />
+                  <rect x="330" y="100" width="12" height="18" fill="#93c5fd" />
+                  <polygon points="300,90 330,60 360,90" fill="#374151" />
+
+                  {/* Clouds */}
+                  <ellipse cx="100" cy="40" rx="30" ry="15" fill="#fff" opacity="0.8" />
+                  <ellipse cx="320" cy="35" rx="25" ry="12" fill="#fff" opacity="0.7" />
+                </svg>
+
+                {/* NostrPass Logo Stamp */}
+                <div className="absolute bottom-2 right-2 w-14 h-14 group-hover:scale-110 transition-transform drop-shadow-lg">
+                  <img src="/logo.svg" alt="NostrPass" className="w-full h-full" />
+                </div>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">No Servers Required</h3>
+                <p className="text-gray-600 text-sm">Your encrypted vault syncs through Nostr relays. No company holds your keys. No central point of failure. True decentralization.</p>
+              </div>
+            </div>
+
+            {/* Card 3 - True Ownership (New York) */}
+            <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group">
+              <div className="h-40 bg-gradient-to-br from-amber-100 to-yellow-50 relative overflow-hidden">
+                {/* New York Scene */}
+                <svg viewBox="0 0 400 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <linearGradient id="nySky" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#fef3c7" />
+                      <stop offset="100%" stopColor="#fef9c3" />
+                    </linearGradient>
+                  </defs>
+                  <rect width="400" height="160" fill="url(#nySky)" />
+
+                  {/* Statue of Liberty */}
+                  <rect x="55" y="90" width="30" height="70" fill="#6b7280" />
+                  <ellipse cx="70" cy="90" rx="20" ry="8" fill="#6b7280" />
+                  <ellipse cx="70" cy="75" rx="12" ry="20" fill="#10b981" />
+                  <circle cx="70" cy="60" r="8" fill="#10b981" />
+                  <polygon points="62,52 70,35 78,52" fill="#10b981" />
+                  <line x1="85" y1="55" x2="100" y2="40" stroke="#10b981" strokeWidth="4" />
+                  <rect x="95" y="30" width="8" height="15" fill="#fbbf24" />
+
+                  {/* NYC Skyline */}
+                  <rect x="140" y="70" width="35" height="90" fill="#374151" />
+                  <polygon points="140,70 157,40 175,70" fill="#4b5563" />
+                  <rect x="180" y="50" width="40" height="110" fill="#4b5563" />
+                  <rect x="225" y="80" width="30" height="80" fill="#374151" />
+                  <rect x="260" y="60" width="45" height="100" fill="#4b5563" />
+                  <rect x="310" y="85" width="35" height="75" fill="#374151" />
+                  <rect x="350" y="70" width="50" height="90" fill="#4b5563" />
+
+                  {/* Windows */}
+                  <rect x="185" y="60" width="6" height="8" fill="#fbbf24" opacity="0.8" />
+                  <rect x="195" y="60" width="6" height="8" fill="#fbbf24" opacity="0.6" />
+                  <rect x="265" y="70" width="6" height="8" fill="#fbbf24" opacity="0.7" />
+                </svg>
+
+                {/* NostrPass Logo Stamp */}
+                <div className="absolute bottom-2 right-2 w-14 h-14 group-hover:scale-110 transition-transform drop-shadow-lg">
+                  <img src="/logo.svg" alt="NostrPass" className="w-full h-full" />
+                </div>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">True Key Ownership</h3>
+                <p className="text-gray-600 text-sm">Private keys never leave your device. Defense-in-depth security with iframe isolation, web workers, and encrypted storage.</p>
+              </div>
+            </div>
+
+            {/* Card 4 - Works Everywhere (Sydney) */}
+            <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group">
+              <div className="h-40 bg-gradient-to-br from-cyan-100 to-teal-50 relative overflow-hidden">
+                {/* Sydney Scene */}
+                <svg viewBox="0 0 400 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <linearGradient id="sydneySky" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#cffafe" />
+                      <stop offset="100%" stopColor="#99f6e4" />
+                    </linearGradient>
+                  </defs>
+                  <rect width="400" height="160" fill="url(#sydneySky)" />
+
+                  {/* Water */}
+                  <rect x="0" y="120" width="400" height="40" fill="#0891b2" opacity="0.4" />
+
+                  {/* Sydney Opera House */}
+                  <ellipse cx="120" cy="130" rx="80" ry="10" fill="#6b7280" />
+                  <path d="M60,130 Q80,60 100,130" fill="#f5f5f5" stroke="#d1d5db" strokeWidth="1" />
+                  <path d="M85,130 Q105,50 125,130" fill="#f5f5f5" stroke="#d1d5db" strokeWidth="1" />
+                  <path d="M110,130 Q130,55 150,130" fill="#f5f5f5" stroke="#d1d5db" strokeWidth="1" />
+                  <path d="M135,130 Q150,70 165,130" fill="#f5f5f5" stroke="#d1d5db" strokeWidth="1" />
+
+                  {/* Harbour Bridge */}
+                  <path d="M220,130 Q300,50 380,130" fill="none" stroke="#374151" strokeWidth="8" />
+                  <line x1="230" y1="130" x2="250" y2="85" stroke="#374151" strokeWidth="2" />
+                  <line x1="260" y1="130" x2="275" y2="65" stroke="#374151" strokeWidth="2" />
+                  <line x1="290" y1="130" x2="300" y2="55" stroke="#374151" strokeWidth="2" />
+                  <line x1="320" y1="130" x2="320" y2="55" stroke="#374151" strokeWidth="2" />
+                  <line x1="350" y1="130" x2="340" y2="65" stroke="#374151" strokeWidth="2" />
+                  <line x1="370" y1="130" x2="355" y2="85" stroke="#374151" strokeWidth="2" />
+
+                  {/* Sun */}
+                  <circle cx="350" cy="40" r="20" fill="#fbbf24" opacity="0.8" />
+                </svg>
+
+                {/* NostrPass Logo Stamp */}
+                <div className="absolute bottom-2 right-2 w-14 h-14 group-hover:scale-110 transition-transform drop-shadow-lg">
+                  <img src="/logo.svg" alt="NostrPass" className="w-full h-full" />
+                </div>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">Works Everywhere</h3>
+                <p className="text-gray-600 text-sm">No browser extension needed. Works in any modern browser through a secure iframe. Access your vault on any device, anywhere.</p>
+              </div>
+            </div>
+
+            {/* Card 5 - One-Line Integration (Cairo) */}
+            <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group">
+              <div className="h-40 bg-gradient-to-br from-orange-100 to-amber-50 relative overflow-hidden">
+                {/* Cairo/Egypt Scene */}
+                <svg viewBox="0 0 400 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <linearGradient id="egyptSky" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#ffedd5" />
+                      <stop offset="100%" stopColor="#fef3c7" />
+                    </linearGradient>
+                  </defs>
+                  <rect width="400" height="160" fill="url(#egyptSky)" />
+
+                  {/* Desert sand */}
+                  <rect x="0" y="130" width="400" height="30" fill="#d97706" opacity="0.3" />
+
+                  {/* Pyramids */}
+                  <polygon points="80,130 150,50 220,130" fill="#d97706" opacity="0.8" />
+                  <polygon points="150,50 220,130 150,130" fill="#b45309" opacity="0.6" />
+
+                  <polygon points="180,130 230,70 280,130" fill="#d97706" opacity="0.9" />
+                  <polygon points="230,70 280,130 230,130" fill="#b45309" opacity="0.7" />
+
+                  <polygon points="250,130 285,90 320,130" fill="#d97706" opacity="0.7" />
+
+                  {/* Sphinx silhouette */}
+                  <ellipse cx="350" cy="125" rx="30" ry="12" fill="#92400e" opacity="0.6" />
+                  <rect x="340" y="110" width="15" height="20" fill="#92400e" opacity="0.6" />
+                  <circle cx="347" cy="105" r="8" fill="#92400e" opacity="0.6" />
+
+                  {/* Sun */}
+                  <circle cx="60" cy="50" r="25" fill="#f59e0b" opacity="0.9" />
+
+                  {/* Palm tree */}
+                  <rect x="15" y="100" width="6" height="30" fill="#78350f" />
+                  <ellipse cx="18" cy="95" rx="15" ry="8" fill="#16a34a" opacity="0.8" />
+                  <ellipse cx="10" cy="100" rx="12" ry="6" fill="#22c55e" opacity="0.7" />
+                  <ellipse cx="26" cy="100" rx="12" ry="6" fill="#22c55e" opacity="0.7" />
+                </svg>
+
+                {/* NostrPass Logo Stamp */}
+                <div className="absolute bottom-2 right-2 w-14 h-14 group-hover:scale-110 transition-transform drop-shadow-lg">
+                  <img src="/logo.svg" alt="NostrPass" className="w-full h-full" />
+                </div>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">One-Line Integration</h3>
+                <p className="text-gray-600 text-sm">Drop in the Embassy SDK and get a standard window.nostr API. Works with every existing Nostr app. NIP-07 compatible.</p>
+              </div>
+            </div>
+
+            {/* Card 6 - Open Protocol (Rio) */}
+            <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group">
+              <div className="h-40 bg-gradient-to-br from-green-100 to-emerald-50 relative overflow-hidden">
+                {/* Rio Scene */}
+                <svg viewBox="0 0 400 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <linearGradient id="rioSky" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#dcfce7" />
+                      <stop offset="100%" stopColor="#d1fae5" />
+                    </linearGradient>
+                  </defs>
+                  <rect width="400" height="160" fill="url(#rioSky)" />
+
+                  {/* Ocean */}
+                  <rect x="0" y="130" width="400" height="30" fill="#0ea5e9" opacity="0.4" />
+
+                  {/* Sugarloaf Mountain */}
+                  <ellipse cx="320" cy="160" rx="60" ry="80" fill="#16a34a" opacity="0.7" />
+                  <ellipse cx="320" cy="140" rx="35" ry="50" fill="#22c55e" opacity="0.8" />
+
+                  {/* Corcovado / Christ the Redeemer */}
+                  <ellipse cx="150" cy="160" rx="80" ry="100" fill="#16a34a" opacity="0.6" />
+                  <ellipse cx="150" cy="130" rx="50" ry="60" fill="#22c55e" opacity="0.7" />
+                  <rect x="145" y="50" width="10" height="35" fill="#e5e7eb" />
+                  <line x1="125" y1="60" x2="175" y2="60" stroke="#e5e7eb" strokeWidth="8" />
+                  <circle cx="150" cy="45" r="6" fill="#e5e7eb" />
+
+                  {/* Beach curve */}
+                  <path d="M0,140 Q100,120 200,140 Q300,160 400,140" fill="#fef3c7" opacity="0.6" />
+
+                  {/* Palm trees */}
+                  <rect x="50" y="115" width="4" height="25" fill="#78350f" />
+                  <ellipse cx="52" cy="110" rx="12" ry="6" fill="#22c55e" opacity="0.8" />
+                  <ellipse cx="45" cy="113" rx="10" ry="5" fill="#16a34a" opacity="0.7" />
+
+                  <rect x="250" y="118" width="4" height="22" fill="#78350f" />
+                  <ellipse cx="252" cy="113" rx="11" ry="5" fill="#22c55e" opacity="0.8" />
+                </svg>
+
+                {/* NostrPass Logo Stamp */}
+                <div className="absolute bottom-2 right-2 w-14 h-14 group-hover:scale-110 transition-transform drop-shadow-lg">
+                  <img src="/logo.svg" alt="NostrPass" className="w-full h-full" />
+                </div>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">Open Protocol</h3>
+                <p className="text-gray-600 text-sm">Built on NPS-01, an open protocol anyone can implement. No vendor lock-in. Self-host your own vault. Interoperable by design.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Developer Section */}
+      <div className="bg-white py-16 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">Built for Developers</h2>
+            <p className="text-gray-600 max-w-2xl mx-auto">
+              Add authentication to your Nostr app in minutes. No complex setup, no user management, no passwords to store.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 mb-12">
+            {/* Code Example */}
+            <div className="bg-gray-900 rounded-xl p-4 sm:p-6 text-white overflow-hidden">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                <span className="text-gray-400 text-sm ml-2">index.html</span>
+              </div>
+              <pre className="text-xs sm:text-sm overflow-x-auto max-w-full">
+                <code className="text-green-400">{`<!-- That's it. Seriously. -->`}</code>
+                {'\n'}
+                <code className="text-blue-300">{`<script `}</code>
+                <code className="text-yellow-300">src</code>
+                <code className="text-white">=</code>
+                <code className="text-green-300">"https://cdn.nostrpass.com/embassy.js"</code>
+                <code className="text-blue-300">{`></script>`}</code>
+                {'\n\n'}
+                <code className="text-blue-300">{`<script>`}</code>
+                {'\n'}
+                <code className="text-gray-400">  // Get user's public key</code>
+                {'\n'}
+                <code className="text-purple-300">  const </code>
+                <code className="text-white">pubkey = </code>
+                <code className="text-purple-300">await </code>
+                <code className="text-yellow-300">window.nostr</code>
+                <code className="text-white">.getPublicKey();</code>
+                {'\n\n'}
+                <code className="text-gray-400">  // Sign events</code>
+                {'\n'}
+                <code className="text-purple-300">  const </code>
+                <code className="text-white">signed = </code>
+                <code className="text-purple-300">await </code>
+                <code className="text-yellow-300">window.nostr</code>
+                <code className="text-white">.signEvent(event);</code>
+                {'\n'}
+                <code className="text-blue-300">{`</script>`}</code>
+              </pre>
+            </div>
+
+            {/* Developer Benefits List */}
+            <div className="space-y-6">
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-10 h-10 bg-black rounded-lg flex items-center justify-center text-white font-bold">1</div>
+                <div>
+                  <h3 className="font-bold text-lg mb-1">One Script Tag</h3>
+                  <p className="text-gray-600 text-sm">Include our SDK and get a standard NIP-07 compatible <code className="bg-gray-100 px-1 rounded">window.nostr</code> API. Works with every existing Nostr library.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-10 h-10 bg-black rounded-lg flex items-center justify-center text-white font-bold">2</div>
+                <div>
+                  <h3 className="font-bold text-lg mb-1">Zero Backend Required</h3>
+                  <p className="text-gray-600 text-sm">No user database. No session management. No password resets. Users own their identity — you just verify signatures.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-10 h-10 bg-black rounded-lg flex items-center justify-center text-white font-bold">3</div>
+                <div>
+                  <h3 className="font-bold text-lg mb-1">Framework Agnostic</h3>
+                  <p className="text-gray-600 text-sm">React, Vue, Svelte, vanilla JS — we don't care. If it runs in a browser, NostrPass works. TypeScript types included.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="flex-shrink-0 w-10 h-10 bg-black rounded-lg flex items-center justify-center text-white font-bold">4</div>
+                <div>
+                  <h3 className="font-bold text-lg mb-1">Self-Host Ready</h3>
+                  <p className="text-gray-600 text-sm">Don't want to depend on us? Self-host your own vault. Full documentation and Docker images available. Open protocol, no lock-in.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* API Methods Grid */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">getPublicKey()</code>
+              <p className="text-gray-500 text-xs mt-1">Get user's Nostr public key</p>
+            </div>
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">signEvent(event)</code>
+              <p className="text-gray-500 text-xs mt-1">Sign any Nostr event (NIP-01)</p>
+            </div>
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">nip04.encrypt()</code>
+              <p className="text-gray-500 text-xs mt-1">Encrypt direct messages</p>
+            </div>
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">nip04.decrypt()</code>
+              <p className="text-gray-500 text-xs mt-1">Decrypt direct messages</p>
+            </div>
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">getRelays()</code>
+              <p className="text-gray-500 text-xs mt-1">Get user's relay preferences</p>
+            </div>
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">signData(data)</code>
+              <p className="text-gray-500 text-xs mt-1">Sign arbitrary data</p>
+            </div>
+          </div>
+
+          {/* CTA */}
+          <div className="text-center mt-12">
+            <button
+              onClick={() => setShowCode(true)}
+              className="px-8 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+            >
+              View Full Documentation
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer - Not fixed when scrolling */}
+      <footer className="flex text-xs py-6 w-full justify-center items-center bg-gray-50 border-t border-gray-200">
           <p className="text-gray-500 mr-2">NostrPass</p>
           <p className="text-gray-500">© 2025 NostrPass. All rights reserved.</p>
       </footer>
