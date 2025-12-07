@@ -1,4 +1,4 @@
-import { Component, Show, createSignal, onMount } from 'solid-js';
+import { Component, Show, createSignal, onMount, createEffect } from 'solid-js';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 import { nip19 } from 'nostr-tools';
 
@@ -9,6 +9,8 @@ import { IdentityManager } from './IdentityManager';
 import { PinManager } from './PinManager';
 import GlobalSettings from './GlobalSettings';
 import { getActiveIdentity } from '../utils/activeIdentityManager';
+import { nostrProfileService } from '../services/nostrProfileService';
+import { profileCacheService } from '../services/profileCacheService';
 
 export const Dashboard: Component = () => {
     const { user, logout, isVaultLocked, lockVault, unlockVault } = useAuth();
@@ -21,53 +23,76 @@ export const Dashboard: Component = () => {
     const [triggerAddIdentity, setTriggerAddIdentity] = createSignal(0);
     const [searchQuery, setSearchQuery] = createSignal('');
     const [showMenu, setShowMenu] = createSignal(false);
-    const [showProfileEditor, setShowProfileEditor] = createSignal(false);
-    const [profileError, setProfileError] = createSignal<string | null>(null);
-
-    // Local state for profile form to prevent re-renders during typing
-    const [profileFormData, setProfileFormData] = createSignal<{
-        name?: string;
-        about?: string;
-        nip05?: string;
-        website?: string;
-        lud16?: string;
-    }>({});
-
-    // Debounce timer for profile updates
-    let profileUpdateTimer: number | null = null;
 
     const cryptoWorker = useCryptoWorker();
 
-    // Helper to get profile field value (local form data takes precedence)
-    const getProfileFieldValue = (field: 'name' | 'about' | 'nip05' | 'website' | 'lud16'): string => {
-        const formValue = profileFormData()[field];
-        if (formValue !== undefined) return formValue;
-
-        const vault = vaultData();
-        if (!vault?.identities) return '';
-        const activeIndex = getActiveIdentityIndex();
-        return vault.identities[activeIndex]?.profile?.[field] || '';
-    };
-
-    // Initialize form data when opening profile editor
-    const openProfileEditor = () => {
-        const vault = vaultData();
-        if (vault?.identities) {
-            const activeIndex = getActiveIdentityIndex();
-            const identity = vault.identities[activeIndex];
-            setProfileFormData({
-                name: identity?.profile?.name || '',
-                about: identity?.profile?.about || '',
-                nip05: identity?.profile?.nip05 || '',
-                website: identity?.profile?.website || '',
-                lud16: identity?.profile?.lud16 || ''
-            });
-        }
-        setShowProfileEditor(true);
-    };
-
     // Use the vault data hook
     const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
+
+    // Auto-fetch Nostr profiles for identities without profile data
+    createEffect(() => {
+        const vault = vaultData();
+        const username = user()?.profile?.username;
+
+        if (!vault?.identities || !username) return;
+
+        // Find identities that don't have profile pictures
+        const identitiesNeedingProfiles = vault.identities.filter((id: any) => !id.profile?.picture);
+
+        if (identitiesNeedingProfiles.length === 0) return;
+
+        console.log('[Dashboard] Auto-fetching Nostr profiles for', identitiesNeedingProfiles.length, 'identities');
+
+        // Fetch profiles in the background (don't await, non-blocking)
+        (async () => {
+            try {
+                const publicKeys = identitiesNeedingProfiles.map((id: any) => id.publicKey);
+                const profiles = await nostrProfileService.fetchProfiles(publicKeys);
+
+                if (profiles.size === 0) return;
+
+                // Update vault with fetched profiles
+                const updatedIdentities = vault.identities.map((id: any) => {
+                    const fetchedProfile = profiles.get(id.publicKey);
+                    if (fetchedProfile) {
+                        // Update cache
+                        profileCacheService.updateProfile(username, id.publicKey, {
+                            name: fetchedProfile.name || fetchedProfile.display_name,
+                            picture: fetchedProfile.picture,
+                            about: fetchedProfile.about,
+                            nip05: fetchedProfile.nip05,
+                            website: fetchedProfile.website,
+                            lud16: fetchedProfile.lud16
+                        });
+
+                        return {
+                            ...id,
+                            profile: {
+                                ...(id.profile || {}),
+                                name: fetchedProfile.name || fetchedProfile.display_name || id.profile?.name,
+                                picture: fetchedProfile.picture || id.profile?.picture,
+                                about: fetchedProfile.about || id.profile?.about,
+                                nip05: fetchedProfile.nip05 || id.profile?.nip05,
+                                website: fetchedProfile.website || id.profile?.website,
+                                lud16: fetchedProfile.lud16 || id.profile?.lud16
+                            }
+                        };
+                    }
+                    return id;
+                });
+
+                // Save updated profiles to vault
+                await updateVaultData({
+                    ...vault,
+                    identities: updatedIdentities
+                });
+
+                console.log('[Dashboard] Successfully updated', profiles.size, 'profiles from Nostr');
+            } catch (error) {
+                console.error('[Dashboard] Failed to auto-fetch Nostr profiles:', error);
+            }
+        })();
+    });
 
     // Listen for vault data refresh events
     onMount(() => {
@@ -97,16 +122,10 @@ export const Dashboard: Component = () => {
             setTimeout(() => setIsRefreshing(false), 2000);
         };
 
-        const handleOpenProfileEditor = () => {
-            openProfileEditor();
-        };
-
         window.addEventListener('vault-data-refresh', handleVaultDataRefresh);
-        window.addEventListener('open-profile-editor', handleOpenProfileEditor);
 
         return () => {
             window.removeEventListener('vault-data-refresh', handleVaultDataRefresh);
-            window.removeEventListener('open-profile-editor', handleOpenProfileEditor);
         };
     });
 
@@ -161,129 +180,19 @@ export const Dashboard: Component = () => {
             }
         })() : null;
 
-        return appOrigin
+        const activeIndex = appOrigin
             ? (getActiveIdentity(user()?.profile.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
             : 0;
-    };
 
-    // Handle profile field changes - just update local state
-    const handleProfileFieldChange = (field: string, value: string) => {
-        setProfileFormData({
-            ...profileFormData(),
-            [field]: value
+        console.log('[Dashboard] Active identity check:', {
+            appOrigin,
+            'params.app': params.app,
+            fromLocalStorage: getActiveIdentity(user()?.profile.username || '', appOrigin || ''),
+            fromVault: vault.activeIdentityByApp?.[params.app!],
+            activeIndex
         });
-    };
 
-    // Save profile changes to vault
-    const saveProfileChanges = async () => {
-        try {
-            const currentVault = vaultData();
-            if (!currentVault) return;
-
-            const identityIndex = getActiveIdentityIndex();
-            const formData = profileFormData();
-
-            const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
-                if (idx === identityIndex) {
-                    return {
-                        ...id,
-                        profile: {
-                            ...(id.profile || {}),
-                            ...formData
-                        }
-                    };
-                }
-                return id;
-            });
-
-            await updateVaultData({
-                ...currentVault,
-                identities: updatedIdentities
-            });
-
-            // Close the editor after saving
-            setShowProfileEditor(false);
-            setProfileFormData({});
-        } catch (e) {
-            console.error('Failed to save profile:', e);
-            setProfileError('Failed to save profile');
-            setTimeout(() => setProfileError(null), 5000);
-        }
-    };
-
-    // Handle profile picture upload
-    const handleProfilePictureUpload = async (file: File) => {
-        try {
-            // Validate file size (max 500KB to keep data URL reasonable)
-            if (file.size > 500 * 1024) {
-                setProfileError('Image too large. Please use an image under 500KB.');
-                setTimeout(() => setProfileError(null), 5000);
-                return;
-            }
-
-            // Convert to data URL
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                const dataUrl = e.target?.result as string;
-
-                const currentVault = vaultData();
-                if (!currentVault) return;
-
-                const identityIndex = getActiveIdentityIndex();
-                const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
-                    if (idx === identityIndex) {
-                        return {
-                            ...id,
-                            profile: {
-                                ...(id.profile || {}),
-                                picture: dataUrl
-                            }
-                        };
-                    }
-                    return id;
-                });
-
-                await updateVaultData({
-                    ...currentVault,
-                    identities: updatedIdentities
-                });
-            };
-
-            reader.readAsDataURL(file);
-        } catch (e) {
-            console.error('Failed to upload profile picture:', e);
-            setProfileError('Failed to upload picture');
-            setTimeout(() => setProfileError(null), 5000);
-        }
-    };
-
-    // Handle remove profile picture
-    const handleRemoveProfilePicture = async () => {
-        try {
-            const currentVault = vaultData();
-            if (!currentVault) return;
-
-            const identityIndex = getActiveIdentityIndex();
-            const updatedIdentities = currentVault.identities.map((id: any, idx: number) => {
-                if (idx === identityIndex) {
-                    const { picture, ...restProfile } = id.profile || {};
-                    return {
-                        ...id,
-                        profile: Object.keys(restProfile).length > 0 ? restProfile : undefined
-                    };
-                }
-                return id;
-            });
-
-            await updateVaultData({
-                ...currentVault,
-                identities: updatedIdentities
-            });
-        } catch (e) {
-            console.error('Failed to remove profile picture:', e);
-            setProfileError('Failed to remove picture');
-            setTimeout(() => setProfileError(null), 5000);
-        }
+        return activeIndex;
     };
 
     return (
@@ -571,21 +480,10 @@ export const Dashboard: Component = () => {
                                 })()}
                             </Show>
                         </div>
-
-                        {/* Edit Profile Button */}
-                        <button
-                            onClick={openProfileEditor}
-                            class="mt-3 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center justify-center gap-2"
-                        >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                            Edit Profile
-                        </button>
                     </div>
 
                     {/* Identities Section Header */}
-                    <div class="px-4 pt-3 pb-0 border-t border-gray-200 dark:border-gray-800">
+                    <div class="px-4 pt-3 pb-3 border-t border-b border-gray-200 dark:border-gray-800">
                         <div class="flex justify-between items-center mb-3">
                             <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
                             <div class="flex gap-2">
@@ -621,14 +519,14 @@ export const Dashboard: Component = () => {
                                 placeholder="Search identities..."
                                 value={searchQuery()}
                                 onInput={(e) => setSearchQuery(e.currentTarget.value)}
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                class="w-full px-3 py-2 mb-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                             />
                         </Show>
                     </div>
                 </header>
 
-                {/* Main Content - Scrollable on mobile */}
-                <main class="flex-1 overflow-y-auto md:overflow-visible px-0 py-6">
+                {/* Main Content - Scrollable */}
+                <main class="flex-1 overflow-y-auto px-0 min-h-0">
                     {/* Identity Manager */}
                     <IdentityManager
                         appId={params.app}
@@ -659,205 +557,15 @@ export const Dashboard: Component = () => {
                 username={user()?.profile.username || ''}
             />
 
-            {/* Profile Editor Sidebar */}
-            <Show when={showProfileEditor()}>
-                <div class="fixed inset-0 z-50 overflow-hidden">
-                    {/* Backdrop */}
-                    <div
-                        class="fixed inset-0 bg-black/50 transition-opacity"
-                        onClick={() => setShowProfileEditor(false)}
-                    />
-
-                    {/* Sidebar - slides from left */}
-                    <div class={`fixed left-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto ${showProfileEditor() ? 'translate-x-0' : '-translate-x-full'}`}>
-                        {/* Header */}
-                        <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
-                            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Edit Profile</h2>
-                            <button
-                                onClick={() => setShowProfileEditor(false)}
-                                class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                            >
-                                <svg class="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-
-                        {/* Content */}
-                        <div class="p-6">
-                            <Show when={(() => {
-                                const vault = vaultData();
-                                if (!vault?.identities) return null;
-                                const activeIndex = getActiveIdentityIndex();
-                                return vault.identities[activeIndex];
-                            })()}>
-                                {(activeIdentity) => (
-                                    <div class="space-y-6">
-                                        {/* Profile Picture */}
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                                                Profile Picture
-                                            </label>
-                                            <div class="flex items-center gap-4">
-                                                <Show when={activeIdentity().profile?.picture} fallback={
-                                                    <div class="w-24 h-24 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
-                                                        <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                                        </svg>
-                                                    </div>
-                                                }>
-                                                    <img
-                                                        src={activeIdentity().profile!.picture}
-                                                        alt="Profile"
-                                                        class="w-24 h-24 rounded-full object-cover border-2 border-gray-300 dark:border-gray-600"
-                                                    />
-                                                </Show>
-                                                <div class="flex-1">
-                                                    <input
-                                                        type="file"
-                                                        accept="image/*"
-                                                        id="profile-picture-upload"
-                                                        class="hidden"
-                                                        onChange={async (e) => {
-                                                            const file = e.target.files?.[0];
-                                                            if (file) {
-                                                                await handleProfilePictureUpload(file);
-                                                            }
-                                                        }}
-                                                    />
-                                                    <label
-                                                        for="profile-picture-upload"
-                                                        class="inline-block px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer transition-colors"
-                                                    >
-                                                        Upload Picture
-                                                    </label>
-                                                    <Show when={activeIdentity().profile?.picture}>
-                                                        <button
-                                                            onClick={handleRemoveProfilePicture}
-                                                            class="ml-2 px-4 py-2 text-sm bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                                                        >
-                                                            Remove
-                                                        </button>
-                                                    </Show>
-                                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Max size: 500KB</p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Display Name */}
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Display Name
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={getProfileFieldValue('name')}
-                                                onInput={(e) => handleProfileFieldChange('name', e.currentTarget.value)}
-                                                placeholder="Your display name"
-                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-
-                                        {/* About */}
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                About
-                                            </label>
-                                            <textarea
-                                                value={getProfileFieldValue('about')}
-                                                onInput={(e) => handleProfileFieldChange('about', e.currentTarget.value)}
-                                                placeholder="Tell us about yourself..."
-                                                rows="4"
-                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-
-                                        {/* NIP-05 */}
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                NIP-05 Identifier
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={getProfileFieldValue('nip05')}
-                                                onInput={(e) => handleProfileFieldChange('nip05', e.currentTarget.value)}
-                                                placeholder="name@domain.com"
-                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-
-                                        {/* Website */}
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Website
-                                            </label>
-                                            <input
-                                                type="url"
-                                                value={getProfileFieldValue('website')}
-                                                onInput={(e) => handleProfileFieldChange('website', e.currentTarget.value)}
-                                                placeholder="https://yourwebsite.com"
-                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-
-                                        {/* Lightning Address */}
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                Lightning Address
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={getProfileFieldValue('lud16')}
-                                                onInput={(e) => handleProfileFieldChange('lud16', e.currentTarget.value)}
-                                                placeholder="you@getalby.com"
-                                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-
-                                        {/* Error Message */}
-                                        <Show when={profileError()}>
-                                            <div class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                                                <p class="text-sm text-red-700 dark:text-red-400">{profileError()}</p>
-                                            </div>
-                                        </Show>
-
-                                        {/* Save Button */}
-                                        <div class="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                            <button
-                                                onClick={() => {
-                                                    setShowProfileEditor(false);
-                                                    setProfileFormData({});
-                                                }}
-                                                class="flex-1 px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                onClick={saveProfileChanges}
-                                                class="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                                            >
-                                                Save Changes
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </Show>
-                        </div>
-                    </div>
-                </div>
-            </Show>
-
             {/* Global Settings Modal */}
-            <Show when={showGlobalSettings()}>
-                <GlobalSettings
-                    username={user()?.profile.username || ''}
-                    identityCount={vaultData()?.identities?.filter((id: any) => !id.archived).length || 0}
-                    isOpen={showGlobalSettings()}
-                    onClose={() => setShowGlobalSettings(false)}
-                    vaultData={vaultData()}
-                    onUpdateVaultData={updateVaultData}
-                />
-            </Show>
+            <GlobalSettings
+                username={user()?.profile.username || ''}
+                identityCount={vaultData()?.identities?.filter((id: any) => !id.archived).length || 0}
+                isOpen={showGlobalSettings()}
+                onClose={() => setShowGlobalSettings(false)}
+                vaultData={vaultData()}
+                onUpdateVaultData={updateVaultData}
+            />
         </div>
     );
 };

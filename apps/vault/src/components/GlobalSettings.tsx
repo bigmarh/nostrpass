@@ -178,16 +178,15 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
   };
 
   return (
-    <Show when={props.isOpen}>
-      <div class="fixed inset-0 z-50 overflow-hidden">
-        {/* Backdrop */}
-        <div
-          class="fixed inset-0 bg-black/50 transition-opacity"
-          onClick={props.onClose}
-        />
+    <div class={`fixed inset-0 z-50 overflow-hidden transition-opacity duration-300 ${props.isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+      {/* Backdrop */}
+      <div
+        class={`fixed inset-0 bg-black/50 transition-opacity duration-300 ${props.isOpen ? 'opacity-100' : 'opacity-0'}`}
+        onClick={props.onClose}
+      />
 
-        {/* Side Panel */}
-        <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+      {/* Side Panel */}
+      <div class={`fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto ${props.isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           {/* Panel Header */}
           <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
             <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Vault Settings</h2>
@@ -381,7 +380,6 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
               </div>
             </Show>
           </div>
-        </div>
 
         {/* Recovery Phrase Backup Modal */}
         <Show when={showBackupModal()}>
@@ -484,7 +482,7 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
           </div>
         </Show>
       </div>
-    </Show>
+    </div>
   );
 };
 

@@ -18,12 +18,15 @@ function originToAppKey(origin: string): string {
     let url: URL;
     if (origin.startsWith('http://') || origin.startsWith('https://')) {
       url = new URL(origin);
+      return sanitizeDomain(url.host);
     } else {
-      url = new URL(`http://${origin}`);
+      // Origin is already just a domain, sanitize it directly
+      return sanitizeDomain(origin);
     }
-    return sanitizeDomain(url.host);
-  } catch {
-    return sanitizeDomain(origin);
+  } catch (err) {
+    // Last resort: try to extract domain from malformed input
+    const cleaned = origin.replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+    return sanitizeDomain(cleaned);
   }
 }
 

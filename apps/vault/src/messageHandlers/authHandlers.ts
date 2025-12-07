@@ -589,7 +589,8 @@ export const authHandlers: MessageHandler[] = [
                 publicKey: firstAuthorizedIdentity.publicKey,
                 npub: firstAuthorizedIdentity.npub,
                 nickname: firstAuthorizedIdentity.nickname,
-                authorized: true
+                authorized: true,
+                avatar: firstAuthorizedIdentity.profile?.picture || null
               }
             };
             console.log('[AUTH_STATUS] Returning alternative identity response');
@@ -618,7 +619,8 @@ export const authHandlers: MessageHandler[] = [
             publicKey: activeIdentity?.publicKey || currentUser.publicKey,
             npub: activeIdentity?.npub,
             nickname: activeIdentity?.nickname,
-            authorized: isAuthorized
+            authorized: isAuthorized,
+            avatar: activeIdentity?.profile?.picture || null
           }
         };
         console.log('[AUTH_STATUS] Returning success response:', { isLocked, username: response.username, authorized: isAuthorized });
@@ -694,7 +696,8 @@ export const authHandlers: MessageHandler[] = [
             createdAt: identity.createdAt,
             isActive: activeIdentityIndex === index,
             isAuthorized: !!(identity.appPermissions && identity.appPermissions[appKey]),
-            archived: identity.archived || false
+            archived: identity.archived || false,
+            avatar: identity.profile?.picture || null
           }))
           .filter((identity: any) => !identity.archived); // Filter out archived identities
 
