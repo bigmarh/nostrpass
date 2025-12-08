@@ -5,6 +5,8 @@ import { Router, Route } from '@solidjs/router';
 import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, AccountManager, ManageDashboard, AccountPickerPage, PermissionRequestPage, SimpleAuthPage } from './components';
 import AccountPickerController from './components/AccountPickerController';
 import SimpleAuthPromptController from './components/SimpleAuthPromptController';
+import RecoveryPhraseRestore from './components/RecoveryPhraseRestore';
+import ProfileEdit from './components/ProfileEdit';
 import { ToastProvider } from './components/Toast';
 import { I18nProvider } from './i18n';
 import { VaultCoreDemo } from './components/VaultCoreDemo';
@@ -22,8 +24,10 @@ const AppContent: Component = () => {
       <Route path="/:app/permission-request" component={PermissionRequestPage} />
       <Route path="/:app/simple-auth" component={() => <AuthGuard><SimpleAuthPage /></AuthGuard>} />
       <Route path="/:app/dashboard" component={() => <AuthGuard><Dashboard /></AuthGuard>} />
+      <Route path="/:app/profile/:pubkey/edit" component={() => <AuthGuard><ProfileEdit /></AuthGuard>} />
       <Route path="/:app/manage" component={ManageDashboard} />
       <Route path="/:app/keys" component={() => <AuthGuard><div>Key Management</div></AuthGuard>} />
+      <Route path="/:app/restore-from-phrase" component={RecoveryPhraseRestore} />
       <Route path="/:app/vault-core-demo" component={() => (
         <VaultCoreProvider>
           <VaultCoreDemo />

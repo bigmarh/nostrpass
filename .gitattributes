@@ -1,0 +1,87 @@
+# Git Attributes - Export Control for Open Source Release
+# Files/directories marked with 'export-ignore' will be excluded from git archive
+
+# ============================================================================
+# SECRETS & CREDENTIALS - Never export
+# ============================================================================
+.env.production export-ignore
+.env.local export-ignore
+*.pem export-ignore
+
+# ============================================================================
+# DEPLOYMENT & INFRASTRUCTURE - Keep private
+# ============================================================================
+scripts/ export-ignore
+.firebaserc export-ignore
+firebase.json export-ignore
+firebase-vault.json export-ignore
+.firebase/ export-ignore
+
+# ============================================================================
+# MARKETING WEBSITE - Optional, keep private for now
+# ============================================================================
+apps/frontend/ export-ignore
+
+# ============================================================================
+# INTERNAL DOCUMENTATION - Keep private
+# ============================================================================
+ATOMIC-AUTH-COMPARISON.md export-ignore
+PHASE_2_COMPLETE.md export-ignore
+PRE_REMOVAL_REPORT.md export-ignore
+PROPOSAL-SIMPLIFIED-AUTH.md export-ignore
+STREAMLINED_SYNC_COMPLETE.md export-ignore
+VAULT_SYNC_REFACTOR.md export-ignore
+VAULT_UPDATE_AUDIT.md export-ignore
+DEBUG_CROSS_BROWSER_SYNC.md export-ignore
+TEST-AUTH-EXAMPLE-OUTPUT.md export-ignore
+TEST-AUTH-README.md export-ignore
+OPEN_SOURCE_CHECKLIST.md export-ignore
+README-PRIVATE.md export-ignore
+
+# ============================================================================
+# DEVELOPMENT ARTIFACTS - Keep private
+# ============================================================================
+debug-*.html export-ignore
+debug-*.js export-ignore
+test-auth-cli.js export-ignore
+test-vault.js export-ignore
+test-schnorr.html export-ignore
+CLEAR_DATA_SCRIPT.js export-ignore
+firebase-debug.log export-ignore
+.turbo/ export-ignore
+
+# ============================================================================
+# BUILD ARTIFACTS - Generated, don't need in source
+# ============================================================================
+dist/ export-ignore
+dist-lib/ export-ignore
+build/ export-ignore
+coverage/ export-ignore
+test-results/ export-ignore
+
+# ============================================================================
+# IDE & OS - Don't export
+# ============================================================================
+.DS_Store export-ignore
+.vscode/ export-ignore
+.idea/ export-ignore
+*.swp export-ignore
+*.swo export-ignore
+
+# ============================================================================
+# Git & CI - Don't need in exports
+# ============================================================================
+.git/ export-ignore
+.github/ export-ignore
+.gitlab-ci.yml export-ignore
+
+# ============================================================================
+# Files TO INCLUDE (documentation)
+# ============================================================================
+# README.md - will be replaced with public version
+# LICENSE - MIT
+# CONTRIBUTING.md - for contributors
+# docs/ - all public documentation
+# apps/embassy/ - provider SDK
+# apps/vault/ - vault application
+# packages/ - all shared packages

@@ -1,4 +1,4 @@
-import { Component, Show, createSignal, onMount } from 'solid-js';
+import { Component, Show, createSignal, onMount, createEffect } from 'solid-js';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 import { nip19 } from 'nostr-tools';
 
@@ -9,6 +9,8 @@ import { IdentityManager } from './IdentityManager';
 import { PinManager } from './PinManager';
 import GlobalSettings from './GlobalSettings';
 import { getActiveIdentity } from '../utils/activeIdentityManager';
+import { nostrProfileService } from '../services/nostrProfileService';
+import { profileCacheService } from '../services/profileCacheService';
 
 export const Dashboard: Component = () => {
     const { user, logout, isVaultLocked, lockVault, unlockVault } = useAuth();
@@ -26,6 +28,71 @@ export const Dashboard: Component = () => {
 
     // Use the vault data hook
     const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
+
+    // Auto-fetch Nostr profiles for identities without profile data
+    createEffect(() => {
+        const vault = vaultData();
+        const username = user()?.profile?.username;
+
+        if (!vault?.identities || !username) return;
+
+        // Find identities that don't have profile pictures
+        const identitiesNeedingProfiles = vault.identities.filter((id: any) => !id.profile?.picture);
+
+        if (identitiesNeedingProfiles.length === 0) return;
+
+        console.log('[Dashboard] Auto-fetching Nostr profiles for', identitiesNeedingProfiles.length, 'identities');
+
+        // Fetch profiles in the background (don't await, non-blocking)
+        (async () => {
+            try {
+                const publicKeys = identitiesNeedingProfiles.map((id: any) => id.publicKey);
+                const profiles = await nostrProfileService.fetchProfiles(publicKeys);
+
+                if (profiles.size === 0) return;
+
+                // Update vault with fetched profiles
+                const updatedIdentities = vault.identities.map((id: any) => {
+                    const fetchedProfile = profiles.get(id.publicKey);
+                    if (fetchedProfile) {
+                        // Update cache
+                        profileCacheService.updateProfile(username, id.publicKey, {
+                            name: fetchedProfile.name || fetchedProfile.display_name,
+                            picture: fetchedProfile.picture,
+                            about: fetchedProfile.about,
+                            nip05: fetchedProfile.nip05,
+                            website: fetchedProfile.website,
+                            lud16: fetchedProfile.lud16
+                        });
+
+                        return {
+                            ...id,
+                            profile: {
+                                ...(id.profile || {}),
+                                name: fetchedProfile.name || fetchedProfile.display_name || id.profile?.name,
+                                picture: fetchedProfile.picture || id.profile?.picture,
+                                about: fetchedProfile.about || id.profile?.about,
+                                nip05: fetchedProfile.nip05 || id.profile?.nip05,
+                                website: fetchedProfile.website || id.profile?.website,
+                                lud16: fetchedProfile.lud16 || id.profile?.lud16
+                            }
+                        };
+                    }
+                    return id;
+                });
+
+                // Save updated profiles to vault
+                await updateVaultData({
+                    ...vault,
+                    identities: updatedIdentities
+                });
+
+                console.log('[Dashboard] Successfully updated', profiles.size, 'profiles from Nostr');
+            } catch (error) {
+                console.error('[Dashboard] Failed to auto-fetch Nostr profiles:', error);
+            }
+        })();
+    });
 
     // Listen for vault data refresh events
     onMount(() => {
@@ -94,6 +161,38 @@ export const Dashboard: Component = () => {
         } catch (error) {
             console.error('❌ Failed to send HIDE_VAULT message:', error);
         }
+    };
+
+    // Get active identity index
+    const getActiveIdentityIndex = () => {
+        const vault = vaultData();
+        if (!vault?.identities) return 0;
+
+        const appOrigin = params.app ? (() => {
+            try {
+                const domain = desanitizeDomain(params.app);
+                if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
+                    return `http://${domain}`;
+                }
+                return `https://${domain}`;
+            } catch {
+                return params.app.startsWith('http') ? params.app : `https://${params.app}`;
+            }
+        })() : null;
+
+        const activeIndex = appOrigin
+            ? (getActiveIdentity(user()?.profile.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
+            : 0;
+
+        console.log('[Dashboard] Active identity check:', {
+            appOrigin,
+            'params.app': params.app,
+            fromLocalStorage: getActiveIdentity(user()?.profile.username || '', appOrigin || ''),
+            fromVault: vault.activeIdentityByApp?.[params.app!],
+            activeIndex
+        });
+
+        return activeIndex;
     };
 
     return (
@@ -291,18 +390,28 @@ export const Dashboard: Component = () => {
                                                     <div class="flex items-center gap-3 px-4 pt-3 pb-2">
                                                         {/* Column 1: Profile photo only */}
                                                         <div class="flex flex-col items-center justify-center shrink-0 border-r border-gray-300 dark:border-gray-700 pr-3">
-                                                            <div class="w-20 h-20 bg-gray-900 dark:bg-gray-700 rounded-full border-2 border-gray-900 dark:border-gray-600 flex items-center justify-center shadow-sm">
-                                                                <span class="text-white dark:text-gray-100 text-3xl font-bold">
-                                                                    {identityInitials}
-                                                                </span>
-                                                            </div>
+                                                            <Show when={activeIdentity.profile?.picture} fallback={
+                                                                <div class="w-20 h-20 bg-gray-900 dark:bg-gray-700 rounded-full border-2 border-gray-900 dark:border-gray-600 flex items-center justify-center shadow-sm">
+                                                                    <span class="text-white dark:text-gray-100 text-3xl font-bold">
+                                                                        {identityInitials}
+                                                                    </span>
+                                                                </div>
+                                                            }>
+                                                                <img
+                                                                    src={activeIdentity.profile!.picture}
+                                                                    alt={activeIdentity.nickname || 'Profile'}
+                                                                    class="w-20 h-20 rounded-full object-cover border-2 border-gray-900 dark:border-gray-600 shadow-sm"
+                                                                />
+                                                            </Show>
                                                         </div>
 
                                                         {/* Column 2: Name and ID Details */}
                                                         <div class="flex-1 flex flex-col gap-2">
                                                             {/* Name section */}
                                                             <div>
-                                                                <h1 class="text-base font-bold tracking-tight text-gray-900 dark:text-white break-words">{activeIdentity.nickname || 'Personal'}</h1>
+                                                                <h1 class="text-base font-bold tracking-tight text-gray-900 dark:text-white break-words">
+                                                                    {activeIdentity.profile?.name || activeIdentity.nickname || 'Personal'}
+                                                                </h1>
                                                                 <div class="text-xs text-gray-600 dark:text-gray-400">
                                                                     {user()?.profile.username}
                                                                 </div>
@@ -374,7 +483,7 @@ export const Dashboard: Component = () => {
                     </div>
 
                     {/* Identities Section Header */}
-                    <div class="px-4 pt-3 pb-0 border-t border-gray-200 dark:border-gray-800">
+                    <div class="px-4 pt-3 pb-3 border-t border-b border-gray-200 dark:border-gray-800">
                         <div class="flex justify-between items-center mb-3">
                             <h4 class="text-gray-500 dark:text-gray-400 text-sm font-bold">Identities</h4>
                             <div class="flex gap-2">
@@ -410,14 +519,14 @@ export const Dashboard: Component = () => {
                                 placeholder="Search identities..."
                                 value={searchQuery()}
                                 onInput={(e) => setSearchQuery(e.currentTarget.value)}
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                class="w-full px-3 py-2 mb-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                             />
                         </Show>
                     </div>
                 </header>
 
-                {/* Main Content - Scrollable on mobile */}
-                <main class="flex-1 overflow-y-auto md:overflow-visible px-0 py-6">
+                {/* Main Content - Scrollable */}
+                <main class="flex-1 overflow-y-auto px-0 min-h-0">
                     {/* Identity Manager */}
                     <IdentityManager
                         appId={params.app}
@@ -449,16 +558,14 @@ export const Dashboard: Component = () => {
             />
 
             {/* Global Settings Modal */}
-            <Show when={showGlobalSettings()}>
-                <GlobalSettings
-                    username={user()?.profile.username || ''}
-                    identityCount={vaultData()?.identities?.filter((id: any) => !id.archived).length || 0}
-                    isOpen={showGlobalSettings()}
-                    onClose={() => setShowGlobalSettings(false)}
-                    vaultData={vaultData()}
-                    onUpdateVaultData={updateVaultData}
-                />
-            </Show>
+            <GlobalSettings
+                username={user()?.profile.username || ''}
+                identityCount={vaultData()?.identities?.filter((id: any) => !id.archived).length || 0}
+                isOpen={showGlobalSettings()}
+                onClose={() => setShowGlobalSettings(false)}
+                vaultData={vaultData()}
+                onUpdateVaultData={updateVaultData}
+            />
         </div>
     );
 };

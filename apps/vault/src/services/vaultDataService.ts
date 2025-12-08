@@ -2,6 +2,7 @@ import { getCryptoWorker } from './cryptoWorkerSingleton';
 import type { VaultData } from '../workers/db';
 import type { Identity } from '@nostrpass/types';
 import { SimplePool } from 'nostr-tools';
+import { profileCacheService } from './profileCacheService';
 // NDK removed: worker handles realtime subscriptions via nostr-tools
 
 export interface VaultDataOptions {
@@ -80,17 +81,22 @@ export class VaultDataService {
             console.log('[VaultDataService] Migrating activeIdentityByApp from index to publicKey');
             vaultData.activeIdentityByApp = migratedActiveIdentityByApp;
 
-            // Persist the migration
+            // Persist the migration - pass full vaultData, not partial updates
             await cryptoWorker.updateVaultData({
               username,
-              updates: { activeIdentityByApp: migratedActiveIdentityByApp },
-              options: { updateTimestamp: true }
+              vaultData: { ...vaultData, activeIdentityByApp: migratedActiveIdentityByApp },
+              options: { updateTimestamp: true, syncToNostr: true }
             });
           }
         }
 
         // Cache the result
         this.cache.set(username, { data: vaultData, timestamp: Date.now() });
+
+        // Cache profiles for fast UI rendering
+        if (vaultData.identities) {
+          profileCacheService.cacheProfiles(username, vaultData.identities);
+        }
       }
 
       return vaultData;
@@ -159,6 +165,11 @@ export class VaultDataService {
 
       // Update cache
       this.cache.set(username, { data: updatedData, timestamp: Date.now() });
+
+      // Cache profiles for fast UI rendering
+      if (updatedData.identities) {
+        profileCacheService.cacheProfiles(username, updatedData.identities);
+      }
 
       // STREAMLINED: Sync happens automatically in worker via updateVaultData
       // No need to call syncToNostr here - it's handled by the worker

@@ -1,4 +1,5 @@
 import { Component, Show, createSignal, For, createMemo, createEffect } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 import { nip19 } from 'nostr-tools';
 import { PermissionsSection } from './PermissionsSection';
@@ -23,6 +24,7 @@ interface IdentityManagerProps {
 }
 
 export const IdentityManager: Component<IdentityManagerProps> = (props) => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = createSignal('');
   const [showSearch, setShowSearch] = createSignal(false);
   const [showAddIdentityModal, setShowAddIdentityModal] = createSignal(false);
@@ -543,6 +545,16 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       console.log('💾 [SetActive] Updating vault data with:', updatedActive);
       // Save vault data - auto-syncs to Nostr in background by default
       await props.onUpdateVaultData({ activeIdentityByApp: updatedActive });
+
+      // Notify parent window (embassy) that active identity changed
+      window.dispatchEvent(new CustomEvent('active-identity-changed', {
+        detail: {
+          appOrigin,
+          identityIndex,
+          publicKey: currentVault.identities[identityIndex]?.publicKey
+        }
+      }));
+
       console.log('✅ [SetActive] Active identity updated successfully');
     } catch (error) {
       console.error('❌ [SetActive] Failed to set active identity for app:', error);
@@ -916,15 +928,35 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
             >
-              {/* Left: Identity name with key icon and status */}
+              {/* Left: Identity name with key icon, profile picture and status */}
               <div class="flex flex-col gap-1.5 min-w-0 flex-1">
                 <div class="flex items-center gap-2">
+                  {/* Profile Picture or Initials */}
+                  <Show when={identity.profile?.picture} fallback={
+                    <div class="w-8 h-8 bg-gray-900 dark:bg-gray-700 rounded-full flex items-center justify-center shrink-0">
+                      <span class="text-white dark:text-gray-100 text-xs font-bold">
+                        {(() => {
+                          const name = identity.profile?.name || identity.nickname || 'ID';
+                          return name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase();
+                        })()}
+                      </span>
+                    </div>
+                  }>
+                    <img
+                      src={identity.profile!.picture}
+                      alt={identity.profile?.name || identity.nickname}
+                      class="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-300 dark:border-gray-600"
+                    />
+                  </Show>
+
                   <Show when={identity.isImported}>
                     <svg class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                     </svg>
                   </Show>
-                  <span class="font-medium text-gray-900 dark:text-gray-100 text-base truncate">{identity.nickname}</span>
+                  <span class="font-medium text-gray-900 dark:text-gray-100 text-base truncate">
+                    {identity.profile?.name || identity.nickname}
+                  </span>
                 </div>
                 <Show when={identity.hasAppPermissions}>
                   <span class="text-xs text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900 px-2 py-0.5 rounded self-start">
@@ -947,6 +979,22 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
               {/* Right: Actions */}
               <div class="flex items-center gap-2 shrink-0">
+                {/* Edit Profile button */}
+                <Show when={!props.isVaultLocked}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/${props.appId}/profile/${identity.publicKey}/edit`);
+                    }}
+                    class="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                    title="Edit Profile"
+                  >
+                    <svg class="w-5 h-5 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                </Show>
+
                 {/* Settings button */}
                 <Show when={!props.isVaultLocked}>
                   <button
@@ -960,22 +1008,6 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                   >
                     <svg class="w-5 h-5 text-gray-600 dark:text-gray-400" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-                    </svg>
-                  </button>
-                </Show>
-
-                {/* Archive button */}
-                <Show when={!props.isVaultLocked}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      confirmArchiveIdentity(identity.index);
-                    }}
-                    class="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                    title="Archive"
-                  >
-                    <svg class="w-5 h-5 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
                     </svg>
                   </button>
                 </Show>
@@ -1254,7 +1286,7 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
           />
 
           {/* Side Panel */}
-          <div class="fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
+          <div class={`fixed right-0 top-0 h-full w-full max-w-md bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto ${showSettingsPanel() ? 'translate-x-0' : 'translate-x-full'}`}>
             {/* Panel Header */}
             <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
               <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Identity Settings</h2>
@@ -1317,9 +1349,20 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
                           </div>
                         </div>
                       </div>
+
+                      {/* Edit Profile Button */}
+                      <button
+                        onClick={() => {
+                          navigate(`/${props.appId}/profile/${identity().publicKey}/edit`);
+                        }}
+                        class="w-full mt-3 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center justify-center gap-2"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Edit Nostr Profile
+                      </button>
                     </div>
-
-
 
                     {/* App Permissions Section or Connect Prompt */}
                     <Show when={identity().hasAppPermissions} fallback={

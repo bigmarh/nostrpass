@@ -191,7 +191,8 @@ export class NostrPassButton {
                 publicKey: newActiveIdentity.publicKey,
                 nickname: newActiveIdentity.nickname,
                 authorized: newActiveIdentity.isAuthorized,
-                npub: newActiveIdentity.npub
+                npub: newActiveIdentity.npub,
+                avatar: newActiveIdentity.avatar
               };
 
               // Save updated session
@@ -413,6 +414,13 @@ export class NostrPassButton {
 
       [data-theme="dark"] .nostrpass-user-btn-warning .nostrpass-user-btn-text {
         color: #fbbf24 !important;
+      }
+
+      .nostrpass-avatar-wrapper {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
       }
 
       .nostrpass-user-avatar {
@@ -774,9 +782,18 @@ export class NostrPassButton {
         flex-shrink: 0;
       }
 
+      img.nostrpass-identity-avatar {
+        object-fit: cover;
+        background: transparent;
+      }
+
       [data-theme="dark"] .nostrpass-identity-avatar {
         background: #fff;
         color: #000;
+      }
+
+      [data-theme="dark"] img.nostrpass-identity-avatar {
+        background: transparent;
       }
 
       .nostrpass-identity-info {
@@ -893,6 +910,40 @@ export class NostrPassButton {
       @keyframes nostrpass-spin {
         to { transform: rotate(360deg); }
       }
+
+      /* Avatar loading spinner overlay */
+      .nostrpass-avatar-loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        pointer-events: none;
+      }
+
+      [data-theme="dark"] .nostrpass-avatar-loading-overlay {
+        background: rgba(255, 255, 255, 0.5);
+      }
+
+      .nostrpass-avatar-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: nostrpass-spin 0.6s linear infinite;
+      }
+
+      [data-theme="dark"] .nostrpass-avatar-spinner {
+        border-color: #000;
+        border-top-color: transparent;
+      }
     `;
     
     document.head.appendChild(style);
@@ -948,6 +999,15 @@ export class NostrPassButton {
       allIdentities = response?.identities || [];
       this.allIdentities = allIdentities; // Store for later use
       console.log('[NostrPassButton] getAllIdentities response:', { response, allIdentities });
+
+      // Update current user's avatar from fresh identity data
+      const currentIdentity = allIdentities.find((id: any) => id.index === user.identityIndex);
+      if (currentIdentity && currentIdentity.avatar !== user.avatar) {
+        console.log('[NostrPassButton] Updating avatar:', { old: user.avatar, new: currentIdentity.avatar });
+        user.avatar = currentIdentity.avatar;
+        this.currentUser!.avatar = currentIdentity.avatar;
+        this.saveSession(this.currentUser!);
+      }
     } catch (error) {
       console.warn('Failed to fetch all identities:', error);
     }
@@ -978,9 +1038,10 @@ export class NostrPassButton {
               const idName = rawIdName.charAt(0).toUpperCase() + rawIdName.slice(1);
               return `
                 <button class="nostrpass-dropdown-item nostrpass-identity-item ${isCurrentIdentity ? 'nostrpass-identity-active' : ''}" data-action="switch-identity" data-identity-index="${identity.index}" data-identity-name="${idName.toLowerCase()}" data-identity-npub="${identity.npub || ''}">
-                  <div class="nostrpass-identity-avatar">
-                    ${idInitials}
-                  </div>
+                  ${identity.avatar
+                    ? `<img src="${identity.avatar}" alt="${idName}" class="nostrpass-identity-avatar" style="object-fit: cover;" />`
+                    : `<div class="nostrpass-identity-avatar">${idInitials}</div>`
+                  }
                   <div class="nostrpass-identity-info">
                     <div class="nostrpass-identity-name">
                       ${idName}
@@ -999,10 +1060,12 @@ export class NostrPassButton {
     this.container.innerHTML = `
       <div class="nostrpass-user-menu">
         <button class="nostrpass-btn-base nostrpass-user-btn ${!hasAuthorizedIdentity ? 'nostrpass-user-btn-warning' : ''}" data-action="toggle-menu">
-          ${user.avatar
-            ? `<img src="${user.avatar}" alt="${displayName}" class="nostrpass-user-avatar" />`
-            : `<div class="nostrpass-user-initials">${initials}</div>`
-          }
+          <div class="nostrpass-avatar-wrapper">
+            ${user.avatar
+              ? `<img src="${user.avatar}" alt="${displayName}" class="nostrpass-user-avatar" />`
+              : `<div class="nostrpass-user-initials">${initials}</div>`
+            }
+          </div>
           <span class="nostrpass-user-btn-text">${hasAuthorizedIdentity ? displayName : 'Not authorized'}</span>
         </button>
         <div class="nostrpass-dropdown" data-dropdown>
@@ -1147,6 +1210,10 @@ export class NostrPassButton {
   }
 
   private async handleSwitchIdentity(identityIndex: number) {
+    // Show loading spinner on avatar BEFORE closing dropdown
+    this.showAvatarLoading();
+
+    // Close dropdown after showing spinner
     this.closeDropdown();
 
     // Check if this identity is authorized
@@ -1158,6 +1225,7 @@ export class NostrPassButton {
     if (!isAuthorized) {
       // Identity not authorized - open vault to authorize
       console.log('[NostrPassButton] Identity not authorized, opening account picker for authorization');
+      this.hideAvatarLoading();
       try {
         await this.embassy.manageAccount({
           forcePrompt: true,
@@ -1180,15 +1248,24 @@ export class NostrPassButton {
           publicKey: result.identity.publicKey,
           npub: result.identity.npub,
           nickname: result.identity.nickname,
-          authorized: result.identity.authorized || false
+          authorized: result.identity.authorized || false,
+          avatar: result.identity.avatar
         };
         this.saveSession(this.currentUser);
+
+        // Small delay to show spinner before re-rendering
+        await new Promise(resolve => setTimeout(resolve, 150));
+
+        // Re-render will remove the loading spinner automatically
         await this.render();
 
         // Call onLogin callback to notify app of identity change
         if (this.config.onLogin) {
           this.config.onLogin(this.currentUser);
         }
+      } else {
+        // Failed to switch - remove loading spinner
+        this.hideAvatarLoading();
       }
     } catch (error: any) {
       console.error('Failed to switch identity:', error);
@@ -1207,23 +1284,62 @@ export class NostrPassButton {
               publicKey: result.identity.publicKey,
               npub: result.identity.npub,
               nickname: result.identity.nickname,
-              authorized: result.identity.authorized || false
+              authorized: result.identity.authorized || false,
+              avatar: result.identity.avatar
             };
             this.saveSession(this.currentUser);
+
+            // Re-render will remove the loading spinner automatically
             await this.render();
 
             // Call onLogin callback to notify app of identity change
             if (this.config.onLogin) {
               this.config.onLogin(this.currentUser);
             }
+          } else {
+            this.hideAvatarLoading();
           }
         } catch (manageError) {
           console.error('Failed to authorize identity:', manageError);
           this.config.onError?.(manageError);
+          this.hideAvatarLoading();
         }
       } else {
         this.config.onError?.(error);
+        this.hideAvatarLoading();
       }
+    }
+  }
+
+  private showAvatarLoading() {
+    const avatarWrapper = this.container.querySelector('.nostrpass-avatar-wrapper') as HTMLElement;
+    if (!avatarWrapper) {
+      console.warn('[NostrPassButton] showAvatarLoading: avatar wrapper not found');
+      return;
+    }
+
+    // Check if overlay already exists
+    if (avatarWrapper.querySelector('.nostrpass-avatar-loading-overlay')) {
+      return;
+    }
+
+    // Add loading overlay to avatar wrapper
+    const overlay = document.createElement('div');
+    overlay.className = 'nostrpass-avatar-loading-overlay';
+    overlay.innerHTML = '<div class="nostrpass-avatar-spinner"></div>';
+    avatarWrapper.appendChild(overlay);
+    console.log('[NostrPassButton] Loading spinner added');
+  }
+
+  private hideAvatarLoading() {
+    const userBtn = this.container.querySelector('.nostrpass-user-btn') as HTMLElement;
+    if (!userBtn) return;
+
+    // Remove loading overlay
+    const overlay = userBtn.querySelector('.nostrpass-avatar-loading-overlay');
+    if (overlay) {
+      overlay.remove();
+      console.log('[NostrPassButton] Loading spinner removed');
     }
   }
 
@@ -1261,7 +1377,8 @@ export class NostrPassButton {
         publicKey: result.identity?.publicKey || '',
         npub: result.identity?.npub,
         nickname: result.identity?.nickname,
-        authorized: result.identity?.authorized || false
+        authorized: result.identity?.authorized || false,
+        avatar: result.identity?.avatar
       };
 
       // Store session
@@ -1290,7 +1407,8 @@ export class NostrPassButton {
                 publicKey: authStatus.user.publicKey || '',
                 npub: authStatus.user.npub,
                 nickname: authStatus.user.nickname,
-                authorized: authStatus.user.authorized || false
+                authorized: authStatus.user.authorized || false,
+                avatar: authStatus.user.avatar
               };
 
               this.saveSession(this.currentUser);
@@ -1449,7 +1567,8 @@ export class NostrPassButton {
                 publicKey: selectedIdentity.publicKey,
                 npub: selectedIdentity.npub,
                 nickname: selectedIdentity.nickname,
-                authorized: selectedIdentity.isAuthorized || false
+                authorized: selectedIdentity.isAuthorized || false,
+                avatar: selectedIdentity.avatar
               };
               this.saveSession(this.currentUser);
               await this.render();
@@ -1689,7 +1808,8 @@ export class NostrPassButton {
               publicKey: authStatus.user.publicKey || '',
               npub: authStatus.user.npub,
               nickname: authStatus.user.nickname,
-              authorized: authStatus.user.authorized || false
+              authorized: authStatus.user.authorized || false,
+              avatar: authStatus.user.avatar
             };
             this.isCheckingAuth = false;
             this.saveSession(this.currentUser);

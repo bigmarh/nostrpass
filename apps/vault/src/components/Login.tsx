@@ -436,16 +436,28 @@ export const Login: Component = () => {
                         </form>
                         
                         <div class="text-center space-y-2">
-                            <button 
+                            <button
                                 onClick={toggleMode}
                                 class="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
                                 type="button"
                             >
                                 {isSignup() ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
                             </button>
-                            
+
+                            <Show when={!isSignup()}>
+                                <div>
+                                    <button
+                                        onClick={() => navigate(`/${params.app}/restore-from-phrase`)}
+                                        class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                                        type="button"
+                                    >
+                                        Restore from recovery phrase
+                                    </button>
+                                </div>
+                            </Show>
+
                             <div>
-                                <button 
+                                <button
                                     onClick={handleHideVault}
                                     class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
                                     type="button"
