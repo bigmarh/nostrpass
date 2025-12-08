@@ -39,8 +39,12 @@ lerna-debug.log*
 .env.local
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 .env.*.local
+
+# Keep example env for open source
+!.env.example
 
 # IDE
 .vscode/*
@@ -86,3 +90,14 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # pnpm
 pnpm-lock.yaml
+
+# Private backup of original README
+README-PRIVATE.md
+
+# Firebase deployment cache
+.firebase/
+
+# Deployment scripts (contain sensitive info)
+# These are excluded via .gitattributes for open source
+# but ignored locally to prevent accidental commits
+firebase-debug.log
