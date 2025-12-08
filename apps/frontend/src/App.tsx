@@ -62,6 +62,7 @@ function App() {
                     style: 'icon-only',
                     expandOnHover: true,
                     theme: 'light',
+                    signInText: 'Sign into Demo App',
                     onLogin: (user: any) => {
                       console.log('[Demo] User logged in:', user)
                       console.log('[Demo] Setting pubkey to:', user.publicKey)

@@ -969,7 +969,7 @@ export class NostrPassButton {
     this.container.innerHTML = `
       <button class="nostrpass-btn-base nostrpass-signin-btn" data-action="signin">
         <div class="nostrpass-signin-logo">🥚</div>
-        <span>NostrPass</span>
+        <span>${this.config.signInText}</span>
       </button>
     `;
 
