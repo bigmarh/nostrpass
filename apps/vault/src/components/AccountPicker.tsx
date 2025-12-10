@@ -135,8 +135,8 @@ export const AccountPicker: Component<AccountPickerProps> = (props) => {
                           {getDisplayName(item.identity, item.index)}
                         </div>
                         {item.isAuthorized && (
-                          <span class="text-xs px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full">
-                            ✓ Connected
+                          <span class="text-green-600 dark:text-green-400" title="Connected">
+                            ✓
                           </span>
                         )}
                       </div>
