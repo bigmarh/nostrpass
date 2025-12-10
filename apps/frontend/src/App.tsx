@@ -640,11 +640,19 @@ function App() {
             </div>
             <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
               <code className="text-sm font-mono text-gray-800">nip04.encrypt()</code>
-              <p className="text-gray-500 text-xs mt-1">Encrypt direct messages</p>
+              <p className="text-gray-500 text-xs mt-1">Encrypt messages (NIP-04)</p>
             </div>
             <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
               <code className="text-sm font-mono text-gray-800">nip04.decrypt()</code>
-              <p className="text-gray-500 text-xs mt-1">Decrypt direct messages</p>
+              <p className="text-gray-500 text-xs mt-1">Decrypt messages (NIP-04)</p>
+            </div>
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">nip44.encrypt()</code>
+              <p className="text-gray-500 text-xs mt-1">Encrypt messages (NIP-44)</p>
+            </div>
+            <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+              <code className="text-sm font-mono text-gray-800">nip44.decrypt()</code>
+              <p className="text-gray-500 text-xs mt-1">Decrypt messages (NIP-44)</p>
             </div>
             <div className="border-2 border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
               <code className="text-sm font-mono text-gray-800">getRelays()</code>
@@ -664,6 +672,63 @@ function App() {
             >
               View Full Documentation
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Resources Section */}
+      <div className="bg-white py-16 px-6 border-t border-gray-200">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 tracking-tight">Learn More</h2>
+          <p className="text-gray-600 text-center mb-12 max-w-2xl mx-auto">
+            Deep dives into NostrPass architecture, security, and the future of decentralized identity
+          </p>
+
+          <div className="grid md:grid-cols-1 gap-6">
+            {/* Featured Article */}
+            <a
+              href="https://primal.net/bigmarh/nostrpass-decentralized-identity"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-black hover:shadow-lg transition-all group"
+            >
+              <div className="p-6">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 bg-gray-900 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-xl mb-2 group-hover:text-black transition-colors">
+                      The Identity Problem Nostr Needed to Solve
+                    </h3>
+                    <p className="text-gray-600 text-sm mb-3">
+                      How a privacy-first vault is making self-sovereign identity actually usable on Nostr—without compromising security.
+                    </p>
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        15 min read
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        </svg>
+                        Security, Architecture, Technical
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <svg className="w-6 h-6 text-gray-400 group-hover:text-black group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </a>
           </div>
         </div>
       </div>

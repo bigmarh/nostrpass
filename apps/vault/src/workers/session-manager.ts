@@ -19,6 +19,7 @@
 
 import { NostrCrypto } from './crypto.noble';
 import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tools/nip04';
+import { encrypt as nip44EncryptJS, decrypt as nip44DecryptJS } from 'nostr-tools/nip44';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
 import { PERMISSION_KINDS, type PermissionLevel, type VaultObj } from '@nostrpass/types';
@@ -1044,6 +1045,106 @@ export const sessionManager = {
   },
 
   /**
+   * Encrypt with session key for a specific identity (NIP-44)
+   * Checks permissions before encrypting
+   * NIP-44 is the improved encryption standard, replacing NIP-04
+   */
+  nip44EncryptWithSession: async (params: {
+    username: string;
+    plaintext: string;
+    recipientPubkey: string;
+    identityIndex: number;
+    origin?: string
+  }): Promise<string> => {
+    // Use SessionStateManager instead of legacy activeSessions
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
+
+    if (!session || !session.isUnlocked) {
+      throw new Error('Session expired or locked');
+    }
+
+    // CHECK PERMISSIONS BEFORE ENCRYPTING
+    if (params.origin) {
+      const permCheck = await sessionManager.checkPermission({
+        username: params.username,
+        origin: params.origin,
+        action: 'nip44',
+        identityIndex: params.identityIndex
+      });
+      if (permCheck.level === 'DENY') {
+        throw new Error('Permission explicitly denied for NIP-44 encryption');
+      }
+      if (!permCheck.allowed) {
+        throw new Error('Permission not granted for NIP-44 encryption');
+      }
+    }
+
+    let privateKey: string | undefined = undefined;
+    if (params.identityIndex === 0 && session.privateKey) {
+      privateKey = session.privateKey;
+    } else if (session.xpriv) {
+      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      privateKey = derived.privateKey;
+    }
+    if (!privateKey) throw new Error('No session key available for encryption');
+
+    // Use nostr-tools NIP-44 (spec-compliant)
+    return nip44EncryptJS(privateKey, params.recipientPubkey, params.plaintext);
+  },
+
+  /**
+   * Decrypt with session key for a specific identity (NIP-44)
+   * Checks permissions before decrypting
+   * NIP-44 is the improved encryption standard, replacing NIP-04
+   */
+  nip44DecryptWithSession: async (params: {
+    username: string;
+    ciphertext: string;
+    senderPubkey: string;
+    identityIndex: number;
+    origin?: string
+  }): Promise<string> => {
+    // Use SessionStateManager instead of legacy activeSessions
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
+
+    if (!session || !session.isUnlocked) {
+      throw new Error('Session expired or locked');
+    }
+
+    // CHECK PERMISSIONS BEFORE DECRYPTING
+    if (params.origin) {
+      const permCheck = await sessionManager.checkPermission({
+        username: params.username,
+        origin: params.origin,
+        action: 'nip44',
+        identityIndex: params.identityIndex
+      });
+      if (permCheck.level === 'DENY') {
+        throw new Error('Permission explicitly denied for NIP-44 decryption');
+      }
+      if (!permCheck.allowed) {
+        throw new Error('Permission not granted for NIP-44 decryption');
+      }
+    }
+
+    let privateKey: string | undefined = undefined;
+    if (params.identityIndex === 0 && session.privateKey) {
+      privateKey = session.privateKey;
+    } else if (session.xpriv) {
+      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
+      privateKey = derived.privateKey;
+    }
+    if (!privateKey) throw new Error('No session key available for decryption');
+
+    // Use nostr-tools NIP-44 (spec-compliant)
+    return nip44DecryptJS(privateKey, params.senderPubkey, params.ciphertext);
+  },
+
+  /**
    * Derive identity keypair using xpriv from the current session
    * Requires unlocked session with xpriv
    */
@@ -1826,6 +1927,14 @@ export const sessionManager = {
         level = resolveLevel(
           (appPerms.permissions?.messaging as PermissionLevel | undefined) ??
           (appPerms.nip04 as PermissionLevel | undefined)
+        );
+        break;
+      case 'nip44':
+        // NIP-44 uses same permission as NIP-04 (messaging category)
+        // Check nested permissions.messaging FIRST (more specific), then fall back to root level
+        level = resolveLevel(
+          (appPerms.permissions?.messaging as PermissionLevel | undefined) ??
+          (appPerms.nip44 as PermissionLevel | undefined)
         );
         break;
       case 'getRelays':

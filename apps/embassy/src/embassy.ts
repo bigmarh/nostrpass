@@ -2067,6 +2067,358 @@ class NostrPassEmbassy {
     }
   }
 
+  /**
+   * Encrypt data using NIP-44 (improved encryption standard)
+   * NIP-44 is the recommended encryption method, replacing NIP-04
+   */
+  async nip44Encrypt(pubkey: string, plaintext: string, options?: NostrOperationOptions): Promise<string> {
+    // Ensure iframe and messenger exist
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
+
+      // Preflight: prompt for PIN first if needed
+      let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
+      try {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+          action: 'nip44',
+          identityIndex
+        });
+        const needsPin = pre?.isLocked === true;
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+        } else if (needsPin && !this.config.parentPinOverlay) {
+          console.log('⏳ Vault is locked, showing quick unlock...');
+          unlockPromise = this.waitForUnlock();
+          this.openPage('unlock');
+        } else if (needsPrompt && !this.config.parentPinOverlay) {
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
+
+          const requestId = `${this.config.appDomain}-nip44-encrypt-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'nip44',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            pubkey,
+            plaintext
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
+        }
+      } catch (error: any) {
+        const errorMsg = String(error?.message || error);
+        if (errorMsg.toLowerCase().includes('not authenticated')) {
+          console.log('⚠️ User not authenticated, showing full vault for login');
+          this.show('vault', 'full');
+        }
+      }
+
+      if (unlockPromise) {
+        console.log('⏳ Waiting for vault unlock...');
+        await unlockPromise;
+        console.log('✅ Vault unlocked, continuing operation');
+
+        try {
+          const recheckPreflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+            action: 'nip44',
+            identityIndex
+          });
+          if (recheckPreflight?.needsPrompt === true) {
+            console.log('⏳ Permission required after unlock, showing permission prompt...');
+            permissionPromise = this.waitForPermission();
+
+            const requestId = `${this.config.appDomain}-nip44-encrypt-${Date.now()}`;
+            const queryParams = {
+              appOrigin: this.config.appDomain || window.location.host,
+              appName: this.config.appName || document.title,
+              action: 'nip44',
+              identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+              requestId,
+              pubkey,
+              plaintext
+            };
+
+            this.openPage('permission', { size: 'tall', queryParams });
+          }
+        } catch (error) {
+          console.warn('Failed to recheck permission after unlock:', error);
+        }
+      }
+
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
+      }
+
+      const doEncrypt = async () => {
+        if (this.useTransportForRequest()) {
+          if (this.config.debug) console.log('🔌 Using transport layer for nip44 encrypt');
+          return this.transport!.request('NIP44_ENCRYPT', {
+            plaintext,
+            recipientPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        } else {
+          return this.messenger!.request(Msg.NIP44_ENCRYPT, {
+            plaintext,
+            recipientPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        }
+      };
+
+      try {
+        const ciphertext = await doEncrypt();
+        if (this.config.debug) console.log('NIP-44 encrypted payload received:', ciphertext);
+        this.hide();
+        return ciphertext;
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
+          await this.sleep(150);
+          try {
+            const result = await doEncrypt();
+            this.hide();
+            return result;
+          } catch (e2: any) {
+            const msg2 = String(e2?.message || e2);
+            if (msg2.toLowerCase().includes('rehydrated')) {
+              await this.sleep(200);
+              const result = await doEncrypt();
+              this.hide();
+              return result;
+            }
+            throw e2;
+          }
+        }
+        throw e;
+      }
+    } catch (error) {
+      console.error('Failed to nip44 encrypt:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Decrypt data using NIP-44 (improved encryption standard)
+   * NIP-44 is the recommended encryption method, replacing NIP-04
+   */
+  async nip44Decrypt(pubkey: string, ciphertext: string, options?: NostrOperationOptions): Promise<string> {
+    // Ensure iframe and messenger exist
+    if (!this.iframe || !this.messenger) {
+      await this.createIframe();
+      await this.waitForReady();
+    }
+
+    try {
+      // Get the active identity index for this app if not explicitly provided
+      let identityIndex = options?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        try {
+          const authStatus = await this.getAuthStatus();
+          identityIndex = authStatus?.user?.identityIndex ?? 0;
+        } catch {
+          identityIndex = 0;
+        }
+      }
+
+      // Preflight: prompt for PIN first if needed
+      let unlockPromise: Promise<void> | null = null;
+      let permissionPromise: Promise<void> | null = null;
+      try {
+        const pre = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+          action: 'nip44',
+          identityIndex
+        });
+        const needsPin = pre?.isLocked === true;
+        const needsPrompt = pre?.needsPrompt === true;
+        if (needsPin && this.config.parentPinOverlay) {
+          const ok = await this.requestPinUnlock();
+          if (!ok) throw new Error('User canceled PIN prompt');
+        } else if (needsPin && !this.config.parentPinOverlay) {
+          console.log('⏳ Vault is locked, showing quick unlock...');
+          unlockPromise = this.waitForUnlock();
+          this.openPage('unlock');
+        } else if (needsPrompt && !this.config.parentPinOverlay) {
+          console.log('⏳ Permission required, showing vault and waiting for approval...');
+          permissionPromise = this.waitForPermission();
+
+          const requestId = `${this.config.appDomain}-nip44-decrypt-${Date.now()}`;
+          const queryParams = new URLSearchParams({
+            appOrigin: this.config.appDomain || window.location.host,
+            appName: this.config.appName || document.title,
+            action: 'nip44',
+            identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+            requestId,
+            pubkey,
+            ciphertext
+          });
+
+          await this.messenger!.send('NAVIGATE', {
+            path: `/${this.config.appDomain?.replace(/[:.]/g, '-') || 'vault'}/permission-request?${queryParams.toString()}`
+          });
+
+          if (this.iframe) {
+            this.iframe.classList.remove('nostrpass-iframe-hidden');
+            this.iframe.classList.remove('nostrpass-iframe-compact');
+            this.iframe.classList.remove('nostrpass-iframe-tall');
+            this.iframe.classList.remove('nostrpass-iframe-minimal');
+            this.iframe.classList.add('nostrpass-iframe-visible');
+
+            if (this.backdropEl) {
+              this.backdropEl.classList.add('visible');
+              this.backdropEl.style.background = 'transparent';
+              this.backdropEl.style.backdropFilter = 'none';
+            }
+
+            this.iframe.setAttribute('aria-hidden', 'false');
+            this.iframe.removeAttribute('tabindex');
+            document.body.style.overflow = 'hidden';
+          }
+        }
+      } catch (error: any) {
+        const errorMsg = String(error?.message || error);
+        if (errorMsg.toLowerCase().includes('not authenticated')) {
+          console.log('⚠️ User not authenticated, showing full vault for login');
+          this.show('vault', 'full');
+        }
+      }
+
+      if (unlockPromise) {
+        console.log('⏳ Waiting for vault unlock...');
+        await unlockPromise;
+        console.log('✅ Vault unlocked, continuing operation');
+
+        try {
+          const recheckPreflight = await this.messenger!.request(Msg.CHECK_PERMISSION, {
+            action: 'nip44',
+            identityIndex
+          });
+          if (recheckPreflight?.needsPrompt === true) {
+            console.log('⏳ Permission required after unlock, showing permission prompt...');
+            permissionPromise = this.waitForPermission();
+
+            const requestId = `${this.config.appDomain}-nip44-decrypt-${Date.now()}`;
+            const queryParams = {
+              appOrigin: this.config.appDomain || window.location.host,
+              appName: this.config.appName || document.title,
+              action: 'nip44',
+              identityIndex: (identityIndex !== undefined ? identityIndex : 0).toString(),
+              requestId,
+              pubkey,
+              ciphertext
+            };
+
+            this.openPage('permission', { size: 'tall', queryParams });
+          }
+        } catch (error) {
+          console.warn('Failed to recheck permission after unlock:', error);
+        }
+      }
+
+      if (permissionPromise) {
+        console.log('⏳ Waiting for permission approval...');
+        await permissionPromise;
+        console.log('✅ Permission granted, continuing operation');
+      }
+
+      const doDecrypt = async () => {
+        if (this.useTransportForRequest()) {
+          if (this.config.debug) console.log('🔌 Using transport layer for nip44 decrypt');
+          return this.transport!.request('NIP44_DECRYPT', {
+            ciphertext,
+            senderPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        } else {
+          return this.messenger!.request(Msg.NIP44_DECRYPT, {
+            ciphertext,
+            senderPubkey: pubkey,
+            appName: this.config.appName,
+            appDomain: this.config.appDomain,
+            identityIndex
+          });
+        }
+      };
+
+      try {
+        const plaintext = await doDecrypt();
+        if (this.config.debug) console.log('NIP-44 decrypted payload received:', plaintext);
+        this.hide();
+        return plaintext;
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (msg.toLowerCase().includes('locked') || msg.toLowerCase().includes('unlock') || msg.toLowerCase().includes('rehydrated')) {
+          await this.sleep(150);
+          try {
+            const result = await doDecrypt();
+            this.hide();
+            return result;
+          } catch (e2: any) {
+            const msg2 = String(e2?.message || e2);
+            if (msg2.toLowerCase().includes('rehydrated')) {
+              await this.sleep(200);
+              const result = await doDecrypt();
+              this.hide();
+              return result;
+            }
+            throw e2;
+          }
+        }
+        throw e;
+      }
+    } catch (error) {
+      console.error('Failed to nip44 decrypt:', error);
+      throw error;
+    }
+  }
+
   async getAuthStatus(): Promise<any> {
     if (!this.iframe || !this.messenger) {
       await this.createIframe();
