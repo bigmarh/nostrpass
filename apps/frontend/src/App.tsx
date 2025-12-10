@@ -538,15 +538,24 @@ function App() {
                 </div>
                 <button
                   onClick={() => {
-                    const code = `<!-- That's it. Seriously. -->
+                    const code = `<!-- Flexible configuration -->
 <script src="https://cdn.nostrpass.com/embassy.js"></script>
 
 <script>
-  // Get user's public key
-  const pubkey = await window.nostr.getPublicKey();
+  // Configure NostrPass for your app
+  window.nostr = window.initNostrPass({
+    appName: 'My App',
+    permissions: {
+      getPublicKey: 'ALLOW',
+      signEvent: 'ASK_EVERYTIME'
+    },
+    theme: 'auto'
+  });
 
-  // Sign events
+  // Use the standard Nostr API
+  const pubkey = await window.nostr.getPublicKey();
   const signed = await window.nostr.signEvent(event);
+  const encrypted = await window.nostr.nip44Encrypt(pk, msg);
 </script>`;
                     navigator.clipboard.writeText(code);
                     const btn = document.getElementById('copy-btn');
@@ -562,7 +571,7 @@ function App() {
                 </button>
               </div>
               <pre className="text-xs sm:text-sm overflow-x-auto max-w-full">
-                <code className="text-green-400">{`<!-- That's it. Seriously. -->`}</code>
+                <code className="text-green-400">{`<!-- Flexible configuration -->`}</code>
                 {'\n'}
                 <code className="text-blue-300">{`<script `}</code>
                 <code className="text-yellow-300">src</code>
@@ -572,21 +581,62 @@ function App() {
                 {'\n\n'}
                 <code className="text-blue-300">{`<script>`}</code>
                 {'\n'}
-                <code className="text-gray-400">  // Get user's public key</code>
+                <code className="text-gray-400">  // Configure NostrPass for your app</code>
+                {'\n'}
+                <code className="text-yellow-300">  window.nostr </code>
+                <code className="text-white">= </code>
+                <code className="text-yellow-300">window</code>
+                <code className="text-white">.initNostrPass({"{"}</code>
+                {'\n'}
+                <code className="text-white">    </code>
+                <code className="text-cyan-300">appName</code>
+                <code className="text-white">: </code>
+                <code className="text-green-300">'My App'</code>
+                <code className="text-white">,</code>
+                {'\n'}
+                <code className="text-white">    </code>
+                <code className="text-cyan-300">permissions</code>
+                <code className="text-white">: {"{"}</code>
+                {'\n'}
+                <code className="text-white">      </code>
+                <code className="text-cyan-300">getPublicKey</code>
+                <code className="text-white">: </code>
+                <code className="text-green-300">'ALLOW'</code>
+                <code className="text-white">,</code>
+                {'\n'}
+                <code className="text-white">      </code>
+                <code className="text-cyan-300">signEvent</code>
+                <code className="text-white">: </code>
+                <code className="text-green-300">'ASK_EVERYTIME'</code>
+                {'\n'}
+                <code className="text-white">    {"}"},</code>
+                {'\n'}
+                <code className="text-white">    </code>
+                <code className="text-cyan-300">theme</code>
+                <code className="text-white">: </code>
+                <code className="text-green-300">'auto'</code>
+                {'\n'}
+                <code className="text-white">  {"}"});</code>
+                {'\n\n'}
+                <code className="text-gray-400">  // Use the standard Nostr API</code>
                 {'\n'}
                 <code className="text-purple-300">  const </code>
                 <code className="text-white">pubkey = </code>
                 <code className="text-purple-300">await </code>
                 <code className="text-yellow-300">window.nostr</code>
                 <code className="text-white">.getPublicKey();</code>
-                {'\n\n'}
-                <code className="text-gray-400">  // Sign events</code>
                 {'\n'}
                 <code className="text-purple-300">  const </code>
                 <code className="text-white">signed = </code>
                 <code className="text-purple-300">await </code>
                 <code className="text-yellow-300">window.nostr</code>
                 <code className="text-white">.signEvent(event);</code>
+                {'\n'}
+                <code className="text-purple-300">  const </code>
+                <code className="text-white">encrypted = </code>
+                <code className="text-purple-300">await </code>
+                <code className="text-yellow-300">window.nostr</code>
+                <code className="text-white">.nip44Encrypt(pk, msg);</code>
                 {'\n'}
                 <code className="text-blue-300">{`</script>`}</code>
               </pre>
@@ -806,15 +856,85 @@ function App() {
             <h2 className="text-2xl font-bold mb-8">Quick Start</h2>
 
             <div className="mb-8">
-              <h3 className="text-xl font-semibold mb-4">Add NostrPass to your website in 2 lines</h3>
+              <h3 className="text-xl font-semibold mb-4">Option 1: NostrPass Button (Recommended)</h3>
               <p className="text-gray-600 mb-6">
-                Drop in a ready-made login button that handles everything for you.
+                Drop in a ready-made login button that handles everything for you - login state, UI, and session management.
               </p>
             </div>
 
-            <div className="bg-gray-900 text-white p-6 rounded-lg mb-6 overflow-x-auto">
-              <pre className="text-[0.65rem] md:text-[0.77rem]">
-                <code>{`<!-- Add this script and button to your HTML -->
+            <div className="bg-gray-900 text-white rounded-lg overflow-x-auto">
+              <div className="flex items-center justify-between px-6 pt-4 pb-2">
+                <span className="text-gray-400 text-xs">HTML</span>
+                <button
+                  onClick={(e) => {
+                    const code = `<!-- Add the script and create a login button -->
+<script src="https://cdn.nostrpass.com/embassy.js"></script>
+<div id="nostrpass-login"></div>
+<script>
+  window.nostr.createNostrPassButton({
+    onLogin: (user) => console.log('Logged in:', user.publicKey)
+  }).mount('#nostrpass-login');
+</script>`;
+                    navigator.clipboard.writeText(code);
+                    const btn = e.target as HTMLButtonElement;
+                    const original = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => { btn.textContent = original; }, 2000);
+                  }}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="text-[0.65rem] md:text-[0.77rem] px-6 pb-4">
+                <code>{`<!-- Add the script and create a login button -->
+<script src="https://cdn.nostrpass.com/embassy.js"></script>
+<div id="nostrpass-login"></div>
+<script>
+  window.nostr.createNostrPassButton({
+    onLogin: (user) => console.log('Logged in:', user.publicKey)
+  }).mount('#nostrpass-login');
+</script>`}</code>
+              </pre>
+            </div>
+
+            <div className="bg-green-50 border-l-4 border-green-500 p-4 mb-8">
+              <p className="text-sm text-green-900">
+                <strong>Best UX!</strong> The NostrPass button shows login state, handles session restoration,
+                and provides a consistent user experience across all apps.
+              </p>
+            </div>
+
+            <div className="mb-8">
+              <h3 className="text-xl font-semibold mb-4">Option 2: Bring Your Own Button</h3>
+              <p className="text-gray-600 mb-6">
+                Use your own custom button and call the NostrPass API directly.
+              </p>
+            </div>
+
+            <div className="bg-gray-900 text-white rounded-lg overflow-x-auto">
+              <div className="flex items-center justify-between px-6 pt-4 pb-2">
+                <span className="text-gray-400 text-xs">HTML</span>
+                <button
+                  onClick={(e) => {
+                    const code = `<!-- Use your own button -->
+<script src="https://cdn.nostrpass.com/embassy.js"></script>
+<button onclick="window.nostr.getPublicKey().then(pk => console.log('Logged in:', pk))">
+  Login with NostrPass
+</button>`;
+                    navigator.clipboard.writeText(code);
+                    const btn = e.target as HTMLButtonElement;
+                    const original = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => { btn.textContent = original; }, 2000);
+                  }}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="text-[0.65rem] md:text-[0.77rem] px-6 pb-4">
+                <code>{`<!-- Use your own button -->
 <script src="https://cdn.nostrpass.com/embassy.js"></script>
 <button onclick="window.nostr.getPublicKey().then(pk => console.log('Logged in:', pk))">
   Login with NostrPass
@@ -824,9 +944,8 @@ function App() {
 
             <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-8">
               <p className="text-sm text-blue-900">
-                <strong>That's it!</strong> NostrPass handles all the complexity of key management,
-                encryption, and user authentication. Your users get a secure, privacy-first login
-                experience without passwords.
+                <strong>Maximum flexibility.</strong> Use your own UI components and handle authentication
+                your way. NostrPass just provides the <code className="bg-blue-100 px-1 rounded">window.nostr</code> API.
               </p>
             </div>
 
@@ -837,8 +956,46 @@ function App() {
               </p>
             </div>
 
-            <div className="bg-gray-900 text-white p-6 rounded-lg mb-6 overflow-x-auto">
-              <pre className="text-[0.65rem] md:text-[0.77rem]">
+            <div className="bg-gray-900 text-white rounded-lg overflow-x-auto">
+              <div className="flex items-center justify-between px-6 pt-4 pb-2">
+                <span className="text-gray-400 text-xs">JavaScript</span>
+                <button
+                  onClick={(e) => {
+                    const code = `<!-- Add this script to your HTML -->
+<script src="https://cdn.nostrpass.com/embassy.js"></script>
+
+<script>
+  // Initialize NostrPass
+  const nostr = window.nostr;
+
+  // Request user's public key
+  async function login() {
+    try {
+      const pubkey = await nostr.getPublicKey();
+      console.log('User public key:', pubkey);
+
+      // You're authenticated!
+      // Now you can sign events, encrypt messages, etc.
+    } catch (error) {
+      console.error('Authentication failed:', error);
+    }
+  }
+
+  // Call login when user clicks your login button
+  login();
+</script>`;
+                    navigator.clipboard.writeText(code);
+                    const btn = e.target as HTMLButtonElement;
+                    const original = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => { btn.textContent = original; }, 2000);
+                  }}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="text-[0.65rem] md:text-[0.77rem] px-6 pb-4">
                 <code>{`<!-- Add this script to your HTML -->
 <script src="https://cdn.nostrpass.com/embassy.js"></script>
 
@@ -1024,12 +1181,43 @@ function App() {
                 </div>
                 <div className="border-l-4 border-gray-300 pl-4">
                   <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">nostr.nip04.encrypt(pubkey, plaintext)</code>
-                  <p className="text-sm text-gray-600 mt-2">Encrypt a direct message</p>
+                  <p className="text-sm text-gray-600 mt-2">Encrypt a direct message (NIP-04, legacy)</p>
                 </div>
                 <div className="border-l-4 border-gray-300 pl-4">
                   <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">nostr.nip04.decrypt(pubkey, ciphertext)</code>
-                  <p className="text-sm text-gray-600 mt-2">Decrypt a direct message</p>
+                  <p className="text-sm text-gray-600 mt-2">Decrypt a direct message (NIP-04, legacy)</p>
                 </div>
+                <div className="border-l-4 border-blue-500 pl-4">
+                  <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">nostr.nip44Encrypt(pubkey, plaintext)</code>
+                  <p className="text-sm text-gray-600 mt-2"><strong>Encrypt a direct message (NIP-44, recommended)</strong> - Improved encryption standard with audited cryptography</p>
+                </div>
+                <div className="border-l-4 border-blue-500 pl-4">
+                  <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">nostr.nip44Decrypt(pubkey, ciphertext)</code>
+                  <p className="text-sm text-gray-600 mt-2"><strong>Decrypt a direct message (NIP-44, recommended)</strong> - Improved encryption standard with audited cryptography</p>
+                </div>
+              </div>
+
+              <div className="mt-8 bg-gray-900 text-white p-6 rounded-lg overflow-x-auto">
+                <h4 className="text-lg font-semibold mb-4 text-white">Encryption Example (NIP-44)</h4>
+                <pre className="text-[0.65rem] md:text-[0.77rem]">
+                  <code>{`// Get user's public key
+const myPubkey = await nostr.getPublicKey();
+
+// Encrypt a message to another user (NIP-44 recommended)
+const recipientPubkey = 'npub1...'; // recipient's public key
+const message = 'Hello! This is a private message.';
+const encrypted = await nostr.nip44Encrypt(recipientPubkey, message);
+
+// Decrypt a message from another user (NIP-44)
+const senderPubkey = 'npub1...'; // sender's public key
+const decrypted = await nostr.nip44Decrypt(senderPubkey, encrypted);
+
+console.log('Decrypted message:', decrypted);
+
+// Legacy NIP-04 also supported for backward compatibility
+const legacyEncrypted = await nostr.nip04.encrypt(recipientPubkey, message);
+const legacyDecrypted = await nostr.nip04.decrypt(senderPubkey, legacyEncrypted);`}</code>
+                </pre>
               </div>
             </div>
           </div>

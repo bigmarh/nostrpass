@@ -55,7 +55,7 @@ export type NostrVaultData = VaultData;
 import type { LoginObj, VaultObj } from '@nostrpass/types';
 
 /**
- * Save LoginObj to Nostr - PASSWORD ENCRYPTED for security
+ * Save LoginObj to Nostr - PASSWORD ENCRYPTED for security (using NIP-44)
  * LoginObj contains PIN-encrypted storage keypair, so needs password protection
  */
 export async function saveLoginObj(
@@ -70,15 +70,18 @@ export async function saveLoginObj(
   try {
     const loginContent = JSON.stringify(loginObj);
 
-    // CRITICAL: Encrypt LoginObj content with password key
+    // CRITICAL: Encrypt LoginObj content with password key using NIP-44
     // This protects the PIN-encrypted storage keypair from public exposure
-    const { encrypt } = await import('nostr-tools/nip04');
+    const { encrypt, getConversationKey } = await import('nostr-tools/nip44');
     const privateKeyBytes = hexToBytes(randomPrivateKey);
     const derivedPublicKey = nostrGetPublicKey(privateKeyBytes);
     const pubkeyToUse = derivedPublicKey || randomPublicKey;
 
-    const encryptedContent = await encrypt(passwordKey, pubkeyToUse, loginContent);
-    console.log('🔐 [saveLoginObj] LoginObj encrypted with password key');
+    // NIP-44 requires deriving a conversation key first
+    const passwordKeyBytes = hexToBytes(passwordKey);
+    const conversationKey = getConversationKey(passwordKeyBytes, pubkeyToUse);
+    const encryptedContent = encrypt(loginContent, conversationKey);
+    console.log('🔐 [saveLoginObj] LoginObj encrypted with password key (NIP-44)');
 
     // Create login event with random key for privacy
     const namespace = getNamespace();
@@ -89,7 +92,7 @@ export async function saveLoginObj(
         ['d', `${namespace}_login_${hash(username)}_${environment}`],
         ['client', namespace],
         ['subject', 'login-lookup'],
-        ['encryption', 'password-nip04'], // Mark as password-encrypted
+        ['encryption', 'password-nip44'], // Mark as password-encrypted with NIP-44
         ['password-salt', loginObj.passwordSalt], // CRITICAL: Store salt in plaintext for password key derivation
       ],
       content: encryptedContent, // Use encrypted content
@@ -106,7 +109,7 @@ export async function saveLoginObj(
     for (const relay of relays) {
       try {
         await pool.publish([relay], signedEvent);
-        console.log(`✅ Published password-encrypted LoginObj to ${relay}`);
+        console.log(`✅ Published password-encrypted LoginObj (NIP-44) to ${relay}`);
         successfulPublishes.push(relay);
       } catch (error: any) {
         console.error(`❌ Failed to publish LoginObj to ${relay}:`, error.message);
@@ -127,6 +130,7 @@ export async function saveLoginObj(
 /**
  * Get LoginObj from Nostr by username - PASSWORD ENCRYPTED
  * First retrieves passwordSalt from event tags, then decrypts content
+ * Supports both NIP-44 (preferred) and NIP-04 (fallback for legacy data)
  */
 export async function getLoginObj(
   username: string,
@@ -173,15 +177,35 @@ export async function getLoginObj(
     const passwordKey = bytesToHex(derivedKey);
     console.log('🔑 [getLoginObj] Derived password key from password + salt');
 
-    // Decrypt the login object with password key
-    const { decrypt } = await import('nostr-tools/nip04');
+    // Check encryption type from tags
+    const encryptionTag = event.tags.find(t => t[0] === 'encryption');
+    const encryptionType = encryptionTag?.[1] || 'password-nip04'; // Default to nip04 for legacy
+
+    // Try NIP-44 first (for new data), then fall back to NIP-04 (for legacy data)
+    if (encryptionType === 'password-nip44') {
+      try {
+        const { decrypt, getConversationKey } = await import('nostr-tools/nip44');
+        // NIP-44 requires deriving a conversation key first
+        const passwordKeyBytes = hexToBytes(passwordKey);
+        const conversationKey = getConversationKey(passwordKeyBytes, event.pubkey);
+        const decryptedContent = decrypt(event.content, conversationKey);
+        const loginObj = JSON.parse(decryptedContent) as LoginObj;
+        console.log('✅ [getLoginObj] LoginObj decrypted successfully (NIP-44)');
+        return { loginObj, passwordSalt };
+      } catch (nip44Error) {
+        console.warn('⚠️ [getLoginObj] NIP-44 decryption failed, trying NIP-04 fallback...', nip44Error);
+      }
+    }
+
+    // Fallback to NIP-04 for legacy data or if NIP-44 fails
     try {
+      const { decrypt } = await import('nostr-tools/nip04');
       const decryptedContent = await decrypt(passwordKey, event.pubkey, event.content);
       const loginObj = JSON.parse(decryptedContent) as LoginObj;
-      console.log('✅ [getLoginObj] LoginObj decrypted successfully');
+      console.log('✅ [getLoginObj] LoginObj decrypted successfully (NIP-04 legacy)');
       return { loginObj, passwordSalt };
     } catch (decryptError) {
-      console.error('❌ [getLoginObj] Failed to decrypt LoginObj - wrong password?', decryptError);
+      console.error('❌ [getLoginObj] Failed to decrypt LoginObj with both NIP-44 and NIP-04 - wrong password?', decryptError);
       return null;
     }
   } catch (error) {
@@ -191,7 +215,7 @@ export async function getLoginObj(
 }
 
 /**
- * Save VaultObj to Nostr using storage key (STORAGE-KEY-ENCRYPTED via NIP-04)
+ * Save VaultObj to Nostr using storage key (STORAGE-KEY-ENCRYPTED via NIP-44)
  * This implements layered encryption:
  * - LoginObj: password-encrypted (contains PIN-encrypted storage keys)
  * - VaultObj: storage-key-encrypted (contains PIN-encrypted xpriv)
@@ -210,13 +234,15 @@ export async function saveVaultObj(
   try {
     const vaultJson = JSON.stringify(vaultObj);
 
-    // CRITICAL: Encrypt entire VaultObj with STORAGE KEY (NIP-04)
+    // CRITICAL: Encrypt entire VaultObj with STORAGE KEY (NIP-44)
     // This allows realtime updates without password (storage keys already in memory)
-    // Uses NIP-04 encryption: encrypt(storagePrivateKey, storagePublicKey, content)
-    const { encrypt } = await import('nostr-tools/nip04');
-    const encryptedContent = await encrypt(storagePrivateKey, storagePublicKey, vaultJson);
+    // Uses NIP-44 encryption with conversation key
+    const { encrypt, getConversationKey } = await import('nostr-tools/nip44');
+    const storagePrivateKeyBytes = hexToBytes(storagePrivateKey);
+    const conversationKey = getConversationKey(storagePrivateKeyBytes, storagePublicKey);
+    const encryptedContent = encrypt(vaultJson, conversationKey);
 
-    console.log('🔐 [saveVaultObj] VaultObj encrypted with storage key (NIP-04)');
+    console.log('🔐 [saveVaultObj] VaultObj encrypted with storage key (NIP-44)');
 
     const namespace = getNamespace();
     // Create vault event with storage key as author
@@ -227,7 +253,7 @@ export async function saveVaultObj(
         ['d', `${namespace}_vault_${storagePublicKey}_${getEnvironment()}`],
         ['client', namespace],
         ['subject', 'encrypted-vault'],
-        ['encryption', 'nip04-storage'], // Mark as storage-key-encrypted (NIP-04)
+        ['encryption', 'nip44-storage'], // Mark as storage-key-encrypted (NIP-44)
       ],
       content: encryptedContent, // Use storage-key-encrypted content
       pubkey: storagePublicKey, // Storage key as author
@@ -243,7 +269,7 @@ export async function saveVaultObj(
     for (const relay of relays) {
       try {
         await pool.publish([relay], signedEvent);
-        console.log(`✅ Published storage-key-encrypted VaultObj to ${relay}`);
+        console.log(`✅ Published storage-key-encrypted VaultObj (NIP-44) to ${relay}`);
         successfulPublishes.push(relay);
       } catch (error: any) {
         console.error(`❌ Failed to publish VaultObj to ${relay}:`, error.message);
@@ -289,6 +315,7 @@ export async function saveVaultToNostr(
 
 /**
  * Retrieve vault data from Nostr (STORAGE-KEY-ENCRYPTED)
+ * Supports both NIP-44 (preferred) and NIP-04 (fallback for legacy data)
  * @param userPublicKey - User's storage public key
  * @param relays - Relay URLs to query
  * @param storagePrivateKey - Storage private key for decrypting VaultObj
@@ -320,13 +347,33 @@ export async function getVaultFromNostr(
     if (events.length === 0) return null;
     const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
     console.log(`📥 [getVaultFromNostr] Using newest event from ${new Date(sortedEvents[0].created_at * 1000).toISOString()}`);
-    const { decrypt } = await import('nostr-tools/nip04');
+
     for (const event of sortedEvents) {
+      // Check encryption type from tags
+      const encryptionTag = event.tags.find(t => t[0] === 'encryption');
+      const encryptionType = encryptionTag?.[1] || 'nip04-storage'; // Default to nip04 for legacy
+
+      // Try NIP-44 first (for new data)
+      if (encryptionType === 'nip44-storage') {
+        try {
+          const { decrypt, getConversationKey } = await import('nostr-tools/nip44');
+          const storagePrivateKeyBytes = hexToBytes(storagePrivateKey);
+          const conversationKey = getConversationKey(storagePrivateKeyBytes, userPublicKey);
+          const decryptedContent = decrypt(event.content, conversationKey);
+          const vaultData = JSON.parse(decryptedContent) as VaultData;
+          console.log(`✅ [getVaultFromNostr] Successfully decrypted vault (NIP-44) with ${vaultData.identities?.length || 0} identities`);
+          return vaultData;
+        } catch (nip44Error) {
+          console.warn(`⚠️ [getVaultFromNostr] NIP-44 decryption failed, trying NIP-04 fallback...`, nip44Error);
+        }
+      }
+
+      // Fallback to NIP-04 for legacy data or if NIP-44 fails
       try {
-        // Decrypt with storage private key (NIP-04)
+        const { decrypt } = await import('nostr-tools/nip04');
         const decryptedContent = await decrypt(storagePrivateKey, userPublicKey, event.content);
         const vaultData = JSON.parse(decryptedContent) as VaultData;
-        console.log(`✅ [getVaultFromNostr] Successfully decrypted vault with ${vaultData.identities?.length || 0} identities`);
+        console.log(`✅ [getVaultFromNostr] Successfully decrypted vault (NIP-04 legacy) with ${vaultData.identities?.length || 0} identities`);
         return vaultData;
       } catch (err) {
         console.warn(`⚠️ [getVaultFromNostr] Failed to decrypt event from ${new Date(event.created_at * 1000).toISOString()}:`, err);
