@@ -16,6 +16,8 @@ export enum Msg {
   SIGN_DATA = 'SIGN_DATA',
   ENCRYPT = 'ENCRYPT',
   DECRYPT = 'DECRYPT',
+  NIP44_ENCRYPT = 'NIP44_ENCRYPT',
+  NIP44_DECRYPT = 'NIP44_DECRYPT',
   GOT_ERROR = 'GOT_ERROR',
   PROMPT_REQUIRED = 'PROMPT_REQUIRED',
   MANAGE_ACCOUNTS = 'MANAGE_ACCOUNTS',
@@ -56,6 +58,12 @@ export interface EncryptResponse extends ResponseBase<'ENCRYPT_RESPONSE', string
 
 export interface DecryptRequest extends RequestBase<Msg.DECRYPT, { ciphertext: string; senderPubkey: string; appName?: string; appDomain?: string; identityIndex?: number }>{}
 export interface DecryptResponse extends ResponseBase<'DECRYPT_RESPONSE', string>{}
+
+export interface Nip44EncryptRequest extends RequestBase<Msg.NIP44_ENCRYPT, { plaintext: string; recipientPubkey: string; appName?: string; appDomain?: string; identityIndex?: number }>{}
+export interface Nip44EncryptResponse extends ResponseBase<'NIP44_ENCRYPT_RESPONSE', string>{}
+
+export interface Nip44DecryptRequest extends RequestBase<Msg.NIP44_DECRYPT, { ciphertext: string; senderPubkey: string; appName?: string; appDomain?: string; identityIndex?: number }>{}
+export interface Nip44DecryptResponse extends ResponseBase<'NIP44_DECRYPT_RESPONSE', string>{}
 
 export interface GetRelaysRequest extends RequestBase<Msg.GET_RELAYS, { appName?: string; appDomain?: string; identityIndex?: number }>{}
 export interface GetRelaysResponse extends ResponseBase<'GET_RELAYS_RESPONSE', Record<string, { read: boolean; write: boolean }>>{}

@@ -11,6 +11,8 @@ export enum WorkerOp {
   SignData = 'signData',
   Nip04Encrypt = 'nip04Encrypt',
   Nip04Decrypt = 'nip04Decrypt',
+  Nip44Encrypt = 'nip44Encrypt',
+  Nip44Decrypt = 'nip44Decrypt',
   EncryptData = 'encryptData',
   DecryptData = 'decryptData',
   CreateSession = 'createSession',
@@ -25,6 +27,8 @@ export type WorkerRequest =
   | { type: WorkerOp.SignData; data: { privateKey?: string; message: string } }
   | { type: WorkerOp.Nip04Encrypt; data: { privateKey?: string; recipientPubkey: string; plaintext: string } }
   | { type: WorkerOp.Nip04Decrypt; data: { privateKey?: string; senderPubkey: string; ciphertext: string } }
+  | { type: WorkerOp.Nip44Encrypt; data: { privateKey?: string; recipientPubkey: string; plaintext: string } }
+  | { type: WorkerOp.Nip44Decrypt; data: { privateKey?: string; senderPubkey: string; ciphertext: string } }
   | { type: WorkerOp.EncryptData; data: { data: string; password?: string; key?: CryptoKey | ArrayBuffer } }
   | { type: WorkerOp.DecryptData; data: { data: string; password?: string; key?: CryptoKey | ArrayBuffer } }
   | { type: WorkerOp.CreateSession; data: { username: string; privateKey: string; publicKey: string; identityIndex: number; ttlMs?: number } }

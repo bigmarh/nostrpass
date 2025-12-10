@@ -171,6 +171,32 @@ export const cryptoPrimitives = {
   },
 
   /**
+   * Encrypt plaintext using NIP-44
+   * NIP-44 is the improved encryption standard, replacing NIP-04
+   */
+  nip44Encrypt: async (params: EncryptParams): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.nip44Encrypt(
+      params.plaintext,
+      params.privateKey,
+      params.recipientPubkey
+    );
+  },
+
+  /**
+   * Decrypt ciphertext using NIP-44
+   * NIP-44 is the improved encryption standard, replacing NIP-04
+   */
+  nip44Decrypt: async (params: DecryptParams): Promise<string> => {
+    const crypto = await ensureCryptoReady();
+    return crypto.nip44Decrypt(
+      params.ciphertext,
+      params.privateKey,
+      params.senderPubkey
+    );
+  },
+
+  /**
    * Derive a key from password and salt using Argon2id
    */
   deriveKey: async (params: DeriveKeyParams): Promise<DeriveKeyResult> => {

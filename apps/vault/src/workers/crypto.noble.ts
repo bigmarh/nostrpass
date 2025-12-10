@@ -616,6 +616,50 @@ export class NostrCrypto {
   }
 
   /**
+   * NIP-44 encryption
+   * Encrypts plaintext using sender's private key and recipient's public key
+   * NIP-44 is the improved encryption standard, replacing NIP-04
+   */
+  async nip44Encrypt(plaintext: string, senderPrivateKey: string, recipientPublicKey: string): Promise<string> {
+    try {
+      // Import nostr-tools nip44
+      const nip44Module = await import('nostr-tools/nip44');
+
+      // Derive conversation key from sender's private key and recipient's public key
+      const conversationKey = nip44Module.getConversationKey(senderPrivateKey, recipientPublicKey);
+
+      // Encrypt with the conversation key
+      return nip44Module.encrypt(plaintext, conversationKey);
+    } catch (error) {
+      // SECURITY: Don't log error details that could leak key information
+      cryptoLog('NIP-44 encryption failed');
+      throw new Error('NIP-44 encryption failed');
+    }
+  }
+
+  /**
+   * NIP-44 decryption
+   * Decrypts ciphertext using recipient's private key and sender's public key
+   * NIP-44 is the improved encryption standard, replacing NIP-04
+   */
+  async nip44Decrypt(ciphertext: string, recipientPrivateKey: string, senderPublicKey: string): Promise<string> {
+    try {
+      // Import nostr-tools nip44
+      const nip44Module = await import('nostr-tools/nip44');
+
+      // Derive conversation key from recipient's private key and sender's public key
+      const conversationKey = nip44Module.getConversationKey(recipientPrivateKey, senderPublicKey);
+
+      // Decrypt with the conversation key
+      return nip44Module.decrypt(ciphertext, conversationKey);
+    } catch (error) {
+      // SECURITY: Don't log error details that could leak key information
+      cryptoLog('NIP-44 decryption failed');
+      throw new Error('NIP-44 decryption failed');
+    }
+  }
+
+  /**
    * BYOK (Bring Your Own Key) helpers
    */
 

@@ -500,6 +500,174 @@ export const authHandlers: MessageHandler[] = [
   },
 
   {
+    route: Msg.NIP44_ENCRYPT,
+    handler: async (data: { plaintext: string; recipientPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
+      const currentUser = deps.getUser();
+      const cryptoWorker = deps.getCryptoWorker();
+
+      if (!currentUser || !cryptoWorker) {
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
+      }
+
+      // Preflight: ensure keys in session
+      const keyStatus = await cryptoWorker.hasKeysInSession({ username: currentUser.profile.username });
+      if (!keyStatus?.hasPrivateKey && !keyStatus?.hasXpriv) {
+        throw vaultError(ErrorCode.LOCKED, 'Session rehydrated without keys; unlock with PIN');
+      }
+
+      // Check if vault is locked
+      if (deps.isVaultLocked()) {
+        throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
+      }
+
+      // Get origin
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin);
+
+      const identityIndex = data?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
+      }
+
+      // Validate identity authorization
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (identityIndex !== authorizedIndex) {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
+      }
+
+      // Check permissions
+      const permissionResult = await deps.checkPermission('nip44', origin, undefined, identityIndex);
+
+      if (permissionResult.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
+      if (!permissionResult.allowed) {
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: (data as any)?.appName,
+            action: 'nip44',
+            identityIndex,
+            plaintext: data.plaintext,
+            pubkey: data.recipientPubkey
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
+        }
+      }
+
+      // Use app-specific identity for encryption
+      const encrypted = await cryptoWorker.nip44EncryptWithSession({
+        username: currentUser.profile.username,
+        plaintext: data.plaintext,
+        recipientPubkey: data.recipientPubkey,
+        identityIndex
+      });
+
+      showSuccessToast('Message Encrypted', `Message encrypted for ${(data as any)?.appName || 'app'} using NIP-44`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Message Encrypted (NIP-44)',
+        details: `NIP-44 message encrypted for ${(data as any)?.appName || 'app'} (${origin})`,
+        appName: (data as any)?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
+      });
+
+      return encrypted;
+    }
+  },
+
+  {
+    route: Msg.NIP44_DECRYPT,
+    handler: async (data: { ciphertext: string; senderPubkey: string; identityIndex?: number }, context: any, deps: MessageHandlerDependencies) => {
+      const currentUser = deps.getUser();
+      const cryptoWorker = deps.getCryptoWorker();
+
+      if (!currentUser || !cryptoWorker) {
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'User not authenticated or crypto not ready');
+      }
+
+      // Check if vault is locked
+      if (deps.isVaultLocked()) {
+        throw vaultError(ErrorCode.LOCKED, 'Vault is locked. Please unlock with PIN.');
+      }
+
+      // Get origin
+      const rawOrigin = (data as any)?.appDomain || context?.origin || 'unknown';
+      const origin = originToAppKey(rawOrigin);
+
+      const identityIndex = data?.identityIndex;
+      if (identityIndex === undefined || identityIndex === null) {
+        throw vaultError(ErrorCode.INVALID_REQUEST, 'Missing identity index');
+      }
+
+      // Validate identity authorization
+      const authorizedIndex = await deps.getAppIdentityIndex(origin);
+      if (identityIndex !== authorizedIndex) {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Requested identity not authorized for this application');
+      }
+
+      // Check permissions
+      const permissionResult = await deps.checkPermission('nip44', origin, undefined, identityIndex);
+
+      if (permissionResult.level === 'DENY') {
+        throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission explicitly denied for this action');
+      }
+
+      if (!permissionResult.allowed) {
+        try {
+          const promptResult = await permissionPromptManager.requestPermission({
+            appOrigin: origin,
+            appName: (data as any)?.appName,
+            action: 'nip44',
+            identityIndex,
+            ciphertext: data.ciphertext,
+            pubkey: data.senderPubkey
+          });
+
+          if (!promptResult.granted) {
+            throw vaultError(ErrorCode.PERMISSION_DENIED, 'Permission denied by user');
+          }
+        } catch (error) {
+          throw vaultError(ErrorCode.PERMISSION_DENIED, error instanceof Error ? error.message : 'Permission denied');
+        }
+      }
+
+      // Use app-specific identity for decryption
+      const decrypted = await cryptoWorker.nip44DecryptWithSession({
+        username: currentUser.profile.username,
+        ciphertext: data.ciphertext,
+        senderPubkey: data.senderPubkey,
+        identityIndex
+      });
+
+      showSuccessToast('Message Decrypted', `Message decrypted from ${(data as any)?.appName || 'app'} using NIP-44`);
+
+      // Log audit event
+      addAuditEvent({
+        type: 'crypto',
+        action: 'Message Decrypted (NIP-44)',
+        details: `NIP-44 message decrypted from ${(data as any)?.appName || 'app'} (${origin})`,
+        appName: (data as any)?.appName,
+        appId: origin,
+        identityIndex: identityIndex,
+        severity: 'medium'
+      });
+
+      return decrypted;
+    }
+  },
+
+  {
     route: Msg.AUTH_STATUS,
     handler: async (data: any, context: any, deps: MessageHandlerDependencies) => {
       const currentUser = deps.getUser();
