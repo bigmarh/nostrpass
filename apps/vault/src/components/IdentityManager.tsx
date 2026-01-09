@@ -7,6 +7,7 @@ import { PermissionService } from '../services/permissionService';
 import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
 import type { VaultData } from '../workers/db';
 import { getActiveIdentity, setActiveIdentity } from '../utils/activeIdentityManager';
+import { useMessenger } from '../providers';
 
 interface IdentityManagerProps {
   appId: string | undefined;
@@ -25,6 +26,7 @@ interface IdentityManagerProps {
 
 export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   const navigate = useNavigate();
+  const { send } = useMessenger();
   const [searchQuery, setSearchQuery] = createSignal('');
   const [showSearch, setShowSearch] = createSignal(false);
   const [showAddIdentityModal, setShowAddIdentityModal] = createSignal(false);
@@ -546,12 +548,18 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       // Save vault data - auto-syncs to Nostr in background by default
       await props.onUpdateVaultData({ activeIdentityByApp: updatedActive });
 
-      // Notify parent window (embassy) that active identity changed
-      window.dispatchEvent(new CustomEvent('active-identity-changed', {
+      // Notify embassy that active identity changed via messenger
+      console.log('📤 [SetActive] Sending VAULT_DATA_UPDATED to embassy');
+      send('VAULT_DATA_UPDATED', {
+        activeIdentityIndex: identityIndex,
+        identity: currentVault.identities[identityIndex]
+      });
+
+      // Also dispatch local window event for vault components
+      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
         detail: {
-          appOrigin,
-          identityIndex,
-          publicKey: currentVault.identities[identityIndex]?.publicKey
+          activeIdentityIndex: identityIndex,
+          identity: currentVault.identities[identityIndex]
         }
       }));
 
