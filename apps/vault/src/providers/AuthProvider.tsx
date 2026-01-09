@@ -281,13 +281,32 @@ export const AuthProvider: ParentComponent = (props) => {
     setAuthState(prev => ({ ...prev, isLoading: true }));
 
     try {
-      console.log('[AuthProvider] Starting atomic login...');
+      // Import getEnvironment and getNamespace to check for custom settings from global config
+      const { getEnvironment, getNamespace, isConfiguredByUser } = await import('@nostrpass/nostrHelpers');
+      const globalEnv = getEnvironment();
+      const globalNamespace = getNamespace();
+      const providerEnv = storageEnvironmentName();
+      const userConfigured = isConfiguredByUser();
+
+      // Use global config if user explicitly set it via Advanced modal (even if they chose defaults)
+      // Otherwise, fall back to provider's storageEnvironmentName (from URL params)
+      const effectiveEnvironment = userConfigured ? globalEnv : providerEnv;
+
+      console.log('[AuthProvider] ========================================');
+      console.log('[AuthProvider] STARTING LOGIN');
+      console.log('[AuthProvider] Username:', username);
+      console.log('[AuthProvider] Global Config - Namespace:', globalNamespace);
+      console.log('[AuthProvider] Global Config - Environment:', globalEnv);
+      console.log('[AuthProvider] Provider Environment:', providerEnv);
+      console.log('[AuthProvider] User Configured:', userConfigured);
+      console.log('[AuthProvider] EFFECTIVE Environment:', effectiveEnvironment);
+      console.log('[AuthProvider] ========================================');
 
       await cryptoWorker.atomicLogin({
         username,
         password,
         relays: getRelays(),
-        environment: storageEnvironmentName()
+        environment: effectiveEnvironment
       });
 
       // State will be updated via AUTH_STATE_CHANGED event

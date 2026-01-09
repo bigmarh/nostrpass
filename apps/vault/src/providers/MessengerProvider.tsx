@@ -102,7 +102,8 @@ export const MessengerProvider: ParentComponent = (props) => {
     // For testing: always allow current origin even if not in iframe
     allowedOrigins.push(window.location.origin);
     
-    messengerInstance.init(allowedOrigins);
+    // Use initWithParent to properly handle wildcard origins and origin verification
+    messengerInstance.initWithParent(allowedOrigins);
 
     // Store in global variable for use outside components
     globalMessenger = messengerInstance;

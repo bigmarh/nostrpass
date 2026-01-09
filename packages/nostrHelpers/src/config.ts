@@ -54,6 +54,12 @@ let globalConfig: NostrPassConfig = {
 };
 
 /**
+ * Track if config has been explicitly set by user
+ * This distinguishes between default values and user-applied defaults
+ */
+let _configuredByUser = false;
+
+/**
  * Configure the NostrPass protocol
  *
  * @param config - Partial configuration to merge with defaults
@@ -69,6 +75,7 @@ let globalConfig: NostrPassConfig = {
  */
 export function configureNostrPass(config: Partial<NostrPassConfig>): void {
   globalConfig = { ...globalConfig, ...config };
+  _configuredByUser = true;
 
   if (globalConfig.debug) {
     console.log('[NostrPass] Configuration updated:', globalConfig);
@@ -132,6 +139,16 @@ export function isDebugMode(): boolean {
 }
 
 /**
+ * Check if config was explicitly set by user
+ * This distinguishes between default values and user-applied settings
+ *
+ * @returns True if user explicitly called configureNostrPass()
+ */
+export function isConfiguredByUser(): boolean {
+  return _configuredByUser;
+}
+
+/**
  * Reset configuration to defaults
  */
 export function resetConfig(): void {
@@ -145,4 +162,5 @@ export function resetConfig(): void {
     ],
     debug: false
   };
+  _configuredByUser = false;
 }
