@@ -844,7 +844,22 @@ export const sessionManager = {
     // Resolve private key for identity
     let privateKey: string | undefined = undefined;
     let publicKey: string | undefined = undefined;
-    if (params.identityIndex === 0 && session.privateKey) {
+
+    // Check if this is a BYOK identity - get the identity from vault data
+    const identity = session.vaultData?.identities?.[params.identityIndex];
+    if (identity?.isImported && identity.publicKey) {
+      // BYOK identity - get key from secure storage
+      const secureStorage = manager.getSecureStorage(params.username);
+      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
+      if (byokKey) {
+        privateKey = byokKey;
+        publicKey = identity.publicKey;
+        console.log('[WORKER] Using BYOK key for identity:', identity.nickname || identity.publicKey.slice(0, 8));
+      } else {
+        console.error('[WORKER] BYOK key not found for identity:', identity.publicKey.slice(0, 8));
+        throw new Error('BYOK key not available - vault may need to be unlocked again');
+      }
+    } else if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
       publicKey = crypto.getPublicKey(privateKey);
     } else if (session.xpriv) {
@@ -922,7 +937,21 @@ export const sessionManager = {
     }
 
     let privateKey: string | undefined = undefined;
-    if (params.identityIndex === 0 && session.privateKey) {
+
+    // Check if this is a BYOK identity - get the identity from vault data
+    const identity = session.vaultData?.identities?.[params.identityIndex];
+    if (identity?.isImported && identity.publicKey) {
+      // BYOK identity - get key from secure storage
+      const secureStorage = manager.getSecureStorage(params.username);
+      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
+      if (byokKey) {
+        privateKey = byokKey;
+        console.log('[WORKER] Using BYOK key for signMessage:', identity.nickname || identity.publicKey.slice(0, 8));
+      } else {
+        console.error('[WORKER] BYOK key not found for signMessage:', identity.publicKey.slice(0, 8));
+        throw new Error('BYOK key not available - vault may need to be unlocked again');
+      }
+    } else if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
       const derived = crypto.deriveKeypairFromXpriv(session.xpriv, params.identityIndex);
@@ -977,7 +1006,20 @@ export const sessionManager = {
     }
 
     let privateKey: string | undefined = undefined;
-    if (params.identityIndex === 0 && session.privateKey) {
+
+    // Check if this is a BYOK identity - get the identity from vault data
+    const identity = session.vaultData?.identities?.[params.identityIndex];
+    if (identity?.isImported && identity.publicKey) {
+      // BYOK identity - get key from secure storage
+      const secureStorage = manager.getSecureStorage(params.username);
+      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
+      if (byokKey) {
+        privateKey = byokKey;
+        console.log('[WORKER] Using BYOK key for NIP-04 encrypt:', identity.nickname || identity.publicKey.slice(0, 8));
+      } else {
+        throw new Error('BYOK key not available - vault may need to be unlocked again');
+      }
+    } else if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
       const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
@@ -1032,7 +1074,20 @@ export const sessionManager = {
     }
 
     let privateKey: string | undefined = undefined;
-    if (params.identityIndex === 0 && session.privateKey) {
+
+    // Check if this is a BYOK identity - get the identity from vault data
+    const identity = session.vaultData?.identities?.[params.identityIndex];
+    if (identity?.isImported && identity.publicKey) {
+      // BYOK identity - get key from secure storage
+      const secureStorage = manager.getSecureStorage(params.username);
+      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
+      if (byokKey) {
+        privateKey = byokKey;
+        console.log('[WORKER] Using BYOK key for NIP-04 decrypt:', identity.nickname || identity.publicKey.slice(0, 8));
+      } else {
+        throw new Error('BYOK key not available - vault may need to be unlocked again');
+      }
+    } else if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
       const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
@@ -1082,7 +1137,20 @@ export const sessionManager = {
     }
 
     let privateKey: string | undefined = undefined;
-    if (params.identityIndex === 0 && session.privateKey) {
+
+    // Check if this is a BYOK identity - get the identity from vault data
+    const identity = session.vaultData?.identities?.[params.identityIndex];
+    if (identity?.isImported && identity.publicKey) {
+      // BYOK identity - get key from secure storage
+      const secureStorage = manager.getSecureStorage(params.username);
+      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
+      if (byokKey) {
+        privateKey = byokKey;
+        console.log('[WORKER] Using BYOK key for NIP-44 encrypt:', identity.nickname || identity.publicKey.slice(0, 8));
+      } else {
+        throw new Error('BYOK key not available - vault may need to be unlocked again');
+      }
+    } else if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
       const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
@@ -1132,7 +1200,20 @@ export const sessionManager = {
     }
 
     let privateKey: string | undefined = undefined;
-    if (params.identityIndex === 0 && session.privateKey) {
+
+    // Check if this is a BYOK identity - get the identity from vault data
+    const identity = session.vaultData?.identities?.[params.identityIndex];
+    if (identity?.isImported && identity.publicKey) {
+      // BYOK identity - get key from secure storage
+      const secureStorage = manager.getSecureStorage(params.username);
+      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
+      if (byokKey) {
+        privateKey = byokKey;
+        console.log('[WORKER] Using BYOK key for NIP-44 decrypt:', identity.nickname || identity.publicKey.slice(0, 8));
+      } else {
+        throw new Error('BYOK key not available - vault may need to be unlocked again');
+      }
+    } else if (params.identityIndex === 0 && session.privateKey) {
       privateKey = session.privateKey;
     } else if (session.xpriv) {
       const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });

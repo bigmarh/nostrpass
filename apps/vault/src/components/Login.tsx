@@ -5,6 +5,7 @@ import PinSetup from './PinSetup';
 import PinVerification from './PinVerification';
 import { permissionService } from '../services/permissionService';
 import { DEFAULT_PERMISSIONS, DEFAULT_GET_PUBLIC_KEY } from '@nostrpass/types';
+import { configureNostrPass } from '@nostrpass/nostrHelpers';
 
 function desanitizeDomain(domain: string) {
     return domain.replace(/_/g, '.');
@@ -22,6 +23,14 @@ export const Login: Component = () => {
     const [showPinUnlock, setShowPinUnlock] = createSignal(false);
     const [tempAccountData, setTempAccountData] = createSignal<{username: string, password: string, publicKey: string} | null>(null);
 
+    // Advanced settings state
+    const [showAdvancedPopover, setShowAdvancedPopover] = createSignal(false);
+    const [customNamespace, setCustomNamespace] = createSignal('');
+    const [customEnvironment, setCustomEnvironment] = createSignal('');
+    const [environmentType, setEnvironmentType] = createSignal<'production' | 'development' | 'staging' | 'custom'>('production');
+    const [advancedConfirmed, setAdvancedConfirmed] = createSignal(false);
+    const [hasCustomSettings, setHasCustomSettings] = createSignal(false);
+
     const params = useParams();
     const navigate = useNavigate();
     const { send } = useMessenger();
@@ -37,6 +46,47 @@ export const Login: Component = () => {
 
     const handleHideVault = () => {
         send('HIDE_VAULT');
+    };
+
+    // Apply custom namespace/environment settings
+    const applyAdvancedSettings = () => {
+        const namespace = customNamespace().trim() || 'nostrpass.com';
+        const environment = environmentType() === 'custom'
+            ? customEnvironment().trim() || 'production'
+            : environmentType();
+
+        configureNostrPass({
+            namespace,
+            environment
+        });
+
+        const isCustom = namespace !== 'nostrpass.com' || environment !== 'production';
+        setHasCustomSettings(isCustom);
+        setShowAdvancedPopover(false);
+
+        console.log('[Login] ========================================');
+        console.log('[Login] ADVANCED SETTINGS APPLIED');
+        console.log('[Login] Namespace:', namespace);
+        console.log('[Login] Environment:', environment);
+        console.log('[Login] Has Custom Settings:', isCustom);
+        console.log('[Login] ========================================');
+    };
+
+    // Reset to default settings
+    const resetAdvancedSettings = () => {
+        setCustomNamespace('');
+        setCustomEnvironment('');
+        setEnvironmentType('production');
+        setAdvancedConfirmed(false);
+        setHasCustomSettings(false);
+
+        configureNostrPass({
+            namespace: 'nostrpass.com',
+            environment: 'production'
+        });
+
+        setShowAdvancedPopover(false);
+        console.log('[Login] Reset to default settings');
     };
 
     const handleSubmit = async (e: Event) => {
@@ -145,7 +195,16 @@ export const Login: Component = () => {
         }
 
         // Login with password (new flow uses LoginObj lookup)
-        console.log('[Login] Attempting login for:', username().trim().toLowerCase(), 'in environment:', storageEnvironmentName());
+        // Import to check what settings are active
+        const { getEnvironment, getNamespace } = await import('@nostrpass/nostrHelpers');
+        console.log('[Login] ========================================');
+        console.log('[Login] ATTEMPTING LOGIN');
+        console.log('[Login] Username:', username().trim().toLowerCase());
+        console.log('[Login] Namespace (from config):', getNamespace());
+        console.log('[Login] Environment (from config):', getEnvironment());
+        console.log('[Login] Environment (from provider):', storageEnvironmentName());
+        console.log('[Login] Has Custom Settings:', hasCustomSettings());
+        console.log('[Login] ========================================');
         setLoadingStatus('Verifying credentials...');
         await login(password(), username().trim().toLowerCase());
 
@@ -343,6 +402,155 @@ export const Login: Component = () => {
                         </div>
                         
                         <form onSubmit={handleSubmit} class={`flex w-full flex-col gap-3 ${isSignup() ? 'signup-form' : 'login-form'}`} method="post" action="#">
+                            {/* Advanced Settings Link */}
+                            <div class="flex justify-end relative">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAdvancedPopover(!showAdvancedPopover())}
+                                    class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors flex items-center gap-1"
+                                >
+                                    Advanced
+                                    <Show when={hasCustomSettings()}>
+                                        <span class="inline-block w-2 h-2 bg-amber-500 rounded-full" title="Custom settings active" />
+                                    </Show>
+                                </button>
+
+                            </div>
+
+                            {/* Advanced Settings Modal - Centered */}
+                            <Show when={showAdvancedPopover()}>
+                                <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={(e) => e.target === e.currentTarget && setShowAdvancedPopover(false)}>
+                                    <div class="w-full max-w-md mx-4 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden border border-gray-200 dark:border-gray-800">
+                                        {/* Header */}
+                                        <div class="relative px-6 pt-6 pb-4">
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAdvancedPopover(false)}
+                                                class="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                            >
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                            <div class="flex items-center gap-3">
+                                                <div class="p-2.5 bg-gray-100 dark:bg-gray-800 rounded-xl">
+                                                    <svg class="w-5 h-5 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    </svg>
+                                                </div>
+                                                <div>
+                                                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Advanced Settings</h3>
+                                                    <p class="text-sm text-gray-500 dark:text-gray-400">Custom vault storage location</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Warning Banner */}
+                                        <div class="mx-6 mb-4 p-4 bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-xl">
+                                            <div class="flex gap-3">
+                                                <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
+                                                <div>
+                                                    <p class="text-sm font-medium text-gray-900 dark:text-white">Important</p>
+                                                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                                        If you forget these values, you will not be able to access your vault. Only change if instructed.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Form Fields */}
+                                        <div class="px-6 pb-4 space-y-4">
+                                            {/* Namespace Field */}
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                                                    Namespace
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={customNamespace()}
+                                                    onInput={(e) => setCustomNamespace(e.currentTarget.value)}
+                                                    placeholder="nostrpass.com"
+                                                    class="w-full px-4 py-3 text-sm border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-all"
+                                                />
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5 ml-1">
+                                                    Your vault provider's domain identifier
+                                                </p>
+                                            </div>
+
+                                            {/* Environment Field */}
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                                                    Environment
+                                                </label>
+                                                <select
+                                                    value={environmentType()}
+                                                    onChange={(e) => setEnvironmentType(e.currentTarget.value as 'production' | 'development' | 'staging' | 'custom')}
+                                                    class="w-full px-4 py-3 text-sm border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-all appearance-none cursor-pointer"
+                                                >
+                                                    <option value="production">production</option>
+                                                    <option value="development">development</option>
+                                                    <option value="staging">staging</option>
+                                                    <option value="custom">custom...</option>
+                                                </select>
+
+                                                <Show when={environmentType() === 'custom'}>
+                                                    <input
+                                                        type="text"
+                                                        value={customEnvironment()}
+                                                        onInput={(e) => setCustomEnvironment(e.currentTarget.value)}
+                                                        placeholder="Enter custom environment name"
+                                                        class="w-full mt-3 px-4 py-3 text-sm border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:border-gray-900 dark:focus:border-gray-500 focus:outline-none transition-all"
+                                                    />
+                                                </Show>
+                                            </div>
+
+                                            {/* Confirmation Checkbox */}
+                                            <label class="flex items-start gap-3 p-4 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={advancedConfirmed()}
+                                                    onChange={(e) => setAdvancedConfirmed(e.currentTarget.checked)}
+                                                    class="mt-0.5 w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-500 accent-gray-900 dark:accent-white"
+                                                />
+                                                <span class="text-sm text-gray-700 dark:text-gray-300">
+                                                    I understand that I must remember these exact values to access my vault
+                                                </span>
+                                            </label>
+                                        </div>
+
+                                        {/* Footer Actions */}
+                                        <div class="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+                                            <button
+                                                type="button"
+                                                onClick={resetAdvancedSettings}
+                                                class="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
+                                            >
+                                                Reset to Default
+                                            </button>
+                                            <div class="flex-1" />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAdvancedPopover(false)}
+                                                class="px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={applyAdvancedSettings}
+                                                disabled={!advancedConfirmed()}
+                                                class="px-6 py-2.5 text-sm font-medium bg-gray-900 hover:bg-black disabled:bg-gray-300 dark:bg-white dark:hover:bg-gray-100 dark:disabled:bg-gray-600 text-white dark:text-gray-900 dark:disabled:text-gray-400 rounded-xl transition-colors disabled:cursor-not-allowed"
+                                            >
+                                                Apply Settings
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </Show>
+
                             <div class="w-full">
                                 <label for="username" class="sr-only">Username</label>
                                 <input

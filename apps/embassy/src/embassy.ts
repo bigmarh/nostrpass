@@ -466,6 +466,10 @@ class NostrPassEmbassy {
       if (this.config.namespace) {
         url.searchParams.set('namespace', this.config.namespace);
       }
+      // Add cache buster to force fresh vault load in development
+      if (this.config.vaultUrl?.includes('localhost') || this.config.vaultUrl?.includes('127.0.0.1')) {
+        url.searchParams.set('_t', Date.now().toString());
+      }
 
       this.iframe.src = url.toString();
       console.log('[Embassy] Creating iframe with:', {
@@ -512,15 +516,29 @@ class NostrPassEmbassy {
           if (this.config.debug) console.log('Iframe initialization period complete');
           // Send handshake message to establish connection and verify origin
           // This triggers the vault to lock onto our origin and respond
-          if (this.messenger) {
-            this.messenger.send('EMBASSY_HANDSHAKE', {
-              origin: window.location.origin,
-              appName: this.config.appName,
-              appDomain: this.config.appDomain,
-              timestamp: Date.now()
-            });
-            console.log('[Embassy] Sent handshake to vault');
-          }
+          // We retry the handshake a few times in case the vault needs more time to initialize
+          const sendHandshake = (attempt: number = 1) => {
+            if (this.messenger && !this._isReady) {
+              this.messenger.send('EMBASSY_HANDSHAKE', {
+                origin: window.location.origin,
+                appName: this.config.appName,
+                appDomain: this.config.appDomain,
+                timestamp: Date.now(),
+                attempt
+              });
+              console.log(`[Embassy] Sent handshake to vault (attempt ${attempt})`);
+
+              // Retry up to 5 times with increasing delays if not ready
+              if (attempt < 5) {
+                setTimeout(() => {
+                  if (!this._isReady) {
+                    sendHandshake(attempt + 1);
+                  }
+                }, 200 * attempt);
+              }
+            }
+          };
+          sendHandshake();
           resolve();
         }, 100);
       };
