@@ -84,8 +84,8 @@ export const AccountPickerPage: Component = () => {
     console.log('[AccountPickerPage] Sanitized appKey:', appKey);
 
     try {
-      console.log('[AccountPickerPage] Fetching vault data for username:', currentUser.profile.username);
-      const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
+      console.log('[AccountPickerPage] Fetching vault data for username:', currentUser.username);
+      const vaultData = await vaultDataService.getVaultData(currentUser.username);
       console.log('[AccountPickerPage] Vault data received:', vaultData);
 
       if (vaultData?.identities && vaultData.identities.length > 0) {
@@ -162,12 +162,12 @@ export const AccountPickerPage: Component = () => {
 
     try {
       // Update active identity in localStorage (per-browser, for UI hints)
-      await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
+      await setActiveIdentity(currentUser.username, appOrigin, identityIndex);
 
       // SECURITY: Update vault data with new active identity (source of truth)
       // Changed to store publicKey instead of index for stability across identity reordering/deletion
       console.log('[AccountPickerPage] Updating vault data with active identity:', { appKey, publicKey: selectedPublicKey });
-      const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
+      const vaultData = await vaultDataService.getVaultData(currentUser.username);
       if (vaultData) {
         const updatedActiveIdentityByApp = {
           ...(vaultData.activeIdentityByApp || {}),
@@ -175,7 +175,7 @@ export const AccountPickerPage: Component = () => {
         };
         console.log('[AccountPickerPage] Updated activeIdentityByApp:', updatedActiveIdentityByApp);
         await vaultDataService.updateVaultData(
-          currentUser.profile.username,
+          currentUser.username,
           { activeIdentityByApp: updatedActiveIdentityByApp },
           { updateTimestamp: true }
         );
@@ -189,7 +189,7 @@ export const AccountPickerPage: Component = () => {
 
       // Notify embassy of identity change so NostrPassButton can update
       send('VAULT_DATA_UPDATED', {
-        username: currentUser.profile.username,
+        username: currentUser.username,
         timestamp: Date.now(),
         activeIdentityIndex: identityIndex,
         activePublicKey: selectedPublicKey,
@@ -199,7 +199,7 @@ export const AccountPickerPage: Component = () => {
       // Dispatch event for vault components to refresh and show active identity change
       window.dispatchEvent(new CustomEvent('vault-data-refresh', {
         detail: {
-          username: currentUser.profile.username,
+          username: currentUser.username,
           source: 'account-picker',
           activeIdentityIndex: identityIndex,
           activePublicKey: selectedPublicKey
@@ -357,6 +357,24 @@ export const AccountPickerPage: Component = () => {
           onSelect={handleSelect}
           onCancel={handleCancel}
         />
+      </Show>
+
+      <Show when={!loading() && !error() && identities().length === 0}>
+        <div class="flex items-center justify-center w-full h-full p-8 bg-white dark:bg-gray-900">
+          <div class="text-center max-w-md">
+            <div class="text-5xl mb-4">👤</div>
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">No Identities Available</h2>
+            <p class="text-gray-600 dark:text-gray-400 mb-4">
+              You don't have any identities set up yet. Please create an identity in your vault first.
+            </p>
+            <button
+              onClick={handleCancel}
+              class="px-6 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Show>
     </div>
   );
