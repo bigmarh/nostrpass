@@ -5,7 +5,6 @@ import { useEnvironment } from './EnvironmentProvider';
 import { useAuth } from './AuthProvider';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import type { PermissionLevel } from '@nostrpass/types';
-import { getActiveIdentity } from '../utils/activeIdentityManager';
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
@@ -250,11 +249,19 @@ export const MessengerProvider: ParentComponent = (props) => {
         const vaultData = await cw.getVaultData({ username: current.profile.username });
         const appKey = toAppKey(origin);
 
-        // Get active identity from localStorage (per-browser)
-        let activeIndex = getActiveIdentity(current.profile.username, origin);
+        // SECURITY: Use activeIdentityByApp from vault data as source of truth (synced across devices)
+        // This must match what AUTH_STATUS returns to embassy to avoid index mismatch
+        const activePublicKey = vaultData?.activeIdentityByApp?.[appKey];
+        let activeIndex: number | null = null;
 
-        // If no active identity set, find first authorized identity for this app
-        if (activeIndex === undefined || activeIndex === null) {
+        if (activePublicKey) {
+          // Find identity by publicKey (stable across reordering/deletion)
+          activeIndex = vaultData.identities.findIndex((id: any) => id?.publicKey === activePublicKey);
+          if (activeIndex === -1) activeIndex = null;
+        }
+
+        // Fallback: find first authorized identity for this app
+        if (activeIndex === null) {
           activeIndex = vaultData.identities.findIndex((id: any) => id?.appPermissions && id.appPermissions[appKey]);
         }
         if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {

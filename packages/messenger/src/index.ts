@@ -13,7 +13,7 @@ export class SecureMessenger {
   private defaultTimeout = 30000; // 30 seconds
   protected verifiedResponseOrigin: string | null = null;
 
-  constructor(private isParent: boolean = false,public window: any = window) {
+  constructor(protected isParent: boolean = false,public window: any = window) {
     this.window = window;
     this.setupMessageListener();
   }
@@ -123,6 +123,11 @@ export class SecureMessenger {
     } else if (this.allowedOrigins.size === 1 && !this.allowedOrigins.has('*')) {
       // Single allowed origin configured
       origin = Array.from(this.allowedOrigins)[0];
+    } else if (!this.isParent && this.allowedOrigins.has('*')) {
+      // In iframe with wildcard origins - use '*' as fallback
+      // This is safe for fire-and-forget messages when handshake hasn't completed
+      console.warn('[SecureMessenger] No verified origin, using "*" for iframe-to-parent message');
+      origin = '*';
     } else {
       // Fallback: parent sends to iframe origin, iframe should have verified origin
       throw new Error('No verified origin available for sending message. Ensure handshake completed.');
@@ -302,11 +307,18 @@ export class SecureServerMessenger extends SecureMessenger {
     }
 
     // Store verified origin for responses (browser-guaranteed, cannot be spoofed)
+    // IMPORTANT: For iframe messengers, ignore messages from our own origin
+    // This prevents self-locking when other scripts (like MetaMask) send messages
     if (!this.verifiedResponseOrigin) {
+      // If we're in an iframe, don't lock to our own origin
+      if (!this.isParent && event.origin === this.window.location.origin) {
+        console.log('[SecureServerMessenger] Ignoring message from self origin:', event.origin, 'type:', event.data?.type || 'unknown');
+        return;
+      }
       this.verifiedResponseOrigin = event.origin;
-      console.log('[SecureServerMessenger] Locked to parent origin:', event.origin);
+      console.log('[SecureServerMessenger] Locked to parent origin:', event.origin, '| First message type:', event.data?.type || 'unknown');
     } else if (this.verifiedResponseOrigin !== event.origin) {
-      console.warn('Message from different origin than established:', event.origin);
+      console.warn('[SecureServerMessenger] Rejected message from different origin:', event.origin, '(locked to:', this.verifiedResponseOrigin + ')');
       return;
     }
 

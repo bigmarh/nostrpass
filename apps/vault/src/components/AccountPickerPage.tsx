@@ -249,11 +249,11 @@ export const AccountPickerPage: Component = () => {
                 requestId,
                 identityIndex,
                 identity: {
-                  publicKey: selectedIdentityData?.publicKey,
-                  npub: selectedIdentityData?.npub,
-                  nickname: selectedIdentityData?.nickname,
+                  publicKey: selectedIdentityData?.identity?.publicKey,
+                  npub: selectedIdentityData?.identity?.npub,
+                  nickname: selectedIdentityData?.identity?.nickname,
                   authorized: true,
-                  avatar: selectedIdentityData?.avatar
+                  avatar: selectedIdentityData?.identity?.avatar
                 }
               });
             }
