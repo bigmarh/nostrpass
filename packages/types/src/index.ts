@@ -11,17 +11,27 @@ export * from './constants';
 export * from './messages';
 export * from './worker';
 
+// Auth provider type for login methods
+export type AuthProvider = 'username' | 'google';
+
+// Identifier type for Nostr lookups
+export type IdentifierType = 'username' | 'google';
+
 // New event types for the updated auth flow
 // NOTE: LoginObj is PASSWORD-ENCRYPTED when stored on Nostr
 // The fields below represent the DECRYPTED content inside
 export interface LoginObj {
   storagePublicKey: string; // Public key for finding VaultObj on Nostr
   storageKeypairEncrypted: string; // Storage keypair (private+public) encrypted with PIN
-  username: string;
+  username: string; // Display name (username or Google email/name)
   createdAt: number;
   version: number;
   passwordSalt: string;  // Salt for deriving password key (for LoginObj decryption)
   pinSalt: string; // Salt for PIN-based key derivation (for storage keypair and xpriv)
+  // Auth provider info (optional for backward compatibility with existing accounts)
+  authProvider?: AuthProvider; // 'username' or 'google'
+  googleUid?: string; // Google UID (only set when authProvider is 'google')
+  vaultUsername?: string; // Original username for VaultObj lookup (for linked accounts)
 }
 
 // NOTE: VaultObj is STORAGE-KEY-ENCRYPTED when stored on Nostr
@@ -45,6 +55,12 @@ export interface VaultObj {
   createdAt?: number;
   // Password salt (optional, for migration/verification)
   passwordSalt?: string;
+  // Linked authentication providers (e.g., Google linked to username account)
+  linkedAuthProviders?: Array<{
+    provider: AuthProvider;
+    linkedAt: number;
+    displayName?: string;
+  }>;
 }
 
 export interface RecoveryData {

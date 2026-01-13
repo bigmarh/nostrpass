@@ -1,7 +1,7 @@
 import { Component, Show, JSX, For, createSignal, createResource, onCleanup, createEffect } from 'solid-js';
 import { nip19 } from 'nostr-tools';
 import RelaySettings from './RelaySettings';
-import RecoveryPhraseBackup from './RecoveryPhraseBackup';
+import { LinkGoogleAccount } from './settings/LinkGoogleAccount';
 import type { VaultData } from '../workers/db';
 import { getCryptoWorker } from '../services/cryptoWorkerSingleton';
 
@@ -33,7 +33,7 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
   const [showRecoveryPhrase, setShowRecoveryPhrase] = createSignal(false);
 
   // Fetch initial vault version history
-  const [vaultVersions, { refetch: refetchVersions }] = createResource(
+  const [_vaultVersions, { refetch: _refetchVersions }] = createResource(
     () => props.isOpen && props.username,
     async (username) => {
       if (!username) return [];
@@ -65,7 +65,7 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
     // Start worker subscription
     worker.startVaultVersionSubscription({
       username: props.username,
-    }).catch(err => {
+    }).catch((err: Error) => {
       console.error('Failed to start vault version subscription:', err);
     });
 
@@ -96,7 +96,7 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
     onCleanup(() => {
       console.log('📡 [GlobalSettings] Cleaning up vault version subscription');
       broadcast.close();
-      worker.stopVaultVersionSubscription({ username: props.username }).catch(err => {
+      worker.stopVaultVersionSubscription({ username: props.username }).catch((err: Error) => {
         console.error('Failed to stop vault version subscription:', err);
       });
     });
@@ -215,6 +215,15 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
                   <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{props.identityCount}</span>
                 </div>
               </div>
+            </div>
+
+            {/* Linked Accounts */}
+            <div>
+              <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-3">Linked Accounts</h3>
+              <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                Link additional sign-in methods to your account.
+              </p>
+              <LinkGoogleAccount vaultData={props.vaultData} />
             </div>
 
             {/* Nostr Sync Section - rendered as a slot */}

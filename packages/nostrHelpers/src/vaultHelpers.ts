@@ -5,11 +5,20 @@ import { hexToBytes, bytesToHex } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 
 
+// Linked auth provider info stored in vault
+export interface LinkedAuthProvider {
+  provider: 'username' | 'google';
+  linkedAt: number;
+  displayName?: string; // e.g., Google email or display name
+  googleUid?: string; // For Google auth: used for deduplication when re-linking
+}
+
 // Updated VaultData interface for new auth flow
 export interface VaultData {
-  // Core fields
-  username: string;
-  publicKey: string; // Storage public key for vault identification
+  // Core fields - storagePublicKey is the PRIMARY IDENTIFIER for all vault lookups
+  storagePublicKey: string; // Primary key - unique vault identifier (derived from master key)
+  username: string; // Display name only (for UI)
+  publicKey: string; // Same as storagePublicKey (alias for compatibility)
   xprivEncrypted: string; // PIN-encrypted xpriv (encrypted with PIN, not password)
   salt: string; // Salt for PIN encryption
 
@@ -18,7 +27,6 @@ export interface VaultData {
 
   // Identity management
   identities: any[];
-  storagePublicKey?: string; // Explicit storage public key (same as publicKey)
   currentIdentityIndex?: number; // Currently selected identity index
   // Active identity per app (persistent selection separate from authorization)
   // Changed from index (number) to publicKey (string) for stability across identity reordering/deletion
@@ -46,26 +54,70 @@ export interface VaultData {
 
   // Security
   passwordSalt?: string; // Salt for password key derivation
+
+  // Linked authentication providers (e.g., Google linked to username account)
+  linkedAuthProviders?: LinkedAuthProvider[];
 }
 
 // Alias for backward compatibility
 export type NostrVaultData = VaultData;
 
 // New helper functions for the updated auth flow
-import type { LoginObj, VaultObj } from '@nostrpass/types';
+import type { LoginObj, VaultObj, IdentifierType } from '@nostrpass/types';
+
+/**
+ * Build the d-tag for LoginObj lookup
+ * Supports both username and Google UID identifiers
+ *
+ * For username auth:
+ *   Format: ${namespace}_login_${hash(identifier)}_${identifierType}_${environment}
+ *   Legacy format: ${namespace}_login_${hash(username)}_${environment}
+ *
+ * For Google auth (multi-vault support):
+ *   Format: ${namespace}_login_${hash(googleUid)}_google_${hash(storagePublicKey)}_${environment}
+ *   This allows multiple vaults per Google account, keyed by storagePublicKey
+ *
+ * @param identifier - Username or Google UID
+ * @param identifierType - 'username' or 'google'
+ * @param environment - Environment name
+ * @param namespace - Namespace for the d-tag
+ * @param storagePublicKey - For Google auth: the vault's storagePublicKey (enables multi-vault)
+ */
+function buildLoginDTag(
+  identifier: string,
+  identifierType: IdentifierType,
+  environment: string,
+  namespace: string,
+  storagePublicKey?: string // Required for Google auth to support multi-vault
+): string {
+  if (identifierType === 'google' && storagePublicKey) {
+    // Multi-vault format for Google: includes storagePublicKey hash
+    return `${namespace}_login_${hash(identifier)}_google_${hash(storagePublicKey)}_${environment}`;
+  }
+  // Standard format for username auth (or Google without storagePublicKey for backward compat)
+  return `${namespace}_login_${hash(identifier)}_${identifierType}_${environment}`;
+}
 
 /**
  * Save LoginObj to Nostr - PASSWORD ENCRYPTED for security (using NIP-44)
  * LoginObj contains PIN-encrypted storage keypair, so needs password protection
+ *
+ * @param identifier - Username or Google UID
+ * @param identifierType - 'username' or 'google'
+ * @param storagePublicKey - For Google auth: the vault's storagePublicKey (enables multi-vault)
+ * @param displayName - For Google auth: human-readable display name for vault picker
  */
 export async function saveLoginObj(
-  username: string,
+  identifier: string,
+  identifierType: IdentifierType,
   loginObj: LoginObj,
   randomPublicKey: string,
   randomPrivateKey: string,
   relays: string[],
   environment: string,
-  passwordKey: string  // Password key for encrypting LoginObj content
+  passwordKey: string,  // Password key for encrypting LoginObj content
+  storagePublicKey?: string, // For Google auth: storagePublicKey for multi-vault d-tag
+  displayName?: string // For Google auth: display name for vault picker UI
 ): Promise<string[]> {
   try {
     const loginContent = JSON.stringify(loginObj);
@@ -85,16 +137,67 @@ export async function saveLoginObj(
 
     // Create login event with random key for privacy
     const namespace = getNamespace();
+    const dTag = buildLoginDTag(identifier, identifierType, environment, namespace, storagePublicKey);
+
+    console.log('📤 [saveLoginObj] Publishing LoginObj:', {
+      identifier: identifier.substring(0, 8) + '...',
+      identifierType,
+      environment,
+      namespace,
+      storagePublicKey: storagePublicKey?.slice(0, 12) + '...',
+      displayName,
+      dTag,
+      relays
+    });
+
+    // Build tags array
+    const tags: string[][] = [
+      ['d', dTag],
+      ['client', namespace],
+      ['subject', 'login-lookup'],
+      ['encryption', 'password-nip44'], // Mark as password-encrypted with NIP-44
+      ['password-salt', loginObj.passwordSalt], // CRITICAL: Store salt in plaintext for password key derivation
+      ['auth-provider', identifierType], // Track auth method for future lookups
+    ];
+
+    // Add Google-specific tags for reliable relay lookups
+    if (identifierType === 'google') {
+      // Use standard 't' (hashtag) tag for reliable relay indexing
+      // The 't' tag is a standard NIP tag that's indexed by most relays (unlike custom tags)
+      // Format: gvault_{hash(googleUid)} - enables finding all vaults linked to a Google account
+      tags.push(['t', `gvault_${hash(identifier)}`]);
+
+      // Also keep the custom tag for backwards compatibility
+      tags.push(['google-uid-hash', hash(identifier)]);
+
+      // Add display-name tag for vault picker UI (human-readable)
+      console.log('🏷️ [saveLoginObj] Adding display-name tag:', { displayName, hasDisplayName: !!displayName });
+      if (displayName) {
+        tags.push(['display-name', displayName]);
+        console.log('🏷️ [saveLoginObj] ✅ Added display-name tag:', displayName);
+      } else {
+        console.warn('🏷️ [saveLoginObj] ⚠️ NO displayName provided - vault picker will show "Unknown Vault"');
+      }
+
+      // Add storage-public-key tag for direct lookup
+      if (storagePublicKey) {
+        tags.push(['storage-public-key', storagePublicKey]);
+        // Also add a 't' tag for reliable relay indexing (custom tags often aren't indexed)
+        // Format: svault_{hash(storagePublicKey)} - enables finding all Google logins for a vault
+        tags.push(['t', `svault_${hash(storagePublicKey)}`]);
+      }
+
+      // Version tag to distinguish new format from old legacy LoginObjs
+      tags.push(['version', '2']);
+
+      // Log all tags being published for debugging
+      console.log('📋 [saveLoginObj] FINAL TAGS for Google LoginObj:', JSON.stringify(tags, null, 2));
+    }
+
     const loginEvent: Partial<NostrEvent> = {
       kind: 30078,
       created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['d', `${namespace}_login_${hash(username)}_${environment}`],
-        ['client', namespace],
-        ['subject', 'login-lookup'],
-        ['encryption', 'password-nip44'], // Mark as password-encrypted with NIP-44
-        ['password-salt', loginObj.passwordSalt], // CRITICAL: Store salt in plaintext for password key derivation
-      ],
+      tags,
       content: encryptedContent, // Use encrypted content
       pubkey: pubkeyToUse, // Random public key for privacy
     };
@@ -109,7 +212,7 @@ export async function saveLoginObj(
     for (const relay of relays) {
       try {
         await pool.publish([relay], signedEvent);
-        console.log(`✅ Published password-encrypted LoginObj (NIP-44) to ${relay}`);
+        console.log(`✅ Published password-encrypted LoginObj (NIP-44) to ${relay} [${identifierType}]`);
         successfulPublishes.push(relay);
       } catch (error: any) {
         console.error(`❌ Failed to publish LoginObj to ${relay}:`, error.message);
@@ -128,12 +231,104 @@ export async function saveLoginObj(
 }
 
 /**
- * Get LoginObj from Nostr by username - PASSWORD ENCRYPTED
+ * Tombstone a Google LoginObj - marks it as unlinked
+ * Publishes a replacement event with the same d-tag but with a 't: tombstone' tag.
+ * This effectively "deletes" the link without actually deleting the event.
+ * The query in getAllGoogleLoginObjs will skip tombstoned entries.
+ *
+ * @param googleUid - Google UID
+ * @param storagePublicKey - The vault's storage public key
+ * @param environment - Environment name
+ * @param relays - Relay URLs to publish to
+ */
+export async function tombstoneGoogleLoginObj(
+  googleUid: string,
+  storagePublicKey: string,
+  storagePrivateKey: string,
+  environment: string,
+  relays: string[]
+): Promise<string[]> {
+  try {
+    const namespace = getNamespace();
+    const dTag = buildLoginDTag(googleUid, 'google', environment, namespace, storagePublicKey);
+
+    console.log('🪦 [tombstoneGoogleLoginObj] Tombstoning Google LoginObj:', {
+      googleUid: googleUid.substring(0, 8) + '...',
+      storagePublicKey: storagePublicKey.slice(0, 12) + '...',
+      environment,
+      namespace,
+      dTag
+    });
+
+    // Use the STORAGE keypair to sign the tombstone
+    // This must match the keypair used to create the original LoginObj
+    // so that relays accept it as a valid replacement (NIP-78 addressable events)
+    const privateKeyBytes = hexToBytes(storagePrivateKey);
+    const publicKey = nostrGetPublicKey(privateKeyBytes);
+
+    // Build tags - include tombstone marker
+    const tags: string[][] = [
+      ['d', dTag],
+      ['client', namespace],
+      ['subject', 'login-lookup'],
+      ['t', 'tombstone'], // Mark as tombstoned/unlinked
+      ['t', `gvault_${hash(googleUid)}`], // Keep the gvault tag so queries still find it (to skip)
+    ];
+
+    // Content can be empty or a simple marker
+    const content = JSON.stringify({ tombstoned: true, at: Date.now() });
+
+    const event: Partial<NostrEvent> = {
+      kind: 30078,
+      created_at: Math.floor(Date.now() / 1000),
+      tags,
+      content,
+      pubkey: publicKey,
+    };
+
+    const signedEvent = finalizeEvent(event as any, privateKeyBytes);
+
+    const pool = new SimplePool();
+    const successfulPublishes: string[] = [];
+
+    for (const relay of relays) {
+      try {
+        await pool.publish([relay], signedEvent);
+        console.log(`✅ [tombstoneGoogleLoginObj] Published tombstone to ${relay}`);
+        successfulPublishes.push(relay);
+      } catch (error: any) {
+        console.error(`❌ [tombstoneGoogleLoginObj] Failed to publish to ${relay}:`, error.message);
+      }
+    }
+
+    pool.close(relays);
+
+    if (successfulPublishes.length === 0) {
+      throw new Error('Failed to publish tombstone to any relay');
+    }
+
+    console.log(`🪦 [tombstoneGoogleLoginObj] Tombstone published to ${successfulPublishes.length} relay(s)`);
+    return successfulPublishes;
+  } catch (error) {
+    console.error('[tombstoneGoogleLoginObj] Failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get LoginObj from Nostr by identifier - PASSWORD ENCRYPTED
  * First retrieves passwordSalt from event tags, then decrypts content
  * Supports both NIP-44 (preferred) and NIP-04 (fallback for legacy data)
+ *
+ * @param identifier - Username or Google UID
+ * @param identifierType - 'username' or 'google'
+ * @param environment - Environment name (e.g., 'production')
+ * @param relays - Relay URLs to query
+ * @param password - Password for deriving decryption key
  */
 export async function getLoginObj(
-  username: string,
+  identifier: string,
+  identifierType: IdentifierType,
   environment: string,
   relays: string[],
   password: string  // Password for deriving decryption key
@@ -142,17 +337,52 @@ export async function getLoginObj(
     const pool = new SimplePool();
     const namespace = getNamespace();
 
+    // Build d-tag with identifier type
+    const dTag = buildLoginDTag(identifier, identifierType, environment, namespace);
+
     // Create filter for login event
     const filter: Filter = {
       kinds: [30078],
-      '#d': [`${namespace}_login_${hash(username)}_${environment}`],
+      '#d': [dTag],
       limit: 1
     };
 
-    console.log('📥 [getLoginObj] Querying for LoginObj:', { username, environment });
+    console.log('📥 [getLoginObj] Querying for LoginObj:', { identifier, identifierType, environment, dTag });
 
     // Get the latest login event
-    const event = await pool.get(relays, filter);
+    let event = await pool.get(relays, filter);
+
+    // Backward compatibility: if username type and not found, try legacy d-tag format
+    if (!event && identifierType === 'username') {
+      const legacyDTag = `${namespace}_login_${hash(identifier)}_${environment}`;
+      console.log('📥 [getLoginObj] Trying legacy d-tag format:', legacyDTag);
+      const legacyFilter: Filter = {
+        kinds: [30078],
+        '#d': [legacyDTag],
+        limit: 1
+      };
+      event = await pool.get(relays, legacyFilter);
+    }
+
+    // Migration fallback: if not found and environment is not 'development',
+    // try 'development' as fallback. This handles accounts created during a bug
+    // where the EnvironmentProvider URL param was read in onMount instead of synchronously,
+    // causing accounts to be saved with 'development' instead of the URL-specified environment.
+    if (!event && environment !== 'development') {
+      const fallbackDTag = buildLoginDTag(identifier, identifierType, 'development', namespace);
+      console.log('📥 [getLoginObj] Trying development fallback (migration):', fallbackDTag);
+      const fallbackFilter: Filter = {
+        kinds: [30078],
+        '#d': [fallbackDTag],
+        limit: 1
+      };
+      event = await pool.get(relays, fallbackFilter);
+
+      if (event) {
+        console.log('⚠️ [getLoginObj] Found account in development environment (migration case)');
+      }
+    }
+
     if (!event) {
       console.log('❌ [getLoginObj] No LoginObj found');
       return null;
@@ -211,6 +441,405 @@ export async function getLoginObj(
   } catch (error) {
     console.error('Failed to get LoginObj:', error);
     return null;
+  }
+}
+
+/**
+ * Get LoginObj by d-tag directly (for multi-vault Google auth)
+ * Used after getAllGoogleLoginObjs() when user selects a vault
+ *
+ * @param dTag - The exact d-tag from GoogleVaultInfo
+ * @param passwordSalt - The password salt from GoogleVaultInfo
+ * @param relays - Relay URLs to query
+ * @param password - Password for decryption
+ */
+export async function getLoginObjByDTag(
+  dTag: string,
+  passwordSalt: string,
+  relays: string[],
+  password: string
+): Promise<{ loginObj: LoginObj; passwordSalt: string } | null> {
+  try {
+    const pool = new SimplePool();
+
+    const filter: Filter = {
+      kinds: [30078],
+      '#d': [dTag],
+      limit: 1
+    };
+
+    console.log('📥 [getLoginObjByDTag] Querying for LoginObj by d-tag:', dTag);
+
+    const event = await pool.get(relays, filter);
+    pool.close(relays);
+
+    if (!event) {
+      console.log('❌ [getLoginObjByDTag] No LoginObj found');
+      return null;
+    }
+
+    // Derive password key from password + salt using PBKDF2
+    const encoder = new TextEncoder();
+    const passwordData = encoder.encode(password);
+    const saltData = hexToBytes(passwordSalt);
+
+    const { pbkdf2 } = await import('@noble/hashes/pbkdf2');
+    const derivedKey = pbkdf2(sha256, passwordData, saltData, { c: 100000, dkLen: 32 });
+    const passwordKey = bytesToHex(derivedKey);
+    console.log('🔑 [getLoginObjByDTag] Derived password key from password + salt');
+
+    // Check encryption type from tags
+    const encryptionTag = event.tags.find(t => t[0] === 'encryption');
+    const encryptionType = encryptionTag?.[1] || 'password-nip04';
+
+    // Try NIP-44 first
+    if (encryptionType === 'password-nip44') {
+      try {
+        const { decrypt, getConversationKey } = await import('nostr-tools/nip44');
+        const passwordKeyBytes = hexToBytes(passwordKey);
+        const conversationKey = getConversationKey(passwordKeyBytes, event.pubkey);
+        const decryptedContent = decrypt(event.content, conversationKey);
+        const loginObj = JSON.parse(decryptedContent) as LoginObj;
+        console.log('✅ [getLoginObjByDTag] LoginObj decrypted successfully (NIP-44)');
+        return { loginObj, passwordSalt };
+      } catch (nip44Error) {
+        console.warn('⚠️ [getLoginObjByDTag] NIP-44 decryption failed, trying NIP-04 fallback...', nip44Error);
+      }
+    }
+
+    // Fallback to NIP-04
+    try {
+      const { decrypt } = await import('nostr-tools/nip04');
+      const decryptedContent = await decrypt(passwordKey, event.pubkey, event.content);
+      const loginObj = JSON.parse(decryptedContent) as LoginObj;
+      console.log('✅ [getLoginObjByDTag] LoginObj decrypted successfully (NIP-04)');
+      return { loginObj, passwordSalt };
+    } catch (decryptError) {
+      console.error('❌ [getLoginObjByDTag] Failed to decrypt LoginObj - wrong password?', decryptError);
+      return null;
+    }
+  } catch (error) {
+    console.error('Failed to get LoginObj by d-tag:', error);
+    return null;
+  }
+}
+
+/**
+ * Vault info extracted from a Google LoginObj without decrypting
+ * Used for vault picker when multiple vaults are linked to same Google account
+ */
+export interface GoogleVaultInfo {
+  dTag: string;
+  storagePublicKey: string; // The vault's unique identifier
+  displayName: string; // Human-readable name for UI
+  passwordSalt: string;
+  createdAt: number;
+  pubkey: string; // Event author pubkey (needed for getLoginObj)
+}
+/**
+ * Get all LoginObjs for a Google UID without decrypting.
+ * Used to check if multiple vaults are linked to the same Google account.
+ * Returns vault info extracted from event tags (no password needed).
+ *
+ * Queries using the standard #t tag with format: gvault_{hash(googleUid)}
+ * The 't' tag is a standard NIP tag reliably indexed by relays.
+ *
+ * @param googleUid - Google UID
+ * @param environment - Environment name (e.g., 'production')
+ * @param relays - Relay URLs to query
+ * @returns Array of vault info objects (empty if none found)
+ */
+export async function getAllGoogleLoginObjs(
+  googleUid: string,
+  environment: string,
+  relays: string[]
+): Promise<GoogleVaultInfo[]> {
+  try {
+    const pool = new SimplePool();
+    const namespace = getNamespace();
+
+    // Build d-tag prefix for Google auth
+    // Format: ${namespace}_login_${hash(googleUid)}_google_
+    const hashedGoogleUid = hash(googleUid);
+    const dTagPrefix = `${namespace}_login_${hashedGoogleUid}_google_`;
+
+    console.log('🔍 [getAllGoogleLoginObjs] Querying for all Google LoginObjs:', {
+      googleUid: googleUid.substring(0, 8) + '...',
+      environment,
+      namespace,
+      dTagPrefix,
+      hashedGoogleUid,
+      relays: relays
+    });
+
+    // Query by #t tag with hashed Google UID
+    // The 't' tag is a standard NIP tag that's reliably indexed by relays
+    const tTagValue = `gvault_${hashedGoogleUid}`;
+    console.log('🔍 [getAllGoogleLoginObjs] Querying by #t tag:', tTagValue);
+
+    const filter: Filter = {
+      kinds: [30078],
+      '#t': [tTagValue],
+      limit: 100
+    };
+
+    let allEvents: NostrEvent[] = [];
+    try {
+      allEvents = await pool.querySync(relays, filter);
+      console.log(`🔍 [getAllGoogleLoginObjs] Query returned ${allEvents.length} event(s)`);
+    } catch (e) {
+      console.warn('🔍 [getAllGoogleLoginObjs] Query failed:', e);
+    }
+
+    // Log all d-tags for debugging
+    if (allEvents.length > 0) {
+      console.log('🔍 [getAllGoogleLoginObjs] D-tags found:', allEvents.map(e => e.tags.find(t => t[0] === 'd')?.[1]));
+    }
+
+    // Filter events by d-tag prefix and environment suffix
+    let matchingEvents = allEvents.filter(event => {
+      const dTag = event.tags.find(t => t[0] === 'd')?.[1];
+      const matches = dTag && dTag.startsWith(dTagPrefix) && dTag.endsWith(`_${environment}`);
+      if (dTag && !matches) {
+        console.log(`🔍 [getAllGoogleLoginObjs] D-tag ${dTag} does not match prefix ${dTagPrefix} or suffix _${environment}`);
+      }
+      return matches;
+    });
+
+    console.log(`🔍 [getAllGoogleLoginObjs] Found ${matchingEvents.length} LoginObj events for this Google UID after filtering`);
+
+    pool.close(relays);
+
+    if (matchingEvents.length === 0) {
+      return [];
+    }
+
+    // Extract vault info from each event
+    const vaults: GoogleVaultInfo[] = [];
+
+    for (const event of matchingEvents) {
+      // Skip tombstoned (unlinked) entries - they have a 't: tombstone' tag
+      const isTombstone = event.tags.some(t => t[0] === 't' && t[1] === 'tombstone');
+      if (isTombstone) {
+        console.log('🔍 [getAllGoogleLoginObjs] Skipping tombstoned entry');
+        continue;
+      }
+
+      // Only include version 2 (new format) entries - orphan old legacy ones
+      const versionTag = event.tags.find(t => t[0] === 'version');
+      if (versionTag?.[1] !== '2') {
+        console.log('🔍 [getAllGoogleLoginObjs] Skipping legacy entry (no version tag or version != 2)');
+        continue;
+      }
+
+      const dTag = event.tags.find(t => t[0] === 'd')?.[1];
+      const passwordSaltTag = event.tags.find(t => t[0] === 'password-salt');
+      const storagePublicKeyTag = event.tags.find(t => t[0] === 'storage-public-key');
+      const displayNameTag = event.tags.find(t => t[0] === 'display-name');
+      // Fallback to old vault-username tag for backwards compatibility
+      const vaultUsernameTag = event.tags.find(t => t[0] === 'vault-username');
+
+      if (!dTag || !passwordSaltTag?.[1]) {
+        console.warn('🔍 [getAllGoogleLoginObjs] Skipping event without d-tag or password-salt');
+        continue;
+      }
+
+      // storagePublicKey is required for multi-vault, but fall back to empty for old events
+      const storagePublicKey = storagePublicKeyTag?.[1] || '';
+      // displayName for UI, fall back to vault-username for backwards compat
+      const displayName = displayNameTag?.[1] || vaultUsernameTag?.[1] || 'Unknown Vault';
+
+      vaults.push({
+        dTag,
+        storagePublicKey,
+        displayName,
+        passwordSalt: passwordSaltTag[1],
+        createdAt: event.created_at,
+        pubkey: event.pubkey
+      });
+    }
+
+    // Sort by creation date (newest first)
+    vaults.sort((a, b) => b.createdAt - a.createdAt);
+
+    console.log(`🔍 [getAllGoogleLoginObjs] Returning ${vaults.length} vault(s)`);
+
+    return vaults;
+  } catch (error) {
+    console.error('[getAllGoogleLoginObjs] Failed to query:', error);
+    return [];
+  }
+}
+
+/**
+ * Find all Google LoginObjs linked to a specific vault (by storagePublicKey).
+ * Used to discover linked Google accounts for unlinking, even if linkedAuthProviders is missing.
+ * Queries by the 't' tag: svault_{hash(storagePublicKey)}
+ *
+ * @param storagePublicKey - The vault's storage public key
+ * @param environment - Environment name (e.g., 'production', 'demo')
+ * @param relays - Relay URLs to query
+ * @returns Array of linked Google account info
+ */
+export async function getLinkedGoogleLoginObjs(
+  storagePublicKey: string,
+  environment: string,
+  relays: string[]
+): Promise<Array<{
+  displayName: string;
+  googleUidHash: string;
+  dTag: string;
+  pubkey: string; // Event pubkey needed for tombstoning
+  createdAt: number;
+}>> {
+  try {
+    const pool = new SimplePool();
+    const storageHash = hash(storagePublicKey);
+
+    console.log('[getLinkedGoogleLoginObjs] Querying for linked Google accounts:', {
+      storagePublicKey: storagePublicKey.slice(0, 12) + '...',
+      storageHash: storageHash.slice(0, 12) + '...',
+      environment,
+      relays
+    });
+
+    // Query by 't' tag: svault_{hash(storagePublicKey)}
+    const filter: Filter = {
+      kinds: [30078],
+      '#t': [`svault_${storageHash}`],
+      limit: 20
+    };
+
+    let events: NostrEvent[] = [];
+    try {
+      events = await pool.querySync(relays, filter);
+    } catch (e) {
+      console.warn('[getLinkedGoogleLoginObjs] Query failed:', e);
+    }
+
+    pool.close(relays);
+
+    console.log(`[getLinkedGoogleLoginObjs] Found ${events.length} event(s)`);
+
+    if (events.length === 0) {
+      return [];
+    }
+
+    const results: Array<{
+      displayName: string;
+      googleUidHash: string;
+      dTag: string;
+      pubkey: string;
+      createdAt: number;
+    }> = [];
+
+    for (const event of events) {
+      // Skip tombstoned (unlinked) entries
+      const isTombstone = event.tags.some(t => t[0] === 't' && t[1] === 'tombstone');
+      if (isTombstone) {
+        console.log('[getLinkedGoogleLoginObjs] Skipping tombstoned entry');
+        continue;
+      }
+
+      // Verify this is a Google auth LoginObj
+      const authProviderTag = event.tags.find(t => t[0] === 'auth-provider');
+      if (authProviderTag?.[1] !== 'google') {
+        continue;
+      }
+
+      // Verify environment matches
+      const dTag = event.tags.find(t => t[0] === 'd')?.[1];
+      if (!dTag || !dTag.endsWith(`_${environment}`)) {
+        continue;
+      }
+
+      // Only include version 2 (new format) entries - orphan old legacy ones
+      const versionTag = event.tags.find(t => t[0] === 'version');
+      if (versionTag?.[1] !== '2') {
+        console.log('[getLinkedGoogleLoginObjs] Skipping legacy entry (no version tag or version != 2)');
+        continue;
+      }
+
+      // Extract display name and google UID hash
+      const displayNameTag = event.tags.find(t => t[0] === 'display-name');
+      const googleUidHashTag = event.tags.find(t => t[0] === 'google-uid-hash');
+
+      results.push({
+        displayName: displayNameTag?.[1] || 'Unknown Vault',
+        googleUidHash: googleUidHashTag?.[1] || '',
+        dTag,
+        pubkey: event.pubkey,
+        createdAt: event.created_at * 1000
+      });
+    }
+
+    console.log(`[getLinkedGoogleLoginObjs] Returning ${results.length} linked account(s)`);
+    return results;
+  } catch (error) {
+    console.error('[getLinkedGoogleLoginObjs] Failed:', error);
+    return [];
+  }
+}
+
+/**
+ * Check if a LoginObj exists on Nostr without decrypting
+ * Used to determine if an account exists before prompting for password
+ *
+ * @param identifier - Username or Google UID
+ * @param identifierType - 'username' or 'google'
+ * @param environment - Environment name (production, development, etc.)
+ * @param relays - Relay URLs to query
+ * @returns true if LoginObj exists, false otherwise
+ */
+export async function loginObjExists(
+  identifier: string,
+  identifierType: IdentifierType,
+  environment: string,
+  relays: string[]
+): Promise<boolean> {
+  try {
+    const pool = new SimplePool();
+    const namespace = getNamespace();
+
+    // Build d-tag with identifier type
+    const dTag = buildLoginDTag(identifier, identifierType, environment, namespace);
+
+    // Create filter for login event
+    const filter: Filter = {
+      kinds: [30078],
+      '#d': [dTag],
+      limit: 1
+    };
+
+    console.log('🔍 [loginObjExists] Checking for LoginObj:', { identifier: identifier.substring(0, 8) + '...', identifierType, environment, dTag });
+
+    // Get the latest login event
+    let event = await pool.get(relays, filter);
+
+    // Backward compatibility: if username type and not found, try legacy d-tag format
+    if (!event && identifierType === 'username') {
+      const legacyDTag = `${namespace}_login_${hash(identifier)}_${environment}`;
+      console.log('🔍 [loginObjExists] Trying legacy d-tag format:', legacyDTag);
+      const legacyFilter: Filter = {
+        kinds: [30078],
+        '#d': [legacyDTag],
+        limit: 1
+      };
+      event = await pool.get(relays, legacyFilter);
+    }
+
+    pool.close(relays);
+
+    if (event) {
+      console.log('✅ [loginObjExists] LoginObj found');
+      return true;
+    }
+
+    console.log('❌ [loginObjExists] No LoginObj found');
+    return false;
+  } catch (error) {
+    console.error('Failed to check LoginObj existence:', error);
+    return false;
   }
 }
 

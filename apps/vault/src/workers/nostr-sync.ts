@@ -625,12 +625,19 @@ export const nostrSync = {
    * Build a minimal vault event for Nostr publishing (STORAGE KEY-ENCRYPTED for sync operations)
    * Used for ongoing sync - encrypted with storage key for cross-tab sync without password
    *
-   * @param params - Object containing username
+   * @param params - Object containing storagePublicKey (preferred) or username (legacy)
    * @returns Object with signed event
    */
-  saveVaultToNostr: async (params: { username: string }): Promise<{ event: any }> => {
+  saveVaultToNostr: async (params: { storagePublicKey?: string; username?: string }): Promise<{ event: any }> => {
     const crypto = await ensureCryptoReady();
-    const vaultRaw = await vaultDB.getVault(params.username);
+
+    // Determine lookup key - prefer storagePublicKey
+    const lookupKey = params.storagePublicKey || params.username;
+    if (!lookupKey) {
+      throw new Error('No storagePublicKey or username provided');
+    }
+
+    const vaultRaw = await vaultDB.getVault(lookupKey);
     if (!vaultRaw) throw new Error('No vault to save');
 
     // Map from IndexedDB field names to VaultData interface field names
@@ -640,6 +647,7 @@ export const nostrSync = {
     };
 
     console.log('📤 [saveVaultToNostr] Preparing vault for Nostr sync:', {
+      storagePublicKey: lookupKey.slice(0, 12) + '...',
       username: vault.username,
       identitiesCount: vault.identities?.length || 0,
       hasXprivEncrypted: !!vault.xprivEncrypted,
@@ -649,7 +657,8 @@ export const nostrSync = {
 
     // Use SessionStateManager to get session (atomic auth uses this)
     const manager = getSessionStateManager();
-    const session = (manager as any).sessions?.get(params.username);
+    // Sessions are keyed by storagePublicKey
+    const session = (manager as any).sessions?.get(lookupKey);
 
     // CRITICAL: Always use the vault's storage public key
     // During account creation, storage keypair is derived at m/44'/1237'/0'/0/8907 (STORAGE_INDEX)

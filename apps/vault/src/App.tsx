@@ -2,7 +2,7 @@ import type { Component } from 'solid-js';
 import { AppProviders } from './providers';
 import './index.css';
 import { Router, Route } from '@solidjs/router';
-import { Login, Dashboard, AuthGuard, LoginGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, AccountManager, ManageDashboard, AccountPickerPage, PermissionRequestPage, SimpleAuthPage } from './components';
+import { Login, Dashboard, AuthGuard, PinUnlock, QuickUnlock, UnlockVaultOperation, ManageDashboard, AccountPickerPage, PermissionRequestPage, SimpleAuthPage } from './components';
 import AccountPickerController from './components/AccountPickerController';
 import SimpleAuthPromptController from './components/SimpleAuthPromptController';
 import RecoveryPhraseRestore from './components/RecoveryPhraseRestore';

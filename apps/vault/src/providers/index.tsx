@@ -6,29 +6,33 @@ import { AuthProvider } from './AuthProvider';
 import { DataProvider } from './DataProvider';
 import { NostrCommsProvider } from './NostrCommsProvider';
 import { DarkModeProvider } from './DarkModeProvider';
+import { GoogleAuthProvider } from './GoogleAuthProvider';
 
 export const AppProviders: ParentComponent = (props) => {
   return (
     <EnvironmentProvider>
-      <MessengerProvider>
-        <CryptoWorkerProvider>
-          <NostrCommsProvider>
-            <AuthProvider>
-              <DataProvider>
-                <DarkModeProvider>
-                  {props.children}
-                </DarkModeProvider>
-              </DataProvider>
-            </AuthProvider>
-          </NostrCommsProvider>
-        </CryptoWorkerProvider>
-      </MessengerProvider>
+      <GoogleAuthProvider>
+        <MessengerProvider>
+          <CryptoWorkerProvider>
+            <NostrCommsProvider>
+              <AuthProvider>
+                <DataProvider>
+                  <DarkModeProvider>
+                    {props.children}
+                  </DarkModeProvider>
+                </DataProvider>
+              </AuthProvider>
+            </NostrCommsProvider>
+          </CryptoWorkerProvider>
+        </MessengerProvider>
+      </GoogleAuthProvider>
     </EnvironmentProvider>
   );
 };
 
 // Re-export all providers and hooks
 export { EnvironmentProvider, useEnvironment } from './EnvironmentProvider';
+export { GoogleAuthProvider, useGoogleAuth } from './GoogleAuthProvider';
 export { MessengerProvider, useMessenger, notifyAuthReady } from './MessengerProvider';
 export { CryptoWorkerProvider, useCryptoWorker, useCryptoWorkerReady } from './CryptoWorkerProvider';
 export { AuthProvider, useAuth } from './AuthProvider';

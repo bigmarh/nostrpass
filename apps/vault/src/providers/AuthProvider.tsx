@@ -15,26 +15,33 @@
 import { createContext, useContext, ParentComponent, createSignal, createEffect, onMount, on } from 'solid-js';
 import { useMessenger, notifyAuthReady } from './MessengerProvider';
 import { useEnvironment } from './EnvironmentProvider';
-import type { UserProfile, ErrorCode } from '@nostrpass/types';
+import type { UserProfile, ErrorCode, IdentifierType } from '@nostrpass/types';
 import { getCryptoWorker, getCryptoWorkerInstance } from '../services/cryptoWorkerSingleton';
 import { showErrorToast, showSuccessToast } from '../components/Toast';
 import { setupMessengerRoutes } from './auth/AuthWorkerBridge';
 
 /**
  * Complete auth state - everything in one object
+ *
+ * Key identifier: storagePublicKey is the UNIVERSAL vault identifier.
+ * - username is for display only
+ * - storagePublicKey is used for all data lookups
  */
 export interface AuthState {
   isAuthenticated: boolean;
   isLocked: boolean;
   isLoading: boolean;
   user: {
-    username: string;
-    publicKey: string;
-    storagePublicKey?: string;
+    username: string; // Login identifier (Google UID for Google auth, actual username for username auth)
+    displayName: string; // Human-readable name for UI display
+    publicKey: string; // Nostr public key (npub)
+    storagePublicKey: string; // Universal vault identifier (used for all lookups)
   } | null;
   sessionId: string | null;
   vaultVersion?: number;
   identityCount?: number;
+  environment?: string | null; // Environment used for login (production, demo, etc.)
+  authProvider?: 'username' | 'google' | null; // How the user logged in
 }
 
 const initialState: AuthState = {
@@ -42,7 +49,9 @@ const initialState: AuthState = {
   isLocked: true,
   isLoading: false,
   user: null,
-  sessionId: null
+  sessionId: null,
+  environment: null,
+  authProvider: null
 };
 
 interface AuthContextType {
@@ -54,8 +63,8 @@ interface AuthContextType {
   hasPinVault: () => boolean;
   isVaultLocked: () => boolean;
   // Operations
-  login: (password: string, username: string) => Promise<void>;
-  createAccount: (username: string, password: string, pin: string, recovery?: { questions: string[], answers: string[] }) => Promise<{ publicKey: string }>;
+  login: (password: string, identifier: string, identifierType?: IdentifierType, displayName?: string, environment?: string, vaultDTag?: string, vaultPasswordSalt?: string) => Promise<void>;
+  createAccount: (identifier: string, password: string, pin: string, recovery?: { questions: string[], answers: string[] }, identifierType?: IdentifierType, displayName?: string, googleUid?: string, environment?: string) => Promise<{ publicKey: string }>;
   logout: () => Promise<void>;
   updateProfile: (profile: Partial<UserProfile>) => void;
   unlockVault: (pin: string) => Promise<boolean>;
@@ -104,7 +113,9 @@ export const AuthProvider: ParentComponent = (props) => {
           user: state.user,
           sessionId: state.sessionId,
           vaultVersion: state.vaultVersion,
-          identityCount: state.identityCount
+          identityCount: state.identityCount,
+          environment: state.environment,
+          authProvider: state.authProvider
         });
 
         console.log('[AuthProvider] Session restored:', {
@@ -152,7 +163,9 @@ export const AuthProvider: ParentComponent = (props) => {
             user: state.user,
             sessionId: state.sessionId,
             vaultVersion: state.vaultVersion,
-            identityCount: state.identityCount
+            identityCount: state.identityCount,
+            environment: state.environment,
+            authProvider: state.authProvider
           });
 
           // Update localStorage
@@ -217,12 +230,14 @@ export const AuthProvider: ParentComponent = (props) => {
         return state.user ? {
           publicKey: state.user.publicKey,
           privateKey: '',
+          storagePublicKey: state.user.storagePublicKey,
           profile: {
             username: state.user.username,
             createdAt: Date.now(),
             updatedAt: Date.now(),
             preferences: {},
-            security: { sessionTimeout: 60 }
+            security: { sessionTimeout: 60 },
+            storagePublicKey: state.user.storagePublicKey
           },
           appPermissions: new Map(),
           isAuthenticated: state.isAuthenticated,
@@ -250,12 +265,14 @@ export const AuthProvider: ParentComponent = (props) => {
           return state.user ? {
             publicKey: state.user.publicKey,
             privateKey: '',
+            storagePublicKey: state.user.storagePublicKey,
             profile: {
               username: state.user.username,
               createdAt: Date.now(),
               updatedAt: Date.now(),
               preferences: {},
-              security: { sessionTimeout: 60 }
+              security: { sessionTimeout: 60 },
+              storagePublicKey: state.user.storagePublicKey
             },
             appPermissions: new Map(),
             isAuthenticated: state.isAuthenticated,
@@ -272,8 +289,15 @@ export const AuthProvider: ParentComponent = (props) => {
 
   /**
    * Login with atomic operation
+   * @param password - User's password for decryption
+   * @param identifier - Username or Google UID
+   * @param identifierType - 'username' or 'google' (defaults to 'username')
+   * @param displayName - Display name (for Google auth)
+   * @param environment - Optional environment override (if provided, takes precedence)
+   * @param vaultDTag - For multi-vault Google auth: specific d-tag to fetch
+   * @param vaultPasswordSalt - For multi-vault: password salt from vault picker
    */
-  const login = async (password: string, username: string) => {
+  const login = async (password: string, identifier: string, identifierType: IdentifierType = 'username', displayName?: string, environment?: string, vaultDTag?: string, vaultPasswordSalt?: string) => {
     if (!cryptoWorker) {
       throw new Error('Crypto worker not ready');
     }
@@ -288,25 +312,42 @@ export const AuthProvider: ParentComponent = (props) => {
       const providerEnv = storageEnvironmentName();
       const userConfigured = isConfiguredByUser();
 
-      // Use global config if user explicitly set it via Advanced modal (even if they chose defaults)
-      // Otherwise, fall back to provider's storageEnvironmentName (from URL params)
-      const effectiveEnvironment = userConfigured ? globalEnv : providerEnv;
+      // Priority: explicit param > user advanced settings > developer URL param > global default
+      // User settings take precedence because they explicitly configured it
+      let effectiveEnvironment: string;
+      if (environment) {
+        // Explicit param passed to function (e.g., from Google auth flow)
+        effectiveEnvironment = environment;
+      } else if (userConfigured) {
+        // User explicitly configured via Advanced settings modal
+        effectiveEnvironment = globalEnv;
+      } else {
+        // Developer's URL param or global default
+        effectiveEnvironment = providerEnv;
+      }
 
       console.log('[AuthProvider] ========================================');
       console.log('[AuthProvider] STARTING LOGIN');
-      console.log('[AuthProvider] Username:', username);
+      console.log('[AuthProvider] Identifier:', identifier);
+      console.log('[AuthProvider] Identifier Type:', identifierType);
+      console.log('[AuthProvider] Display Name:', displayName);
       console.log('[AuthProvider] Global Config - Namespace:', globalNamespace);
       console.log('[AuthProvider] Global Config - Environment:', globalEnv);
       console.log('[AuthProvider] Provider Environment:', providerEnv);
       console.log('[AuthProvider] User Configured:', userConfigured);
+      console.log('[AuthProvider] Explicit Environment Param:', environment);
       console.log('[AuthProvider] EFFECTIVE Environment:', effectiveEnvironment);
       console.log('[AuthProvider] ========================================');
 
       await cryptoWorker.atomicLogin({
-        username,
+        identifier,
+        identifierType,
         password,
         relays: getRelays(),
-        environment: effectiveEnvironment
+        environment: effectiveEnvironment,
+        displayName,
+        vaultDTag,
+        vaultPasswordSalt
       });
 
       // State will be updated via AUTH_STATE_CHANGED event
@@ -321,6 +362,7 @@ export const AuthProvider: ParentComponent = (props) => {
 
   /**
    * Unlock vault with atomic operation
+   * Uses storagePublicKey as the session identifier
    */
   const unlockVault = async (pin: string): Promise<boolean> => {
     if (!cryptoWorker) {
@@ -328,15 +370,16 @@ export const AuthProvider: ParentComponent = (props) => {
     }
 
     const state = authState();
-    if (!state.user?.username) {
+    if (!state.user?.storagePublicKey) {
       throw new Error('No user logged in');
     }
 
     try {
-      console.log('[AuthProvider] Starting atomic unlock...');
+      console.log('[AuthProvider] Starting atomic unlock for storagePublicKey:', state.user.storagePublicKey.slice(0, 12) + '...');
 
+      // Worker accepts username but internally resolves to storagePublicKey
       await cryptoWorker.atomicUnlock({
-        username: state.user.username,
+        username: state.user.storagePublicKey,
         pin
       });
 
@@ -352,6 +395,7 @@ export const AuthProvider: ParentComponent = (props) => {
 
   /**
    * Logout with atomic operation
+   * Uses storagePublicKey as the session identifier
    */
   const logout = async () => {
     if (!cryptoWorker) {
@@ -359,21 +403,22 @@ export const AuthProvider: ParentComponent = (props) => {
     }
 
     const state = authState();
-    if (!state.user?.username) {
+    if (!state.user?.storagePublicKey) {
       return;
     }
 
     try {
-      console.log('[AuthProvider] Starting atomic logout...');
+      console.log('[AuthProvider] Starting atomic logout for storagePublicKey:', state.user.storagePublicKey.slice(0, 12) + '...');
 
       await cryptoWorker.atomicLogout({
-        username: state.user.username
+        username: state.user.storagePublicKey
       });
 
       // Notify embassy about logout and request vault close
       if (messenger) {
         console.log('[AuthProvider] Sending logout message to embassy');
         messenger.send('nostrpass:logout', {
+          storagePublicKey: state.user.storagePublicKey,
           username: state.user.username,
           timestamp: Date.now()
         });
@@ -393,6 +438,7 @@ export const AuthProvider: ParentComponent = (props) => {
 
   /**
    * Lock vault
+   * Uses storagePublicKey as the session identifier
    */
   const lockVault = async () => {
     if (!cryptoWorker) {
@@ -400,15 +446,15 @@ export const AuthProvider: ParentComponent = (props) => {
     }
 
     const state = authState();
-    if (!state.user?.username) {
+    if (!state.user?.storagePublicKey) {
       return;
     }
 
     try {
-      console.log('[AuthProvider] Locking vault...');
+      console.log('[AuthProvider] Locking vault for storagePublicKey:', state.user.storagePublicKey.slice(0, 12) + '...');
 
       await cryptoWorker.lockSession({
-        username: state.user.username
+        username: state.user.storagePublicKey
       });
 
       // State will be updated via AUTH_STATE_CHANGED event
@@ -421,12 +467,24 @@ export const AuthProvider: ParentComponent = (props) => {
 
   /**
    * Create account with atomic operation
+   * @param identifier - Username or Google UID
+   * @param password - User's password for encryption
+   * @param pin - PIN for vault unlock
+   * @param recovery - Optional recovery questions/answers
+   * @param identifierType - 'username' or 'google' (defaults to 'username')
+   * @param displayName - Display name (for Google auth)
+   * @param googleUid - Google UID (only for Google auth)
+   * @param environment - Optional environment override (if provided, takes precedence)
    */
   const createAccount = async (
-    username: string,
+    identifier: string,
     password: string,
     pin: string,
-    recovery?: { questions: string[], answers: string[] }
+    recovery?: { questions: string[], answers: string[] },
+    identifierType: IdentifierType = 'username',
+    displayName?: string,
+    googleUid?: string,
+    environment?: string
   ): Promise<{ publicKey: string }> => {
     if (!cryptoWorker) {
       throw new Error('Crypto worker not ready');
@@ -435,15 +493,50 @@ export const AuthProvider: ParentComponent = (props) => {
     setAuthState(prev => ({ ...prev, isLoading: true }));
 
     try {
-      console.log('[AuthProvider] Starting atomic account creation...');
+      // Determine effective environment (same logic as login)
+      const { getEnvironment, getNamespace, isConfiguredByUser } = await import('@nostrpass/nostrHelpers');
+      const globalEnv = getEnvironment();
+      const globalNamespace = getNamespace();
+      const providerEnv = storageEnvironmentName();
+      const userConfigured = isConfiguredByUser();
+
+      // Priority: explicit param > user advanced settings > developer URL param > global default
+      // User settings take precedence because they explicitly configured it
+      let effectiveEnvironment: string;
+      if (environment) {
+        // Explicit param passed to function (e.g., from Google auth flow)
+        effectiveEnvironment = environment;
+      } else if (userConfigured) {
+        // User explicitly configured via Advanced settings modal
+        effectiveEnvironment = globalEnv;
+      } else {
+        // Developer's URL param or global default
+        effectiveEnvironment = providerEnv;
+      }
+
+      console.log('[AuthProvider] ========================================');
+      console.log('[AuthProvider] STARTING ACCOUNT CREATION');
+      console.log('[AuthProvider] Identifier:', identifier);
+      console.log('[AuthProvider] Identifier Type:', identifierType);
+      console.log('[AuthProvider] Display Name:', displayName);
+      console.log('[AuthProvider] Global Config - Namespace:', globalNamespace);
+      console.log('[AuthProvider] Global Config - Environment:', globalEnv);
+      console.log('[AuthProvider] Provider Environment:', providerEnv);
+      console.log('[AuthProvider] User Configured:', userConfigured);
+      console.log('[AuthProvider] Explicit Environment Param:', environment);
+      console.log('[AuthProvider] EFFECTIVE Environment:', effectiveEnvironment);
+      console.log('[AuthProvider] ========================================');
 
       const result = await cryptoWorker.atomicCreateAccount({
-        username,
+        identifier,
+        identifierType,
+        displayName: displayName || identifier,
         password,
         pin,
         relays: getRelays(),
-        environment: storageEnvironmentName(),
-        recovery
+        environment: effectiveEnvironment,
+        recovery,
+        googleUid
       });
 
       // State will be updated via AUTH_STATE_CHANGED event
@@ -479,8 +572,12 @@ export const AuthProvider: ParentComponent = (props) => {
       return state.user ? {
         publicKey: state.user.publicKey,
         privateKey: '',
+        // storagePublicKey is the universal vault identifier for all data lookups
+        storagePublicKey: state.user.storagePublicKey,
+        displayName: state.user.displayName, // Include displayName for UI display
         profile: {
           username: state.user.username,
+          displayName: state.user.displayName, // Include displayName in profile too
           createdAt: Date.now(),
           updatedAt: Date.now(),
           preferences: {},

@@ -15,13 +15,28 @@
  */
 
 import { vaultDB, type VaultData } from './db';
-import {
-  CheckVaultExistsParams,
-  CheckVaultExistsResult,
-  DeleteVaultParams,
-  DeleteVaultResult,
-} from '@nostrpass/types';
 import { ensureCryptoReady } from './crypto-primitives';
+
+// Local type definitions for vault operations
+interface CheckVaultExistsParams {
+  username?: string;
+  storagePublicKey?: string;
+}
+
+interface CheckVaultExistsResult {
+  exists: boolean;
+  storagePublicKey?: string;
+}
+
+interface DeleteVaultParams {
+  username?: string;
+  storagePublicKey?: string;
+}
+
+interface DeleteVaultResult {
+  success: boolean;
+  error?: string;
+}
 import { broadcastVaultUpdate } from './shared';
 import { nostrSync } from './nostr-sync';
 
@@ -62,29 +77,42 @@ export function setLogSessionState(logger: (action: string, username: string) =>
 /**
  * Get vault data from the database
  *
- * @param params - Object containing username
+ * @param params - Object containing storagePublicKey (preferred) or username (legacy fallback)
  * @returns The vault data or null if not found
  */
-async function getVaultData(params: { username: string; includeEncryptedVault?: boolean }): Promise<VaultData | null> {
+async function getVaultData(params: { storagePublicKey?: string; username?: string; includeEncryptedVault?: boolean }): Promise<VaultData | null> {
   try {
     console.log('📥 [getVaultData] ===== REQUEST START =====');
     console.log('📥 [getVaultData] Full params object:', JSON.stringify(params));
-    console.log('📥 [getVaultData] username:', params.username);
+    console.log('📥 [getVaultData] storagePublicKey:', params.storagePublicKey);
+    console.log('📥 [getVaultData] username (legacy):', params.username);
     console.log('📥 [getVaultData] includeEncryptedVault value:', params.includeEncryptedVault);
-    console.log('📥 [getVaultData] includeEncryptedVault type:', typeof params.includeEncryptedVault);
-    console.log('📥 [getVaultData] Has property "includeEncryptedVault":', 'includeEncryptedVault' in params);
 
     console.log('🔄 [getVaultData] Ensuring crypto ready...');
     await ensureCryptoReady();
     console.log('✅ [getVaultData] Crypto ready');
 
-    // Get vault data from database
-    console.log('🗄️ [getVaultData] Querying IndexedDB...');
-    const vaultData = await vaultDB.getVault(params.username);
+    // Determine lookup key - prefer storagePublicKey, fallback to username for backward compatibility
+    const lookupKey = params.storagePublicKey || params.username;
+    if (!lookupKey) {
+      console.log('❌ [getVaultData] No storagePublicKey or username provided');
+      return null;
+    }
+
+    // Get vault data from database (keyed by storagePublicKey)
+    console.log('🗄️ [getVaultData] Querying IndexedDB with key:', lookupKey.slice(0, 12) + '...');
+    let vaultData = await vaultDB.getVault(lookupKey);
+
+    // Fallback: If not found and we have a username, try legacy username lookup
+    if (!vaultData && params.username && !params.storagePublicKey) {
+      console.log('🔄 [getVaultData] Trying legacy username lookup...');
+      vaultData = await vaultDB.getVaultByUsername(params.username);
+    }
+
     console.log('✅ [getVaultData] IndexedDB query complete, found:', !!vaultData);
 
     if (!vaultData) {
-      console.log('❌ [getVaultData] No vault found for username:', params.username);
+      console.log('❌ [getVaultData] No vault found for key:', lookupKey.slice(0, 12) + '...');
       return null;
     }
 
@@ -95,7 +123,8 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
       hasXprivEncrypted: !!vaultData.xprivEncrypted,
       hasRecovery: !!(vaultData as any).recovery,
       identitiesCount: vaultData.identities?.length || 0,
-      identities: vaultData.identities
+      identities: vaultData.identities,
+      linkedAuthProviders: (vaultData as any).linkedAuthProviders
     });
 
     // Security: Only include sensitive fields when explicitly requested
@@ -113,7 +142,9 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
       lastSyncedAt: vaultData.lastSyncedAt,
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
       createdAt: vaultData.createdAt,
-      version: (vaultData as any).version || 1
+      version: (vaultData as any).version || 1,
+      // Linked auth providers (e.g., Google accounts linked to username vaults)
+      linkedAuthProviders: (vaultData as any).linkedAuthProviders || []
     };
 
     // Only include xprivEncrypted when explicitly requested (for unlock operations)
@@ -124,7 +155,7 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
         // Fallback to xprivs store
         console.warn('⚠️ [getVaultData] No xprivEncrypted in main vault, checking xprivs store...');
         try {
-          const xprivData = await vaultDB.getXpriv(params.username);
+          const xprivData = await vaultDB.getXpriv(lookupKey);
           if (xprivData?.xprivEncrypted) {
             result.xprivEncrypted = xprivData.xprivEncrypted;
             result.salt = xprivData.salt;
@@ -150,15 +181,15 @@ async function getVaultData(params: { username: string; includeEncryptedVault?: 
  * Save a new vault to the database
  * Used when fetching from Nostr for the first time or creating a new vault
  *
- * @param params - Vault data to save
+ * @param params - Vault data to save (storagePublicKey is the primary key)
  */
 async function saveVault(params: {
-  username: string;
-  publicKey: string;
+  storagePublicKey: string; // Primary key - the vault identifier
+  username: string; // Display name (for UI)
+  publicKey: string; // Same as storagePublicKey (alias)
   xprivEncrypted: string;
   salt: string;
   identities?: any[];
-  // activeIdentityByApp removed - now stored in localStorage
   passwordVerifier?: string;
   passwordSalt?: string;
   recovery?: any;
@@ -168,57 +199,70 @@ async function saveVault(params: {
 }): Promise<void> {
   await ensureCryptoReady();
 
-  const vaultData = {
-    username: params.username,
+  const vaultData: VaultData = {
+    storagePublicKey: params.storagePublicKey, // Primary key
+    username: params.username, // Display name
     publicKey: params.publicKey,
     xprivEncrypted: params.xprivEncrypted,
-    encryptedVault: params.xprivEncrypted, // Redundant field for compatibility
     salt: params.salt,
     identities: params.identities || [],
-    // activeIdentityByApp removed - now stored in localStorage per-browser
-    passwordVerifier: params.passwordVerifier,
     passwordSalt: params.passwordSalt,
     recovery: params.recovery,
     lastSyncedAt: params.lastSyncedAt || Date.now(),
     updatedAt: params.updatedAt || Date.now(),
     createdAt: params.createdAt || Date.now(),
-    lastUnlocked: Date.now()
+    lastUnlocked: Date.now(),
+    version: 1
   };
 
-  // Persist to vaults store
+  // Persist to vaults store (keyed by storagePublicKey)
   await vaultDB.saveVault(vaultData);
 
   // Mirror to xprivs store if present
   try {
     if (params.xprivEncrypted && params.salt) {
-      await vaultDB.saveXpriv(params.username, params.xprivEncrypted, params.salt, params.passwordSalt);
+      await vaultDB.saveXpriv(params.storagePublicKey, params.xprivEncrypted, params.salt, params.passwordSalt);
     }
   } catch (err) {
     console.error('Failed to mirror to xprivs store:', err);
   }
 
-  console.log('✅ Vault saved to IndexedDB');
+  console.log('✅ Vault saved to IndexedDB with storagePublicKey:', params.storagePublicKey.slice(0, 12) + '...');
 }
 
 /**
  * Update vault data atomically and broadcast change
  *
- * @param params - Object containing username, vaultData, and optional skipVersionIncrement flag
+ * @param params - Object containing storagePublicKey (preferred) or username (legacy), vaultData, and optional flags
  */
 async function updateVaultData(params: {
-  username: string;
+  storagePublicKey?: string;
+  username?: string; // Legacy fallback
   vaultData: any;
   skipVersionIncrement?: boolean;
   options?: { syncToNostr?: boolean };
 }): Promise<void> {
   await ensureCryptoReady();
+
+  // Determine lookup key - prefer storagePublicKey
+  const lookupKey = params.storagePublicKey || params.vaultData?.storagePublicKey || params.username;
+  if (!lookupKey) {
+    console.error('❌ [updateVaultData] No storagePublicKey or username provided');
+    throw new Error('No storagePublicKey or username provided');
+  }
+
   const toSave = { ...params.vaultData };
+
+  // Ensure storagePublicKey is set in the data
+  if (!toSave.storagePublicKey) {
+    toSave.storagePublicKey = lookupKey;
+  }
 
   // CRITICAL: Preserve xprivEncrypted if missing in incoming data
   // This prevents data loss when worker operations update vault without including xprivEncrypted
   if (!toSave.xprivEncrypted) {
     console.warn('⚠️ [updateVaultData] xprivEncrypted missing in incoming data, attempting to preserve from database...');
-    const existing = await vaultDB.getVault(params.username);
+    const existing = await vaultDB.getVault(lookupKey);
     if (existing?.xprivEncrypted) {
       toSave.xprivEncrypted = existing.xprivEncrypted;
       toSave.salt = existing.salt; // Preserve salt too
@@ -226,7 +270,7 @@ async function updateVaultData(params: {
     } else {
       // Try xprivs store as fallback
       console.warn('⚠️ [updateVaultData] No xprivEncrypted in main vault, checking xprivs store...');
-      const xprivData = await vaultDB.getXpriv(params.username);
+      const xprivData = await vaultDB.getXpriv(lookupKey);
       if (xprivData?.xprivEncrypted) {
         toSave.xprivEncrypted = xprivData.xprivEncrypted;
         toSave.salt = xprivData.salt;
@@ -249,6 +293,7 @@ async function updateVaultData(params: {
   }
 
   console.log('💾 [updateVaultData] Saving vault with:', {
+    storagePublicKey: lookupKey.slice(0, 12) + '...',
     username: toSave.username,
     version: toSave.version,
     identitiesCount: toSave.identities?.length || 0,
@@ -258,18 +303,18 @@ async function updateVaultData(params: {
     syncToNostr: params.options?.syncToNostr
   });
 
-  // Persist
+  // Persist (keyed by storagePublicKey)
   await vaultDB.saveVault(toSave);
   // Mirror to xprivs store if present
   try {
     const enc = toSave.xprivEncrypted;
     const pinSalt = toSave.salt;
     if (enc && pinSalt) {
-      await vaultDB.saveXpriv(params.username, enc, pinSalt, toSave.passwordSalt);
+      await vaultDB.saveXpriv(lookupKey, enc, pinSalt, toSave.passwordSalt);
     }
   } catch {}
-  // Broadcast
-  broadcastVaultUpdate(params.username, 'VAULT_DATA_UPDATED', { username: params.username });
+  // Broadcast (use storagePublicKey as identifier)
+  broadcastVaultUpdate(lookupKey, 'VAULT_DATA_UPDATED', { storagePublicKey: lookupKey, username: toSave.username });
 
   // Sync to Nostr if requested
   console.log('🔍 [updateVaultData] Checking sync options:', {
@@ -281,7 +326,7 @@ async function updateVaultData(params: {
   if (params.options?.syncToNostr) {
     try {
       console.log('📡 [updateVaultData] Syncing to Nostr...');
-      await nostrSync.saveVaultToNostr({ username: params.username });
+      await nostrSync.saveVaultToNostr({ storagePublicKey: lookupKey, username: toSave.username });
       console.log('✅ [updateVaultData] Vault synced to Nostr successfully');
     } catch (err) {
       console.warn('⚠️ [updateVaultData] Failed to sync vault to Nostr (non-critical):', err);
@@ -294,13 +339,24 @@ async function updateVaultData(params: {
 /**
  * Check if a vault exists in the database
  *
- * @param params - Object containing username
+ * @param params - Object containing storagePublicKey (preferred) or username (legacy)
  * @returns Object with exists boolean
  */
-async function checkVaultExists(params: CheckVaultExistsParams): Promise<CheckVaultExistsResult> {
+async function checkVaultExists(params: { storagePublicKey?: string; username?: string }): Promise<CheckVaultExistsResult> {
   await ensureCryptoReady();
 
-  const vaultData = await vaultDB.getVault(params.username);
+  const lookupKey = params.storagePublicKey || params.username;
+  if (!lookupKey) {
+    return { exists: false };
+  }
+
+  let vaultData = await vaultDB.getVault(lookupKey);
+
+  // Fallback: Try legacy username lookup if not found
+  if (!vaultData && params.username && !params.storagePublicKey) {
+    vaultData = await vaultDB.getVaultByUsername(params.username);
+  }
+
   return { exists: !!vaultData };
 }
 
@@ -308,25 +364,31 @@ async function checkVaultExists(params: CheckVaultExistsParams): Promise<CheckVa
  * Delete a vault from the database
  * Also clears the active session if present
  *
- * @param params - Object containing username
+ * @param params - Object containing storagePublicKey (preferred) or username (legacy)
  * @returns Object with success boolean
  */
-async function deleteVault(params: DeleteVaultParams): Promise<DeleteVaultResult> {
+async function deleteVault(params: { storagePublicKey?: string; username?: string }): Promise<DeleteVaultResult> {
   await ensureCryptoReady();
+
+  const lookupKey = params.storagePublicKey || params.username;
+  if (!lookupKey) {
+    console.error('❌ [deleteVault] No storagePublicKey or username provided');
+    return { success: false };
+  }
 
   // Remove from active sessions
   if (activeSessions) {
-    activeSessions.delete(params.username);
+    activeSessions.delete(lookupKey);
     if (logSessionState) {
-      logSessionState('delete', params.username);
+      logSessionState('delete', lookupKey);
     }
   }
 
-  // Delete from database (vaults, xprivs, sessions)
-  await vaultDB.deleteVault(params.username);
+  // Delete from database (vaults, xprivs, sessions) - keyed by storagePublicKey
+  await vaultDB.deleteVault(lookupKey);
 
   // Broadcast deletion
-  broadcastVaultUpdate(params.username, 'VAULT_DELETED', {});
+  broadcastVaultUpdate(lookupKey, 'VAULT_DELETED', {});
 
   return { success: true };
 }
