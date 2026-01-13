@@ -1,11 +1,11 @@
 import { Component, createSignal, Show } from 'solid-js';
-import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady, useCryptoWorker, useEnvironment } from '../providers';
+import { useAuth, useMessenger, useNostrComms, useCryptoWorkerReady, useEnvironment, useGoogleAuth } from '../providers';
 import { useParams, useNavigate } from '@solidjs/router';
 import PinSetup from './PinSetup';
 import PinVerification from './PinVerification';
-import { permissionService } from '../services/permissionService';
-import { DEFAULT_PERMISSIONS, DEFAULT_GET_PUBLIC_KEY } from '@nostrpass/types';
-import { configureNostrPass } from '@nostrpass/nostrHelpers';
+import { configureNostrPass, getEnvironment, getNamespace, isConfiguredByUser, getAllGoogleLoginObjs, type GoogleVaultInfo } from '@nostrpass/nostrHelpers';
+import GooglePasswordPrompt from './GooglePasswordPrompt';
+import VaultPicker from './VaultPicker';
 
 function desanitizeDomain(domain: string) {
     return domain.replace(/_/g, '.');
@@ -20,8 +20,20 @@ export const Login: Component = () => {
     const [error, setError] = createSignal('');
     const [loadingStatus, setLoadingStatus] = createSignal('');
     const [showPinSetup, setShowPinSetup] = createSignal(false);
+    const [isGoogleSignup, setIsGoogleSignup] = createSignal(false); // Track if PIN setup is for Google signup
     const [showPinUnlock, setShowPinUnlock] = createSignal(false);
     const [tempAccountData, setTempAccountData] = createSignal<{username: string, password: string, publicKey: string} | null>(null);
+
+    // Google auth state
+    const [showGooglePasswordPrompt, setShowGooglePasswordPrompt] = createSignal(false);
+    const [googleAuthMode, setGoogleAuthMode] = createSignal<'login' | 'signup'>('login');
+    const [googleAuthEnvironment, setGoogleAuthEnvironment] = createSignal<string>(''); // Store determined environment
+    const [googlePasswordError, setGooglePasswordError] = createSignal<string>(''); // Error to show in password prompt
+
+    // Multi-vault Google auth state
+    const [showVaultPicker, setShowVaultPicker] = createSignal(false);
+    const [googleVaults, setGoogleVaults] = createSignal<GoogleVaultInfo[]>([]);
+    const [selectedVault, setSelectedVault] = createSignal<GoogleVaultInfo | null>(null);
 
     // Advanced settings state - initialized after we have environment context
     const [showAdvancedPopover, setShowAdvancedPopover] = createSignal(false);
@@ -35,15 +47,13 @@ export const Login: Component = () => {
     const params = useParams();
     const navigate = useNavigate();
     const { send } = useMessenger();
-    const { login, createAccount, hasPinVault, unlockVault, user } = useAuth();
+    const { login, createAccount, unlockVault } = useAuth();
     const { checkUsernameAvailable, registerUsername, isConnected } = useNostrComms();
 
     const cryptoReady = useCryptoWorkerReady();
-    const cryptoWorker = useCryptoWorker();
+    // cryptoWorker available via useCryptoWorker() if needed
     const { getRelays, storageEnvironmentName } = useEnvironment();
-
-    // Log storage environment on component mount
-    console.log('[Login] Storage environment:', storageEnvironmentName());
+    const { isAvailable: googleAvailable, googleUser, signInWithGoogle, clearGoogleUser, isLoading: googleLoading } = useGoogleAuth();
 
     // Initialize environment type from URL params when popover opens
     const openAdvancedSettings = () => {
@@ -70,6 +80,270 @@ export const Login: Component = () => {
 
     const handleHideVault = () => {
         send('HIDE_VAULT');
+    };
+
+    // Handle Google Sign-In button click
+    // Mode is determined automatically based on whether account exists on Nostr
+    // For multi-vault: shows vault picker if multiple vaults linked to same Google account
+    const handleGoogleSignIn = async () => {
+        try {
+            setError('');
+            setIsLoading(true);
+            setLoadingStatus('Signing in with Google...');
+
+            const user = await signInWithGoogle();
+
+            if (!user) {
+                setIsLoading(false);
+                setLoadingStatus('');
+                return;
+            }
+
+            // Check for all vaults linked to this Google account
+            setLoadingStatus('Checking for linked vaults...');
+            const relays = getRelays();
+
+            // Get environment - priority: user configured global > URL params > provider default
+            // This ensures Google sign-in respects advanced settings
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlEnv = urlParams.get('storageEnvironment');
+            const userConfigured = isConfiguredByUser();
+            const globalEnv = getEnvironment();
+            const globalNamespace = getNamespace();
+
+            let environment: string;
+            if (userConfigured) {
+                // User applied advanced settings - use global config
+                environment = globalEnv;
+            } else if (urlEnv) {
+                // URL param provided
+                environment = urlEnv;
+            } else {
+                // Fall back to provider
+                environment = storageEnvironmentName();
+            }
+
+            console.log('[Login] Google sign-in environment check:', {
+                userConfigured,
+                globalNamespace,
+                globalEnv,
+                urlEnv,
+                providerEnv: storageEnvironmentName(),
+                effectiveEnv: environment
+            });
+
+            // Query for all vaults linked to this Google account using #t tag
+            const vaults = await getAllGoogleLoginObjs(user.uid, environment, relays);
+
+            console.log('[Login] Google vaults found:', { uid: user.uid.substring(0, 8) + '...', environment, namespace: globalNamespace, vaultCount: vaults.length });
+
+            // Store the determined environment for use in login/signup
+            setGoogleAuthEnvironment(environment);
+
+            if (vaults.length === 0) {
+                // No vaults found - this is a new user, go to signup flow
+                console.log('[Login] No vaults found for Google account, switching to signup mode');
+                setGoogleAuthMode('signup');
+                setGooglePasswordError('');
+                setShowGooglePasswordPrompt(true);
+            } else if (vaults.length === 1) {
+                // Single vault - proceed directly to password prompt
+                console.log('[Login] Single vault found, proceeding to password prompt');
+                setSelectedVault(vaults[0]);
+                setGoogleAuthMode('login');
+                setGooglePasswordError('');
+                setShowGooglePasswordPrompt(true);
+            } else {
+                // Multiple vaults - show vault picker
+                console.log('[Login] Multiple vaults found, showing vault picker');
+                setGoogleVaults(vaults);
+                setShowVaultPicker(true);
+            }
+
+            setIsLoading(false);
+            setLoadingStatus('');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Google sign-in failed');
+            setIsLoading(false);
+            setLoadingStatus('');
+        }
+    };
+
+    // Handle vault selection from picker (multi-vault Google auth)
+    const handleVaultSelect = (vault: GoogleVaultInfo) => {
+        setSelectedVault(vault);
+        setShowVaultPicker(false);
+        setGoogleAuthMode('login');
+        setGooglePasswordError('');
+        setShowGooglePasswordPrompt(true);
+    };
+
+    // Handle Google login with password
+    const handleGoogleLogin = async (password: string) => {
+        if (!googleUser()) return;
+
+        setIsLoading(true);
+        setShowGooglePasswordPrompt(false);
+        setError('');
+        setGooglePasswordError('');
+
+        try {
+            const user = googleUser()!;
+            const environment = googleAuthEnvironment(); // Use the stored environment
+            const vault = selectedVault(); // May be null for single-vault (will use standard lookup)
+            setLoadingStatus('Verifying credentials...');
+
+            // If we have a selected vault (from picker or single vault), pass its d-tag
+            // This enables multi-vault support
+            // Get displayName: prefer Google displayName, fallback to email username (before @), never use UID
+            let displayName = user.displayName;
+            if (!displayName && user.email) {
+                // Use the part before @ as a fallback (e.g., "john.doe" from "john.doe@gmail.com")
+                displayName = user.email.split('@')[0];
+            }
+            // If still no displayName, the session manager will use a better fallback
+            
+            await login(
+                password,
+                user.uid,
+                'google',
+                displayName || undefined, // Pass undefined if we can't get a good displayName
+                environment,
+                vault?.dTag,
+                vault?.passwordSalt
+            );
+
+            setLoadingStatus('Loading your vault...');
+            setIsLoading(false);
+            setShowPinUnlock(true);
+            clearGoogleUser();
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'Login failed';
+
+            // Since we already checked loginObjExists before showing the password prompt,
+            // if googleAuthMode is 'login', we know the account exists.
+            // A failure here means wrong password - show error in password prompt
+            if (googleAuthMode() === 'login') {
+                // Check if it's a decryption/password error
+                const isPasswordError = errorMessage.toLowerCase().includes('decrypt') ||
+                    errorMessage.toLowerCase().includes('password') ||
+                    errorMessage.toLowerCase().includes('invalid') ||
+                    errorMessage.toLowerCase().includes('failed');
+
+                if (isPasswordError) {
+                    console.log('[Login] Google login failed with wrong password, showing error');
+                    setGooglePasswordError('Incorrect password. Please try again.');
+                } else {
+                    // Some other error - show it
+                    setGooglePasswordError(errorMessage);
+                }
+                setShowGooglePasswordPrompt(true);
+                setIsLoading(false);
+                setLoadingStatus('');
+                return;
+            }
+
+            // Only switch to signup mode if we haven't verified the account exists
+            // (This is a fallback for edge cases where loginObjExists wasn't called)
+            if (errorMessage.toLowerCase().includes('not found') ||
+                errorMessage.toLowerCase().includes('no account') ||
+                errorMessage.toLowerCase().includes('loginobj not found')) {
+                console.log('[Login] Google account not found, switching to signup mode');
+                setGoogleAuthMode('signup');
+                setShowGooglePasswordPrompt(true);
+                setIsLoading(false);
+                setLoadingStatus('');
+                // Don't clear googleUser - we still need it for signup
+                return;
+            }
+
+            setError(errorMessage);
+            setIsLoading(false);
+            setLoadingStatus('');
+        }
+    };
+
+    // Handle Google signup - show PIN setup after password entry
+    const handleGoogleSignupPassword = async (password: string) => {
+        if (!googleUser()) return;
+
+        const user = googleUser()!;
+
+        // Store temp data for PIN setup
+        setTempAccountData({
+            username: user.displayName || user.email || user.uid,
+            password: password,
+            publicKey: ''
+        });
+
+        setShowGooglePasswordPrompt(false);
+        setIsGoogleSignup(true); // Mark this as a Google signup
+        setShowPinSetup(true);
+    };
+
+    // Handle PIN set for Google signup
+    const handleGooglePinSet = async (pin: string) => {
+        const accountData = tempAccountData();
+        const user = googleUser();
+        if (!accountData || !user) return;
+
+        try {
+            setIsLoading(true);
+            setShowPinSetup(false);
+            setLoadingStatus('Securing your vault with PIN...');
+
+            const environment = googleAuthEnvironment(); // Use the stored environment
+            // Get displayName: prefer Google displayName, fallback to email username (before @)
+            let displayName = user.displayName;
+            if (!displayName && user.email) {
+                // Use the part before @ as a fallback (e.g., "john.doe" from "john.doe@gmail.com")
+                displayName = user.email.split('@')[0];
+            }
+            // For vaultUsername, use displayName or email (never UID)
+            const vaultUsername = displayName || user.email || 'Google User';
+            
+            await createAccount(
+                user.uid, // Use Google UID as identifier
+                accountData.password,
+                pin,
+                undefined, // No recovery questions for now
+                'google',
+                displayName || vaultUsername, // Pass displayName (not vaultUsername which might be email)
+                user.uid,
+                environment // Pass the environment
+            );
+
+            // Note: The primary multi-vault discovery uses google-uid-hash tag query (Phase 1)
+            // This localStorage entry is deprecated - it was intended as a fallback but
+            // used vaultUsername instead of storagePublicKey, which is incorrect.
+            // Keeping for reference but the google-uid-hash query is the reliable method.
+            // localStorage.setItem(`nostrpass_google_vault_${user.uid}`, vaultUsername);
+            console.log('[Login] Google signup complete. Multi-vault discovery uses google-uid-hash tag.');
+
+            setLoadingStatus('Connecting to app...');
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            const appId = params.app;
+            const appOrigin = appId ? desanitizeDomain(appId) : window.location.origin;
+
+            window.dispatchEvent(new CustomEvent('vault-simple-auth-prompt', {
+                detail: {
+                    appOrigin: appOrigin,
+                    appName: appOrigin,
+                    identityIndex: 0,
+                    afterSignup: true
+                }
+            }));
+
+            clearGoogleUser();
+            setIsLoading(false);
+            setLoadingStatus('');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Account creation failed');
+            setShowPinSetup(false);
+            setIsLoading(false);
+            setLoadingStatus('');
+        }
     };
 
     // Apply custom namespace/environment settings
@@ -180,6 +454,7 @@ export const Login: Component = () => {
         });
         
         // Show PIN setup modal first
+        setIsGoogleSignup(false); // This is a username signup, not Google
         setShowPinSetup(true);
         setIsLoading(false);
     };
@@ -407,29 +682,50 @@ export const Login: Component = () => {
     return (
         <div class="w-full h-full bg-white dark:bg-gray-900 rounded-lg overflow-hidden">
             <div class="flex w-full h-full bg-white dark:bg-gray-800 flex-col md:flex-row">
-                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center md:rounded-l-lg bg-top bg-cover bg-no-repeat justify-center pt-8 pb-2 px-4 md:p-4 md:w-48 md:min-w-[12rem]`}>
-                    <div class="w-32 h-32 ">
-                        <img class="w-full h-full " src="/logo.svg" alt="NostrPass Logo" />
+                <div style={`background-image: url('/egg_background_${changeBackground()}.png')`} class={`flex flex-col items-center md:rounded-l-lg bg-bottom bg-cover bg-no-repeat justify-center pt-4 pb-1 px-4 md:p-3 md:w-40 md:min-w-[10rem]`}>
+                    <div class="w-24 h-24 md:w-28 md:h-28">
+                        <img class="w-full h-full" src="/logo.svg" alt="NostrPass Logo" />
                     </div>
-                   
                 </div>
                 <div class="flex flex-1 flex-col items-center justify-center min-w-0 pt-2 pb-4 px-6 md:p-6">
                     <div class="w-full max-w-sm space-y-3">
-                        <div class="text-center">
-                            <h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">{isSignup() ? 'Create Account' : 'Welcome Back'}</h1>
-                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                                {isSignup() ? 'Sign up to get started' : 'Sign in to your account'}
-                            </p>
-                            {params.app && (
-                                <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">App: {desanitizeDomain(params.app)}</p>
-                            )}
-                        </div>
-                        
                         {/* Non-production environment warning */}
                         <Show when={storageEnvironmentName() !== 'production'}>
                             <p class="text-xs text-amber-600 dark:text-amber-400 text-center">
                                 This is a {storageEnvironmentName()} site. Accounts here are separate from regular NostrPass accounts.
                             </p>
+                        </Show>
+
+                        {/* Google Sign-In Button - Primary option above username form */}
+                        <Show when={googleAvailable()}>
+                            <button
+                                type="button"
+                                onClick={() => handleGoogleSignIn()}
+                                disabled={isLoading() || googleLoading() || !cryptoReady() || !isConnected()}
+                                class="w-full p-2.5 rounded-md border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed text-gray-700 dark:text-gray-300 transition-colors font-medium flex items-center justify-center gap-2"
+                            >
+                                <Show when={googleLoading()}>
+                                    <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                </Show>
+                                <Show when={!googleLoading()}>
+                                    <svg class="w-5 h-5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                                    </svg>
+                                </Show>
+                                Continue with Google
+                            </button>
+
+                            <div class="relative flex items-center">
+                                <div class="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
+                                <span class="flex-shrink mx-3 text-xs text-gray-400 dark:text-gray-500">or use username</span>
+                                <div class="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
+                            </div>
                         </Show>
 
                         <form onSubmit={handleSubmit} class={`flex w-full flex-col gap-2.5 ${isSignup() ? 'signup-form' : 'login-form'}`} method="post" action="#">
@@ -530,6 +826,11 @@ export const Login: Component = () => {
                                                         I understand I must remember these values to access my vault
                                                     </span>
                                                 </label>
+
+                                                {/* Current Active Settings - at bottom */}
+                                                <p class="mt-3 font-mono text-[9px] text-gray-400 dark:text-gray-600 truncate">
+                                                    current: {getNamespace()} / {storageEnvironmentName()}{new URLSearchParams(window.location.search).get('storageEnvironment') ? ` (url: ${new URLSearchParams(window.location.search).get('storageEnvironment')})` : ''}
+                                                </p>
                                             </div>
                                         </div>
 
@@ -640,8 +941,8 @@ export const Login: Component = () => {
                                 </div>
                             </Show>
                             
-                            <button 
-                                type="submit" 
+                            <button
+                                type="submit"
                                 class="w-full p-2 rounded-md bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white transition-colors font-medium flex items-center justify-center gap-2"
                                 disabled={isLoading() || !cryptoReady() || !isConnected()}
                             >
@@ -654,7 +955,7 @@ export const Login: Component = () => {
                                 {isLoading() ? (isSignup() ? 'Creating Account...' : 'Signing In...') : (isSignup() ? 'Create Account' : 'Sign In')}
                             </button>
                         </form>
-                        
+
                         <div class="text-center space-y-2">
                             <button
                                 onClick={toggleMode}
@@ -695,11 +996,13 @@ export const Login: Component = () => {
                 <div class="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-start md:items-center justify-center z-50 overflow-y-auto">
                     <div class="bg-white dark:bg-gray-900 w-full md:w-auto md:rounded-lg md:shadow-xl md:border-2 md:border-black dark:md:border-gray-700 min-h-screen md:min-h-0">
                         <PinSetup
-                            onPinSet={handlePinSet}
+                            onPinSet={isGoogleSignup() ? handleGooglePinSet : handlePinSet}
                             onPinSetWithRecovery={handlePinSetWithRecovery}
                             onCancel={() => {
                                 setShowPinSetup(false);
                                 setTempAccountData(null);
+                                setIsGoogleSignup(false);
+                                clearGoogleUser();
                                 setError('PIN setup cancelled. Please try again.');
                             }}
                         />
@@ -737,7 +1040,7 @@ export const Login: Component = () => {
                         <PinVerification
                             onSuccess={handlePinUnlockSuccess}
                             onFailed={handlePinUnlockFailed}
-                            expectedPinHash={user()?.vaultPinHash}
+                            expectedPinHash={undefined}
                         />
 
                         <div class="mt-4 text-center">
@@ -753,6 +1056,39 @@ export const Login: Component = () => {
                         </div>
                     </div>
                 </div>
+            </Show>
+
+            {/* Vault Picker Modal (multi-vault Google auth) */}
+            <Show when={showVaultPicker() && googleUser()}>
+                <VaultPicker
+                    googleUser={googleUser()!}
+                    vaults={googleVaults()}
+                    onSelect={handleVaultSelect}
+                    onCancel={() => {
+                        setShowVaultPicker(false);
+                        setGoogleVaults([]);
+                        clearGoogleUser();
+                    }}
+                />
+            </Show>
+
+            {/* Google Password Prompt Modal */}
+            <Show when={showGooglePasswordPrompt() && googleUser()}>
+                <GooglePasswordPrompt
+                    googleUser={googleUser()!}
+                    mode={googleAuthMode()}
+                    onSubmit={googleAuthMode() === 'login' ? handleGoogleLogin : handleGoogleSignupPassword}
+                    onCancel={() => {
+                        setShowGooglePasswordPrompt(false);
+                        setGooglePasswordError('');
+                        setSelectedVault(null);
+                        clearGoogleUser();
+                    }}
+                    isLoading={isLoading()}
+                    namespace={getNamespace()}
+                    environment={googleAuthEnvironment()}
+                    errorMessage={googlePasswordError()}
+                />
             </Show>
         </div>
     );

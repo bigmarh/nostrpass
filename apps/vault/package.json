@@ -26,6 +26,7 @@
     "@scure/bip32": "^2.0.0",
     "@scure/bip39": "^2.0.0",
     "@solidjs/router": "^0.15.3",
+    "firebase": "^12.7.0",
     "solid-js": "^1.8.11"
   },
   "devDependencies": {

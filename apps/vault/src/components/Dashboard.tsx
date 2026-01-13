@@ -19,7 +19,7 @@ export const Dashboard: Component = () => {
     const navigate = useNavigate();
     const { isDarkMode, toggleDarkMode } = useDarkModeContext();
     const [showGlobalSettings, setShowGlobalSettings] = createSignal(false);
-    const [isRefreshing, setIsRefreshing] = createSignal(false);
+    const [_isRefreshing, setIsRefreshing] = createSignal(false);
     const [triggerAddIdentity, setTriggerAddIdentity] = createSignal(0);
     const [searchQuery, setSearchQuery] = createSignal('');
     const [showMenu, setShowMenu] = createSignal(false);
@@ -27,12 +27,12 @@ export const Dashboard: Component = () => {
     const cryptoWorker = useCryptoWorker();
 
     // Use the vault data hook
-    const { vaultData, loadVaultData, syncToNostr, getVaultFromNostr, updateVaultData } = useVaultData({ autoLoad: true });
+    const { vaultData, loadVaultData, syncToNostr, updateVaultData } = useVaultData({ autoLoad: true });
 
     // Auto-fetch Nostr profiles for identities without profile data
     createEffect(() => {
         const vault = vaultData();
-        const username = user()?.profile?.username;
+        const username = user()?.username;
 
         if (!vault?.identities || !username) return;
 
@@ -99,13 +99,14 @@ export const Dashboard: Component = () => {
         // Broadcast a session refresh so other tabs can restore state
         try {
             const current = user();
-            if (current?.profile.username && typeof BroadcastChannel !== 'undefined') {
+            if (current?.username && typeof BroadcastChannel !== 'undefined') {
                 const bc = new BroadcastChannel('nostrpass-vault');
                 bc.postMessage({
                     type: 'VAULT_BROADCAST',
                     data: {
                         broadcastType: 'SESSION_REFRESH',
-                        username: current.profile.username,
+                        username: current.username,
+                        storagePublicKey: current.storagePublicKey,
                         timestamp: Date.now()
                     }
                 });
@@ -163,8 +164,8 @@ export const Dashboard: Component = () => {
         }
     };
 
-    // Get active identity index
-    const getActiveIdentityIndex = () => {
+    // Get active identity index (used in template)
+    const _getActiveIdentityIndex = () => {
         const vault = vaultData();
         if (!vault?.identities) return 0;
 
@@ -181,13 +182,13 @@ export const Dashboard: Component = () => {
         })() : null;
 
         const activeIndex = appOrigin
-            ? (getActiveIdentity(user()?.profile.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
+            ? (getActiveIdentity(user()?.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
             : 0;
 
         console.log('[Dashboard] Active identity check:', {
             appOrigin,
             'params.app': params.app,
-            fromLocalStorage: getActiveIdentity(user()?.profile.username || '', appOrigin || ''),
+            fromLocalStorage: getActiveIdentity(user()?.username || '', appOrigin || ''),
             fromVault: vault.activeIdentityByApp?.[params.app!],
             activeIndex
         });
@@ -331,12 +332,12 @@ export const Dashboard: Component = () => {
                                     {/* Fallback when no active identity */}
                                     <div class="w-16 h-16 bg-gray-900 dark:bg-gray-700 rounded-full border-2 border-gray-900 dark:border-gray-600 flex items-center justify-center shadow-sm">
                                         <span class="text-white dark:text-gray-100 text-2xl font-bold">
-                                            {user()?.profile.username.substring(0, 2).toUpperCase()}
+                                            {(user()?.displayName || 'U').substring(0, 2).toUpperCase()}
                                         </span>
                                     </div>
                                     <div class="flex-1 text-gray-900 dark:text-white">
                                         <div class="text-[10px] uppercase tracking-wide font-semibold text-gray-600 dark:text-gray-400 mb-1">Digital Passport</div>
-                                        <h1 class="text-lg font-bold tracking-tight">{user()?.profile.username.toUpperCase()}</h1>
+                                        <h1 class="text-lg font-bold tracking-tight">{(user()?.displayName || '').toUpperCase()}</h1>
                                     </div>
                                 </div>
                             }>
@@ -357,13 +358,27 @@ export const Dashboard: Component = () => {
                                         }
                                     })() : null;
 
+                                    // getActiveIdentity returns number | null from localStorage
                                     const activeIndex = appOrigin
-                                        ? (getActiveIdentity(user()?.profile.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
+                                        ? (getActiveIdentity(user()?.username || '', appOrigin) ?? 0)
                                         : 0;
 
                                     const activeIdentity = vault.identities[activeIndex];
 
-                                    if (!activeIdentity) return null;
+                                    if (!activeIdentity) {
+                                        // No active identity selected - show a prompt to select one
+                                        return (
+                                            <div class="flex flex-col items-center justify-center p-6 text-center">
+                                                <div class="w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
+                                                    <svg class="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                    </svg>
+                                                </div>
+                                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">No identity selected for this app</p>
+                                                <p class="text-xs text-gray-500 dark:text-gray-500">Select an identity from the list below to use with this site</p>
+                                            </div>
+                                        );
+                                    }
 
                                     // Get initials from identity nickname
                                     // For multi-word names, use first letter of each word (e.g., "John Smith" -> "JS")
@@ -413,7 +428,7 @@ export const Dashboard: Component = () => {
                                                                     {activeIdentity.profile?.name || activeIdentity.nickname || 'Personal'}
                                                                 </h1>
                                                                 <div class="text-xs text-gray-600 dark:text-gray-400">
-                                                                    {user()?.profile.username}
+                                                                    {user()?.displayName}
                                                                 </div>
                                                             </div>
 
@@ -532,7 +547,8 @@ export const Dashboard: Component = () => {
                         appId={params.app}
                         vaultData={vaultData()}
                         isVaultLocked={isVaultLocked()}
-                        username={user()?.profile.username || ''}
+                        username={user()?.username || ''}
+                        storagePublicKey={user()?.storagePublicKey}
                         onUpdateVaultData={updateVaultData}
                         onSyncToNostr={syncToNostr}
                         onRefresh={() => loadVaultData(true)}
@@ -554,12 +570,12 @@ export const Dashboard: Component = () => {
                 vaultData={vaultData()}
                 onUnlock={unlockVault}
                 onLock={lockVault}
-                username={user()?.profile.username || ''}
+                username={user()?.username || ''}
             />
 
             {/* Global Settings Modal */}
             <GlobalSettings
-                username={user()?.profile.username || ''}
+                username={user()?.username || ''}
                 identityCount={vaultData()?.identities?.filter((id: any) => !id.archived).length || 0}
                 isOpen={showGlobalSettings()}
                 onClose={() => setShowGlobalSettings(false)}
