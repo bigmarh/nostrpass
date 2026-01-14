@@ -659,17 +659,14 @@ export const Login: Component = () => {
             setLoadingStatus('Unlocking vault and fetching identities from Nostr...');
 
             // Unlock the vault with the PIN - this will fetch VaultObj from Nostr if needed
-            const success = await unlockVault(pin);
+            // unlockVault now throws on error instead of returning false
+            await unlockVault(pin);
 
-            if (success) {
-                setLoadingStatus('Vault unlocked successfully!');
+            setLoadingStatus('Vault unlocked successfully!');
 
-                // After login+unlock, navigate to account picker so user can select identity
-                const appOrigin = params.app ? desanitizeDomain(params.app) : 'unknown';
-                navigate(`/${params.app || 'vault'}/account-picker?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&afterLogin=true`);
-            } else {
-                throw new Error('Failed to unlock vault. Please try again.');
-            }
+            // After login+unlock, navigate to account picker so user can select identity
+            const appOrigin = params.app ? desanitizeDomain(params.app) : 'unknown';
+            navigate(`/${params.app || 'vault'}/account-picker?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&afterLogin=true`);
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to unlock vault';
 

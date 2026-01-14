@@ -388,8 +388,13 @@ export const AuthProvider: ParentComponent = (props) => {
       return true;
     } catch (error) {
       console.error('[AuthProvider] Unlock failed:', error);
-      showErrorToast((error as Error).message as ErrorCode);
-      return false;
+      // Don't show toast for VaultObj not found - let caller handle with custom UI
+      const errorMessage = (error as Error).message;
+      if (!errorMessage.includes('VaultObj not found')) {
+        showErrorToast(errorMessage as ErrorCode);
+      }
+      // Rethrow so caller can see the actual error message
+      throw error;
     }
   };
 
