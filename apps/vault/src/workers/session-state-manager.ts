@@ -206,8 +206,10 @@ export class SessionStateManager {
 
       // Cache the LoginObj for future logins (after successful password verification)
       // Include environment in cache key to handle same username in different namespaces
-      await vaultDB.saveLoginObj(username, loginResult.loginObj, loginResult.passwordSalt, environment);
-      console.log('[SessionStateManager] Password verified, LoginObj cached successfully');
+      // For Google login, use "${googleUid}_google" format to match link-google handler
+      const cacheKeyUsername = identifierType === 'google' ? `${username}_google` : username;
+      await vaultDB.saveLoginObj(cacheKeyUsername, loginResult.loginObj, loginResult.passwordSalt, environment);
+      console.log('[SessionStateManager] Password verified, LoginObj cached with key:', cacheKeyUsername);
 
       const { loginObj, passwordSalt } = loginResult;
 
@@ -391,6 +393,8 @@ export class SessionStateManager {
 
         // Fetch VaultObj from Nostr
         console.log('[SessionStateManager] Fetching VaultObj from Nostr...');
+        console.log('[SessionStateManager] Using storagePublicKey:', storagePublicKey?.slice(0, 16) + '...');
+        console.log('[SessionStateManager] Using relays:', session.relays);
         vaultData = await getVaultFromNostr(
           storagePublicKey,
           session.relays || [],
@@ -398,6 +402,10 @@ export class SessionStateManager {
         );
 
         if (!vaultData) {
+          console.error('[SessionStateManager] VaultObj not found on Nostr!');
+          console.error('[SessionStateManager] storagePublicKey:', storagePublicKey);
+          console.error('[SessionStateManager] relays:', session.relays);
+          console.error('[SessionStateManager] authProvider:', session.authProvider);
           throw new Error('VaultObj not found on Nostr');
         }
 
