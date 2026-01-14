@@ -150,11 +150,13 @@ export const Settings: Component = () => {
       })();
       await setActiveIdentity(currentUser.profile.username, appOrigin, index);
 
-      const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+      const vaultData = await cryptoWorker.getVaultData({ username: lookupKey });
       (vaultData as any).activeIdentityByApp = (vaultData as any).activeIdentityByApp || {};
       (vaultData as any).activeIdentityByApp[appKey] = index;
       (vaultData as any).updatedAt = Date.now();
-      await cryptoWorker.updateVaultData({ username: currentUser.profile.username, vaultData });
+      await cryptoWorker.updateVaultData({ username: lookupKey, vaultData });
       setActiveIndexForApp(index);
       // Optionally sync to Nostr in background
       try {

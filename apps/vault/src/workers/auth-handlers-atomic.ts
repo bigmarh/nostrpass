@@ -22,17 +22,21 @@ function broadcastAuthStateChanged(state: CompleteSessionState | null) {
       isLocked: !state.isUnlocked,
       user: state.username ? {
         username: state.username,
+        displayName: state.displayName || state.username,
         publicKey: state.publicKey,
         storagePublicKey: state.storagePublicKey
       } : null,
       sessionId: state.sessionId,
       vaultVersion: state.vaultVersion,
-      identityCount: state.identityCount
+      identityCount: state.identityCount,
+      environment: state.environment,
+      authProvider: state.authProvider  // Include auth method (username or google)
     } : {
       isAuthenticated: false,
       isLocked: true,
       user: null,
-      sessionId: null
+      sessionId: null,
+      authProvider: null
     }
   };
 
@@ -92,12 +96,15 @@ export async function handleGetAuthState(params: { username?: string }) {
     isLocked: !state.isUnlocked,
     user: {
       username: state.username,
+      displayName: state.displayName || state.username,
       publicKey: state.publicKey,
       storagePublicKey: state.storagePublicKey
     },
     sessionId: state.sessionId,
     vaultVersion: state.vaultVersion,
     identityCount: state.identityCount,
+    environment: state.environment,
+    authProvider: state.authProvider,  // Include auth method (username or google)
     timestamp: Date.now()
   };
 }
@@ -107,18 +114,30 @@ export async function handleGetAuthState(params: { username?: string }) {
  * Fetches from Nostr and creates session in ONE operation
  */
 export async function handleAtomicLogin(params: {
-  username: string;
+  username?: string;
+  identifier?: string;  // Alias for username (used by Google auth flow)
+  identifierType?: 'username' | 'google';
   password: string;
   relays: string[];
   environment?: string;
+  displayName?: string;
+  vaultDTag?: string;  // For multi-vault Google auth: specific d-tag to fetch
+  vaultPasswordSalt?: string;  // For multi-vault: password salt from vault picker
 }) {
   const manager = getSessionStateManager();
 
+  // Support both 'username' and 'identifier' parameter names
+  const username = params.username || params.identifier;
+
   const session = await manager.login({
-    username: params.username,
+    username: username!,
     password: params.password,
     relays: params.relays,
-    environment: params.environment
+    environment: params.environment,
+    identifierType: params.identifierType || 'username',
+    displayName: params.displayName,
+    vaultDTag: params.vaultDTag,
+    vaultPasswordSalt: params.vaultPasswordSalt
   });
 
   // Broadcast state change

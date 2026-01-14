@@ -156,9 +156,9 @@ class VaultDB {
     }
   }
 
-  async getVault(storagePublicKey: string): Promise<VaultData | null> {
-    if (!storagePublicKey) {
-      console.warn('[DB] getVault called with empty storagePublicKey');
+  async getVault(keyOrUsername: string): Promise<VaultData | null> {
+    if (!keyOrUsername) {
+      console.warn('[DB] getVault called with empty key');
       return null;
     }
     if (!this.db) await this.init();
@@ -166,7 +166,7 @@ class VaultDB {
       try {
         const transaction = this.db!.transaction(['vaults'], 'readonly');
         const store = transaction.objectStore('vaults');
-        const request = store.get(storagePublicKey);
+        const request = store.get(keyOrUsername);
 
         request.onsuccess = () => {
           resolve(request.result || null);
@@ -177,7 +177,12 @@ class VaultDB {
       }
     });
     try {
-      return await run();
+      let result = await run();
+      // Fallback: If not found by storagePublicKey, try username index
+      if (!result) {
+        result = await this.getVaultByUsername(keyOrUsername);
+      }
+      return result;
     } catch (e: any) {
       const msg = String(e?.message || e || '').toLowerCase();
       if (msg.includes('closing') || msg.includes('invalidstateerror')) {
@@ -243,6 +248,26 @@ class VaultDB {
 
       transaction.oncomplete = () => {
         console.log('🗑️ Deleted vault, xpriv, and session for storagePublicKey:', storagePublicKey);
+        resolve();
+      };
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  /**
+   * Delete only the vault record (not session or xpriv)
+   * Used for migration when vault key needs to be corrected
+   */
+  async deleteVaultOnly(storagePublicKey: string): Promise<void> {
+    if (!this.db) await this.init();
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(['vaults'], 'readwrite');
+      const vaultStore = transaction.objectStore('vaults');
+      vaultStore.delete(storagePublicKey);
+
+      transaction.oncomplete = () => {
+        console.log('🗑️ Deleted vault record only for key:', storagePublicKey);
         resolve();
       };
       transaction.onerror = () => reject(transaction.error);
@@ -440,7 +465,7 @@ class VaultDB {
       const tx = this.db!.transaction(['loginObjs'], 'readwrite');
       const store = tx.objectStore('loginObjs');
       const request = store.put({
-        username: cacheKey, // Use composite key as primary key
+        cacheKey, // Primary key (matches store keyPath)
         loginObj,
         passwordSalt,
         cachedAt: Date.now()

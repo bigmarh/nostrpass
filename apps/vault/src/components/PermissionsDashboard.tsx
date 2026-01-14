@@ -95,8 +95,10 @@ export const PermissionsDashboard: Component = () => {
       }
       // Load only this app's permissions for the active identity
       // Get active identity from localStorage (per-browser, not synced)
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
       const appOrigin = getAppOrigin(appId);
-      const identityIndex = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+      const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? (await vaultDataService.getVaultData(lookupKey, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
       const appPerm = await permissionService.getAppPermissions(
         currentUser.profile.username,
         appId,
@@ -160,8 +162,10 @@ export const PermissionsDashboard: Component = () => {
       }
 
       // Get active identity from localStorage (per-browser, not synced)
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
       const appOrigin = getAppOrigin(appId);
-      const identityIndex = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+      const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? (await vaultDataService.getVaultData(lookupKey, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
       await permissionService.saveAppPermissions(
         currentUser.profile.username,
         appId,
@@ -174,7 +178,7 @@ export const PermissionsDashboard: Component = () => {
 
       // Best-effort sync to Nostr in background
       vaultDataService
-        .syncToNostr(currentUser.profile.username)
+        .syncToNostr(lookupKey)
         .catch((err) => console.error('Failed to sync permissions to Nostr:', err));
     } catch (error) {
       console.error('Failed to update permission:', error);
@@ -256,8 +260,10 @@ export const PermissionsDashboard: Component = () => {
               }
             };
             // Get active identity from localStorage (per-browser, not synced)
+            // Use storagePublicKey for vault lookup (critical for Google login)
+            const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
             const appOrigin = getAppOrigin(appId);
-            const identityIndex = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (await vaultDataService.getVaultData(currentUser.profile.username, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+            const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? (await vaultDataService.getVaultData(lookupKey, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
             await permissionService.saveAppPermissions(
               currentUser.profile.username,
               appId,

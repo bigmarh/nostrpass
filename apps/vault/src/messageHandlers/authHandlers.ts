@@ -72,7 +72,9 @@ export const authHandlers: MessageHandler[] = [
         throw vaultError(ErrorCode.INTERNAL, 'Crypto not ready');
       }
 
-      const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
+      const vaultData = await cryptoWorker.getVaultData({ username: lookupKey });
       const appKey = originToAppKey(origin);
       const authorizedIndex = await deps.getAppIdentityIndex(origin);
 
@@ -688,8 +690,10 @@ export const authHandlers: MessageHandler[] = [
       }
 
       // Get the active identity for this app
+      // Use storagePublicKey for vault lookup (critical for Google login)
       try {
-        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+        const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile?.username;
+        const vaultData = await cryptoWorker?.getVaultData({ username: lookupKey });
         const appOrigin = context?.origin;
 
         // Get app key for permission check
@@ -827,10 +831,12 @@ export const authHandlers: MessageHandler[] = [
         return { identities: [], activeIdentityIndex: null };
       }
 
+      // Use storagePublicKey for vault lookup (critical for Google login)
       try {
         // Use getVaultData instead of getVaultDataFromSession to get fresh data
         // getVaultDataFromSession uses cached data which may be stale after permission changes
-        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+        const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile?.username;
+        const vaultData = await cryptoWorker?.getVaultData({ username: lookupKey });
 
         if (!vaultData?.identities || vaultData.identities.length === 0) {
           return { identities: [], activeIdentityIndex: null };
@@ -896,8 +902,10 @@ export const authHandlers: MessageHandler[] = [
         throw new Error('Invalid identity index');
       }
 
+      // Use storagePublicKey for vault lookup (critical for Google login)
       try {
-        const vaultData = await cryptoWorker?.getVaultData({ username: currentUser.profile?.username });
+        const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile?.username;
+        const vaultData = await cryptoWorker?.getVaultData({ username: lookupKey });
 
         if (!vaultData?.identities || identityIndex >= vaultData.identities.length) {
           throw new Error('Identity not found');

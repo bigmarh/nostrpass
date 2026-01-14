@@ -35,10 +35,12 @@ export const ManageDashboard: Component = () => {
     const currentUser = user();
     console.log('[ManageDashboard] Effect triggered - user:', currentUser?.profile?.username);
 
-    if (isAuthenticated() && currentUser?.profile.username && cryptoWorker) {
-      console.log('[ManageDashboard] Loading vault data...');
+    // Use storagePublicKey for vault lookup (critical for Google login)
+    const lookupKey = currentUser?.profile?.storagePublicKey || currentUser?.profile?.username;
+    if (isAuthenticated() && lookupKey && cryptoWorker) {
+      console.log('[ManageDashboard] Loading vault data for:', lookupKey?.slice(0, 12) + '...');
       try {
-        const data = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+        const data = await cryptoWorker.getVaultData({ username: lookupKey });
         console.log('[ManageDashboard] Loaded vault data:', data);
         setVaultData(data);
       } catch (error) {

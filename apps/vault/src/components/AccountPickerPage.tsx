@@ -84,8 +84,11 @@ export const AccountPickerPage: Component = () => {
     console.log('[AccountPickerPage] Sanitized appKey:', appKey);
 
     try {
-      console.log('[AccountPickerPage] Fetching vault data for username:', currentUser.username);
-      const vaultData = await vaultDataService.getVaultData(currentUser.username);
+      // Use storagePublicKey for vault lookup (primary), fall back to username
+      // This is critical for Google login where username is the Google UID
+      const lookupKey = currentUser.storagePublicKey || currentUser.username;
+      console.log('[AccountPickerPage] Fetching vault data for:', lookupKey?.slice(0, 12) + '...');
+      const vaultData = await vaultDataService.getVaultData(lookupKey);
       console.log('[AccountPickerPage] Vault data received:', vaultData);
 
       if (vaultData?.identities && vaultData.identities.length > 0) {
@@ -160,14 +163,18 @@ export const AccountPickerPage: Component = () => {
       return;
     }
 
+    // Use storagePublicKey for vault lookup (critical for Google login)
+    const lookupKey = currentUser.storagePublicKey || currentUser.username;
+
     try {
       // Update active identity in localStorage (per-browser, for UI hints)
-      await setActiveIdentity(currentUser.username, appOrigin, identityIndex);
+      // Pass lookupKey for vault validation, but still use username for localStorage key
+      await setActiveIdentity(lookupKey, appOrigin, identityIndex);
 
       // SECURITY: Update vault data with new active identity (source of truth)
       // Changed to store publicKey instead of index for stability across identity reordering/deletion
       console.log('[AccountPickerPage] Updating vault data with active identity:', { appKey, publicKey: selectedPublicKey });
-      const vaultData = await vaultDataService.getVaultData(currentUser.username);
+      const vaultData = await vaultDataService.getVaultData(lookupKey);
       if (vaultData) {
         const updatedActiveIdentityByApp = {
           ...(vaultData.activeIdentityByApp || {}),
@@ -175,7 +182,7 @@ export const AccountPickerPage: Component = () => {
         };
         console.log('[AccountPickerPage] Updated activeIdentityByApp:', updatedActiveIdentityByApp);
         await vaultDataService.updateVaultData(
-          currentUser.username,
+          lookupKey,
           { activeIdentityByApp: updatedActiveIdentityByApp },
           { updateTimestamp: true }
         );
