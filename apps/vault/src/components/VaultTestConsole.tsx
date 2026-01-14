@@ -63,9 +63,12 @@ export const VaultTestConsole: Component = () => {
         throw new Error('User not authenticated');
       }
 
+      // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+      const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
       // Check permission (use sanitized app key)
       const permissionCheck = await permissionService.checkPermission(
-        currentUser.profile.username,
+        lookupKey,
         currentAppKey(),
         'getPublicKey'
       );
@@ -76,13 +79,13 @@ export const VaultTestConsole: Component = () => {
         // The public key is stored in the user object, which was derived from the current identity
         // when the user logged in. The identity itself only stores the derivation path.
         const publicKey = currentUser.publicKey;
-        
+
         // Get additional info about the current identity
         let identityInfo = { nickname: 'Personal', index: 0 };
-        if (cryptoWorker && currentUser.profile?.username) {
+        if (cryptoWorker && lookupKey) {
           try {
-            const vaultData = await cryptoWorker.getVaultData({ 
-              username: currentUser.profile.username 
+            const vaultData = await cryptoWorker.getVaultData({
+              username: lookupKey
             });
             
       if (vaultData?.identities) {

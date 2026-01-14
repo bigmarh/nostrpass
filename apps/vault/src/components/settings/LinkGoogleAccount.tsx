@@ -28,28 +28,16 @@ export const LinkGoogleAccount: Component<LinkGoogleAccountProps> = (props) => {
   const sessionEnvironment = () => authState().environment || storageEnvironmentName();
 
   // Check if user logged in via Google (already linked)
-  // For Google login: username is Google UID (short alphanumeric), storagePublicKey is hex
-  // For username login: username equals storagePublicKey (both are hex)
+  // authProvider is the authoritative source - set by session-state-manager
   const isLoggedInViaGoogle = () => {
-    // Check explicit authProvider first
-    if (authState().authProvider === 'google') return true;
+    // Use explicit authProvider - this is set during login/restore and is authoritative
+    const provider = authState().authProvider;
+    if (provider === 'google') return true;
+    if (provider === 'username') return false;
 
-    // Fallback: detect Google login by comparing username vs storagePublicKey
-    // If they differ, user logged in via Google (username = Google UID)
-    const currentUser = user();
-    const username = currentUser?.profile?.username;
-    const storagePublicKey = currentUser?.profile?.storagePublicKey;
-
-    // If username exists, storagePublicKey exists, and they're different,
-    // the user logged in via Google (username is Google UID, not the vault key)
-    if (username && storagePublicKey && username !== storagePublicKey) {
-      // Additional check: username should NOT be a 64-char hex string (storagePublicKey format)
-      const isUsernameHex = /^[0-9a-f]{64}$/i.test(username);
-      if (!isUsernameHex) {
-        return true;
-      }
-    }
-
+    // No authProvider set (very old session?) - be conservative, assume NOT Google
+    // The user can re-login to get proper authProvider set
+    console.log('[LinkGoogleAccount] authProvider not set, assuming username login');
     return false;
   };
 

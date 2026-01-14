@@ -105,6 +105,9 @@ export const PermissionRequestPage: Component = () => {
       return;
     }
 
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     let appKey = appOrigin();
     try {
       appKey = sanitizeDomain(new URL(appOrigin()).host || appOrigin());
@@ -159,7 +162,7 @@ export const PermissionRequestPage: Component = () => {
             }
             break;
         }
-        await permissionService.saveAppPermissions(currentUser.profile.username, appKey, perms, appName(), identityIndex());
+        await permissionService.saveAppPermissions(lookupKey, appKey, perms, appName(), identityIndex());
       }
 
       console.log('[PermissionRequestPage] ✅ Permission saved, level:', level);

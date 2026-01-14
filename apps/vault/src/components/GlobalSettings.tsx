@@ -208,7 +208,7 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
                   <span class="text-sm text-gray-600 dark:text-gray-400">Username:</span>
-                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{props.username}</span>
+                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{props.vaultData?.username || props.username}</span>
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-sm text-gray-600 dark:text-gray-400">Identities:</span>

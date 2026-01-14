@@ -44,6 +44,9 @@ export const SimpleAuthPage: Component = () => {
     const currentUser = auth.user();
     if (!currentUser) return;
 
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     let appKey = appOrigin;
     try {
       appKey = sanitizeDomain(new URL(appOrigin).host || appOrigin);
@@ -71,7 +74,7 @@ export const SimpleAuthPage: Component = () => {
       };
 
       await permissionService.saveAppPermissions(
-        currentUser.profile.username,
+        lookupKey,
         appKey,
         permissionsToGrant,
         appName,

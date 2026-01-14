@@ -14,6 +14,7 @@ interface IdentityManagerProps {
   vaultData: VaultData | null;
   isVaultLocked: boolean;
   username: string;
+  storagePublicKey?: string; // Vault lookup key (different from username for Google login)
   onUpdateVaultData: (updates: Partial<VaultData> | ((current: VaultData) => Partial<VaultData>), options?: any) => Promise<void>;
   onSyncToNostr: () => Promise<void>;
   onRefresh: () => void;
@@ -85,8 +86,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     if (!vault || !appId) return null;
 
     // Get active identity from localStorage (per-browser, not synced)
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
     const appOrigin = getAppOrigin(appId);
-    const identityIndex = getActiveIdentity(props.username, appOrigin) ?? vault.activeIdentityByApp?.[appId] ?? 0;
+    const lookupKey = props.storagePublicKey || props.username;
+    const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? vault.activeIdentityByApp?.[appId] ?? 0;
     const identity = vault.identities?.[identityIndex];
 
     if (!identity) return null;
@@ -124,9 +127,11 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
     // Use real vault identities - filter out archived ones and preserve original index
     // Get active identity from localStorage (per-browser, not synced)
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = props.storagePublicKey || props.username;
     const activeIndex = props.appId ? (() => {
       const appOrigin = getAppOrigin(props.appId);
-      const stored = getActiveIdentity(props.username, appOrigin);
+      const stored = getActiveIdentity(lookupKey, appOrigin);
       return stored !== null ? stored : (vault.activeIdentityByApp?.[props.appId] ?? null);
     })() : null;
     return vault.identities
@@ -272,10 +277,12 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
       try {
         // Get active identity from localStorage (per-browser, not synced)
+        // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+        const lookupKey = props.storagePublicKey || props.username;
         const appOrigin = props.appId ? getAppOrigin(props.appId) : undefined;
-        const identityIndex = appOrigin ? (getActiveIdentity(props.username, appOrigin) ?? undefined) : (props.vaultData?.activeIdentityByApp?.[props.appId] ?? undefined);
+        const identityIndex = appOrigin ? (getActiveIdentity(lookupKey, appOrigin) ?? undefined) : (props.vaultData?.activeIdentityByApp?.[props.appId] ?? undefined);
         await permissionService.saveAppPermissions(
-          props.username,
+          lookupKey,
           props.appId,
           updates,
           appPermissions()!.appName || props.appId,
@@ -338,8 +345,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       });
 
       // Set active identity in localStorage (per-browser, not synced)
+      // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
       const appOrigin = getAppOrigin(props.appId);
-      await setActiveIdentity(props.username, appOrigin, identityIndex);
+      const lookupKey = props.storagePublicKey || props.username;
+      await setActiveIdentity(lookupKey, appOrigin, identityIndex);
 
       const updatedActive = {
         ...(currentVault.activeIdentityByApp || {}),
@@ -537,8 +546,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
     try {
       // Set active identity in localStorage (per-browser, not synced)
+      // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
       const appOrigin = getAppOrigin(props.appId);
-      await setActiveIdentity(props.username, appOrigin, identityIndex);
+      const lookupKey = props.storagePublicKey || props.username;
+      await setActiveIdentity(lookupKey, appOrigin, identityIndex);
 
       const updatedActive = {
         ...(currentVault.activeIdentityByApp || {}),

@@ -106,6 +106,9 @@ export const SimpleAuthPromptController: Component = () => {
     }
 
     try {
+      // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+      const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
       // Use app-requested permissions or fall back to safe defaults
       const permissionsToGrant = {
         getPublicKey: d.permissions?.getPublicKey || 'ALLOW',
@@ -117,7 +120,7 @@ export const SimpleAuthPromptController: Component = () => {
       };
 
       await permissionService.saveAppPermissions(
-        currentUser.profile.username,
+        lookupKey,
         appKey,
         permissionsToGrant,
         d.appName,
@@ -125,7 +128,7 @@ export const SimpleAuthPromptController: Component = () => {
       );
 
       // Set this identity as the active identity for this app (per-browser, not synced)
-      await setActiveIdentity(currentUser.profile.username, d.appOrigin, d.identityIndex);
+      await setActiveIdentity(lookupKey, d.appOrigin, d.identityIndex);
 
       // Trigger vault data refresh event to notify embassy
       console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');

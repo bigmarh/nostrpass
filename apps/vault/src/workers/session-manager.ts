@@ -1958,7 +1958,13 @@ export const sessionManager = {
   }): Promise<{ allowed: boolean; level: PermissionLevel; needsPrompt: boolean; sessionGranted?: boolean }> => {
     const { username, origin, action, eventKind } = params;
 
-    const vault = await vaultDB.getVault(username);
+    // Get session to find storagePublicKey (critical for Google login where username is UID)
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(username);
+    const lookupKey = session?.storagePublicKey || username;
+
+    const vault = await vaultDB.getVault(lookupKey);
     if (!vault || !vault.identities || vault.identities.length === 0) {
       return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
     }
@@ -2101,7 +2107,13 @@ export const sessionManager = {
    * Returns full permission object or null if not found
    */
   getAppPermissions: async (params: { username: string; origin: string; identityIndex?: number }): Promise<any | null> => {
-    const vault = await vaultDB.getVault(params.username);
+    // Get session to find storagePublicKey (critical for Google login where username is UID)
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(params.username);
+    const lookupKey = session?.storagePublicKey || params.username;
+
+    const vault = await vaultDB.getVault(lookupKey);
     if (!vault || !vault.identities || vault.identities.length === 0) return null;
 
     // Note: identityIndex should always be provided by caller
@@ -2129,8 +2141,14 @@ export const sessionManager = {
   }): Promise<{ success: boolean }> => {
     const { username, origin, permissions, appName } = params;
 
+    // Get session to find storagePublicKey (critical for Google login where username is UID)
+    const { getSessionStateManager } = await import('./session-state-manager');
+    const manager = getSessionStateManager();
+    const session = manager.getAuthState(username);
+    const lookupKey = session?.storagePublicKey || username;
+
     // Get current vault data
-    const vault = await vaultDB.getVault(username);
+    const vault = await vaultDB.getVault(lookupKey);
     if (!vault) {
       throw new Error('Vault not found');
     }
@@ -2217,8 +2235,9 @@ export const sessionManager = {
     }, null, 2));
 
     // Use streamlined vault operations path for automatic sync
+    // Use storagePublicKey (lookupKey) for correct vault lookup
     await vaultOperations.updateVaultData({
-      username,
+      storagePublicKey: lookupKey,
       vaultData: updatedVault,
       options: { syncToNostr: true }  // Sync to Nostr for cross-browser updates
     });
