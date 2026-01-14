@@ -246,7 +246,9 @@ export const MessengerProvider: ParentComponent = (props) => {
         const cw = auth.cryptoWorker;  // cryptoWorker is already the value
         const current = auth.user();  // user is a signal (function)
         if (!cw || !current) throw new Error('Crypto not ready');
-        const vaultData = await cw.getVaultData({ username: current.profile.username });
+        // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+        const lookupKey = current.profile?.storagePublicKey || current.profile.username;
+        const vaultData = await cw.getVaultData({ username: lookupKey });
         const appKey = toAppKey(origin);
 
         // SECURITY: Use activeIdentityByApp from vault data as source of truth (synced across devices)

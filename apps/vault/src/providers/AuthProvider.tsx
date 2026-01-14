@@ -375,11 +375,11 @@ export const AuthProvider: ParentComponent = (props) => {
     }
 
     try {
-      console.log('[AuthProvider] Starting atomic unlock for storagePublicKey:', state.user.storagePublicKey.slice(0, 12) + '...');
+      console.log('[AuthProvider] Starting atomic unlock for user:', state.user.username);
 
-      // Worker accepts username but internally resolves to storagePublicKey
+      // Worker looks up session by username
       await cryptoWorker.atomicUnlock({
-        username: state.user.storagePublicKey,
+        username: state.user.username,
         pin
       });
 
@@ -574,6 +574,7 @@ export const AuthProvider: ParentComponent = (props) => {
         privateKey: '',
         // storagePublicKey is the universal vault identifier for all data lookups
         storagePublicKey: state.user.storagePublicKey,
+        username: state.user.username, // Include username at top level for backward compatibility
         displayName: state.user.displayName, // Include displayName for UI display
         profile: {
           username: state.user.username,

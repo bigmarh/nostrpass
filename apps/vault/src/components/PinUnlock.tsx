@@ -35,11 +35,12 @@ export const PinUnlock: Component = () => {
             }
         } catch {}
         
-        // Load vault data
-        const username = user()?.profile.username;
-        if (username && cryptoWorker) {
+        // Load vault data - use storagePublicKey for lookup (critical for Google login)
+        const profile = user()?.profile;
+        const lookupKey = profile?.storagePublicKey || profile?.username;
+        if (lookupKey && cryptoWorker) {
             try {
-                const data = await cryptoWorker.getVaultData({ username });
+                const data = await cryptoWorker.getVaultData({ username: lookupKey });
                 setVaultData(data);
             } catch (err) {
             }

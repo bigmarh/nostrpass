@@ -55,14 +55,17 @@ let vaultUpdateChannel: BroadcastChannel | null = null;
 /**
  * Initialize the vault store for a specific user
  * Sets up BroadcastChannel listener and loads initial data
+ *
+ * @param storageKey - The vault lookup key (storagePublicKey preferred, username as fallback)
+ *                     For Google login, this MUST be storagePublicKey, not the Google UID
  */
-export function initVaultStore(username: string) {
-  console.log('🏪 [VaultStore] Initializing for user:', username);
+export function initVaultStore(storageKey: string) {
+  console.log('🏪 [VaultStore] Initializing for user:', storageKey);
 
-  setCurrentUsername(username);
+  setCurrentUsername(storageKey);
 
   // Load initial vault data
-  loadVaultData(username);
+  loadVaultData(storageKey);
 
   // Set up BroadcastChannel listener if not already set up
   if (!vaultUpdateChannel) {
@@ -101,9 +104,11 @@ export function initVaultStore(username: string) {
 
 /**
  * Load vault data from worker
+ *
+ * @param storageKey - The vault lookup key (storagePublicKey preferred, username as fallback)
  */
-async function loadVaultData(username: string) {
-  if (!username) return;
+async function loadVaultData(storageKey: string) {
+  if (!storageKey) return;
 
   setIsLoading(true);
 
@@ -114,7 +119,7 @@ async function loadVaultData(username: string) {
       return;
     }
 
-    const data = await worker.getVaultData({ username });
+    const data = await worker.getVaultData({ username: storageKey });
 
     // Log permissions to debug real-time updates
     const firstIdentity = data?.identities?.[0];
@@ -122,7 +127,7 @@ async function loadVaultData(username: string) {
     const appIds = Object.keys(appPerms);
 
     console.log('🏪 [VaultStore] Loaded vault data:', {
-      username,
+      username: storageKey,
       identitiesCount: data?.identities?.length || 0,
       version: data?.version || 0,
       updatedAt: data?.updatedAt,

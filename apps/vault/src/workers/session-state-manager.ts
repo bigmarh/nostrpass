@@ -12,7 +12,7 @@
 
 import type { VaultData } from './db';
 import type { LoginObj } from '@nostrpass/types';
-import { getLoginObj, getVaultFromNostr } from '@nostrpass/nostrHelpers';
+import { getLoginObj, getLoginObjByDTag, getVaultFromNostr } from '@nostrpass/nostrHelpers';
 import { SecureKeyStorage } from './secure-key-storage';
 import { checkPinLockout, recordFailedPinAttempt, recordSuccessfulPinAttempt, resetPinTracking } from './session-manager';
 
@@ -30,8 +30,12 @@ export interface CompleteSessionState {
 
   // User info
   username: string;
+  displayName?: string;  // Human-readable name for UI
   publicKey: string;
   storagePublicKey: string;
+
+  // Auth method
+  authProvider?: 'username' | 'google';  // How the user logged in
 
   // Vault metadata
   vaultVersion: number;
@@ -43,6 +47,7 @@ export interface CompleteSessionState {
   unlockedAt: number;
   expiresAt: number;
   relays?: string[];  // Relays for Nostr operations
+  environment?: string;  // Environment (production, demo, etc.)
 
   // LoginObj (cached from login, needed for unlock)
   loginObj?: LoginObj;
@@ -154,10 +159,14 @@ export class SessionStateManager {
     password: string;
     relays: string[];
     environment?: string;
+    identifierType?: 'username' | 'google';
+    displayName?: string;
+    vaultDTag?: string;  // For multi-vault Google auth: specific d-tag to fetch
+    vaultPasswordSalt?: string;  // For multi-vault: password salt from vault picker
   }): Promise<CompleteSessionState> {
-    console.log('[SessionStateManager] Starting atomic login for:', params.username);
+    console.log('[SessionStateManager] Starting atomic login for:', params.username, 'type:', params.identifierType);
 
-    const { username, password, relays, environment = 'production' } = params;
+    const { username, password, relays, environment = 'production', identifierType = 'username', displayName, vaultDTag, vaultPasswordSalt } = params;
 
     try {
       // Step 1: Try to load LoginObj from IndexedDB cache (fast)
@@ -167,11 +176,33 @@ export class SessionStateManager {
       // Always fetch from Nostr to verify password
       // Even if we have a cached LoginObj, we need to verify the password is correct
       console.log('[SessionStateManager] Fetching from Nostr to verify password...');
-      const loginResult = await getLoginObj(username, environment, relays, password);
+      console.log('[SessionStateManager] Using identifierType:', identifierType, 'environment:', environment);
+
+      let loginResult: { loginObj: LoginObj; passwordSalt: string } | null = null;
+
+      // For Google auth with multi-vault: use specific d-tag if provided
+      if (identifierType === 'google' && vaultDTag && vaultPasswordSalt) {
+        console.log('[SessionStateManager] Using getLoginObjByDTag for multi-vault Google auth');
+        console.log('[SessionStateManager] vaultDTag:', vaultDTag);
+        loginResult = await getLoginObjByDTag(vaultDTag, vaultPasswordSalt, relays, password);
+      } else {
+        // Standard lookup by identifier
+        loginResult = await getLoginObj(username, identifierType, environment, relays, password);
+      }
 
       if (!loginResult) {
         throw new Error('Account not found or wrong password');
       }
+
+      // DEBUG: Log the full LoginObj structure
+      console.log('[SessionStateManager] ========== LOGIN OBJ DEBUG ==========');
+      console.log('[SessionStateManager] LoginObj keys:', Object.keys(loginResult.loginObj));
+      console.log('[SessionStateManager] LoginObj.storagePublicKey:', loginResult.loginObj.storagePublicKey);
+      console.log('[SessionStateManager] LoginObj.passwordSalt:', loginResult.loginObj.passwordSalt);
+      console.log('[SessionStateManager] LoginObj.pinSalt exists:', !!loginResult.loginObj.pinSalt);
+      console.log('[SessionStateManager] LoginObj.storageKeypairEncrypted exists:', !!loginResult.loginObj.storageKeypairEncrypted);
+      console.log('[SessionStateManager] Result passwordSalt:', loginResult.passwordSalt);
+      console.log('[SessionStateManager] =====================================');
 
       // Cache the LoginObj for future logins (after successful password verification)
       // Include environment in cache key to handle same username in different namespaces
@@ -179,6 +210,12 @@ export class SessionStateManager {
       console.log('[SessionStateManager] Password verified, LoginObj cached successfully');
 
       const { loginObj, passwordSalt } = loginResult;
+
+      // Ensure passwordSalt is on the loginObj (for older accounts it may only be in event tags)
+      if (!loginObj.passwordSalt && passwordSalt) {
+        loginObj.passwordSalt = passwordSalt;
+        console.log('[SessionStateManager] Added passwordSalt to loginObj from event tags');
+      }
 
       // Step 2: Store LoginObj in session for later use during unlock
       // We can't fetch VaultObj yet because it's encrypted with storage key
@@ -189,13 +226,18 @@ export class SessionStateManager {
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const now = Date.now();
 
+      // Use provided displayName or fall back to username
+      const effectiveDisplayName = displayName || username;
+
       // Create complete session state (locked - no keys yet)
       const session: CompleteSessionState = {
         isAuthenticated: true,
         isUnlocked: false,
         username,
+        displayName: effectiveDisplayName,
         publicKey: '', // Will be set on unlock
         storagePublicKey: loginObj.storagePublicKey,
+        authProvider: identifierType === 'google' ? 'google' : 'username', // Track auth method
         vaultVersion: 0, // Will be set on unlock
         identityCount: 0, // Will be set on unlock
         sessionId,
@@ -203,6 +245,7 @@ export class SessionStateManager {
         unlockedAt: 0,
         expiresAt: now + this.SESSION_TIMEOUT,
         relays, // Store for later use during unlock
+        environment, // Store for use during unlock
         loginObj // Store for decrypting storage keys during unlock
       };
 
@@ -215,9 +258,13 @@ export class SessionStateManager {
       await vaultDB.saveSession({
         sessionId,
         username,
-        publicKey: loginObj.storagePublicKey,
+        displayName: effectiveDisplayName,
+        storagePublicKey: loginObj.storagePublicKey,
+        publicKey: '', // Will be set on unlock when we decrypt the vault
         isUnlocked: false,
-        createdAt: now
+        createdAt: now,
+        environment, // Store environment for use during unlock
+        authProvider: identifierType === 'google' ? 'google' : 'username' // Track auth method
       });
 
       // SECURITY: Reset PIN tracking after successful password login
@@ -278,31 +325,49 @@ export class SessionStateManager {
       console.log('[SessionStateManager] Loading VaultObj from IndexedDB cache...');
       const { vaultDB } = await import('./db');
       await vaultDB.init();
-      let vaultData = await vaultDB.getVault(params.username);
+
+      // For Google login, we need to get the storagePublicKey from LoginObj first
+      // because the vault is keyed by storagePublicKey, not by username/Google UID
+      let storagePublicKeyForLookup = session.storagePublicKey;
+
+      // Load LoginObj early if not already in session (needed for storagePublicKey lookup)
+      if (!session.loginObj) {
+        console.log('[SessionStateManager] Loading LoginObj from IndexedDB cache...');
+        const environment = session.environment || 'production';
+        console.log('[SessionStateManager] Using environment:', environment);
+        const cachedLogin = await vaultDB.getLoginObj(params.username, environment);
+        if (cachedLogin?.loginObj) {
+          session.loginObj = cachedLogin.loginObj;
+          storagePublicKeyForLookup = cachedLogin.loginObj.storagePublicKey;
+          console.log('[SessionStateManager] LoginObj loaded from cache, storagePublicKey:', storagePublicKeyForLookup?.slice(0, 12) + '...');
+        }
+      } else if (session.loginObj.storagePublicKey) {
+        storagePublicKeyForLookup = session.loginObj.storagePublicKey;
+      }
+
+      // Try to get vault by storagePublicKey first (primary), then by username (fallback)
+      let vaultData = storagePublicKeyForLookup
+        ? await vaultDB.getVault(storagePublicKeyForLookup)
+        : null;
+
+      if (!vaultData) {
+        // Fallback to username lookup
+        vaultData = await vaultDB.getVault(params.username);
+      }
+
+      console.log('[SessionStateManager] Vault lookup result:', {
+        foundByStoragePublicKey: !!vaultData && !!storagePublicKeyForLookup,
+        foundByUsername: !!vaultData && !storagePublicKeyForLookup,
+        vaultUsername: vaultData?.username
+      });
 
       if (!vaultData) {
         console.log('[SessionStateManager] VaultObj not in cache, need to fetch from Nostr first');
         console.log('[SessionStateManager] This requires storage keys - deriving from xpriv temporarily...');
 
-        // We need to fetch the LoginObj to get the storage keypair
-        // Then use that to fetch and decrypt the VaultObj from Nostr
+        // We need the LoginObj to get the storage keypair
         if (!session.loginObj) {
-          // Fetch LoginObj from Nostr (should have been cached during login, but might be a restored session)
-          console.log('[SessionStateManager] Fetching LoginObj from Nostr...');
-
-          const loginResult = await getLoginObj(
-            params.username,
-            'production',
-            session.relays || [],
-            '' // We don't have password, will use what's cached
-          );
-
-          if (!loginResult || !loginResult.loginObj) {
-            throw new Error('LoginObj not found - please login with password first');
-          }
-
-          session.loginObj = loginResult.loginObj;
-          console.log('[SessionStateManager] LoginObj fetched successfully');
+          throw new Error('LoginObj not found in cache - please login with password first');
         }
 
         // Decrypt storage keypair with PIN
@@ -329,12 +394,29 @@ export class SessionStateManager {
           throw new Error('VaultObj not found on Nostr');
         }
 
+        // Add storagePublicKey for IndexedDB keyPath (not stored in encrypted vault)
+        vaultData.storagePublicKey = storagePublicKey;
+
         // Save to IndexedDB for future unlocks
         console.log('[SessionStateManager] Saving VaultObj to IndexedDB cache...');
         await vaultDB.saveVault(vaultData);
         console.log('[SessionStateManager] VaultObj cached successfully');
       } else {
         console.log('[SessionStateManager] VaultObj loaded from cache');
+      }
+
+      // ALWAYS load LoginObj into session (needed for linkGoogleAccount and other operations)
+      // Even if vaultData was cached, we still need loginObj for password verification
+      if (!session.loginObj) {
+        console.log('[SessionStateManager] Loading LoginObj into session...');
+        const environment = session.environment || 'production';
+        const cachedLogin = await vaultDB.getLoginObj(params.username, environment);
+        if (cachedLogin?.loginObj) {
+          session.loginObj = cachedLogin.loginObj;
+          console.log('[SessionStateManager] LoginObj loaded into session');
+        } else {
+          console.warn('[SessionStateManager] LoginObj not found in cache - some features may not work');
+        }
       }
 
       // Step 2: Decrypt xpriv with PIN
@@ -619,14 +701,17 @@ export class SessionStateManager {
           isAuthenticated: true,
           isUnlocked: false,
           username: persistedSession.username,
-          publicKey: '',
-          storagePublicKey: persistedSession.publicKey,
+          displayName: persistedSession.displayName || persistedSession.username, // Restore displayName
+          publicKey: persistedSession.publicKey || '', // Nostr public key (set after unlock)
+          storagePublicKey: persistedSession.storagePublicKey, // Vault identifier (from IndexedDB)
+          authProvider: persistedSession.authProvider || 'username', // Restore auth method (username or google)
           vaultVersion: 0,
           identityCount: 0,
           sessionId,
           createdAt: now,
           unlockedAt: 0,
-          expiresAt: now + this.SESSION_TIMEOUT
+          expiresAt: now + this.SESSION_TIMEOUT,
+          environment: persistedSession.environment || 'production' // Restore environment for unlock
         };
 
         this.sessions.set(persistedSession.username, session);

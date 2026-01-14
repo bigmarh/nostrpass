@@ -106,7 +106,8 @@ export function appKeyFromOrigin(origin: string): string {
  * 3. Triggering account picker if no authorized identity found
  *
  * @param cryptoWorker - The crypto worker instance
- * @param username - The current user's username
+ * @param lookupKey - The vault lookup key (storagePublicKey preferred, username as fallback)
+ *                    For Google login, this MUST be storagePublicKey, not the Google UID
  * @param origin - The origin requesting access
  * @param DEV_BYPASS - If true, always return index 0 (for development)
  * @returns Promise resolving to the identity index
@@ -117,9 +118,10 @@ export function appKeyFromOrigin(origin: string): string {
  *
  * @example
  * ```typescript
+ * const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
  * const idx = await getAppIdentityIndexForOrigin(
  *   cryptoWorker,
- *   'alice',
+ *   lookupKey,
  *   'https://app.example.com',
  *   false
  * );
@@ -127,11 +129,11 @@ export function appKeyFromOrigin(origin: string): string {
  */
 export async function getAppIdentityIndexForOrigin(
   cryptoWorker: CryptoWorker,
-  username: string,
+  lookupKey: string,
   origin: string,
   DEV_BYPASS: boolean = false
 ): Promise<number> {
-  const vaultData = await cryptoWorker.getVaultData({ username });
+  const vaultData = await cryptoWorker.getVaultData({ username: lookupKey });
 
   if (!vaultData?.identities || vaultData.identities.length === 0) {
     throw new Error('No identities found');
@@ -525,12 +527,14 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
       if (!cryptoWorker) throw new Error('Crypto not ready');
       if (!currentUser.profile?.username) throw new Error('No username');
 
-      const vaultData = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
+      const vaultData = await cryptoWorker.getVaultData({ username: lookupKey });
 
       // Only allow if identity is connected to this app
       const idx = await getAppIdentityIndexForOrigin(
         cryptoWorker,
-        currentUser.profile.username,
+        lookupKey,
         origin,
         DEV_BYPASS
       );
@@ -578,16 +582,18 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
       }
 
       const origin = context?.origin || 'unknown';
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
       const identityIndex = await getAppIdentityIndexForOrigin(
         cryptoWorker,
-        currentUser.profile.username,
+        lookupKey,
         origin,
         DEV_BYPASS
       );
 
       // Ensure event has required fields (pubkey, created_at)
       try {
-        const vdata = await cryptoWorker.getVaultData({ username: currentUser.profile.username });
+        const vdata = await cryptoWorker.getVaultData({ username: lookupKey });
         const identity = (vdata as any)?.identities?.[identityIndex];
         if (identity?.publicKey) {
           if (!data.event) data.event = {};
@@ -669,9 +675,11 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
       }
 
       const origin = context?.origin || 'unknown';
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
       const identityIndex = await getAppIdentityIndexForOrigin(
         cryptoWorker,
-        currentUser.profile.username,
+        lookupKey,
         origin,
         DEV_BYPASS
       );
@@ -728,9 +736,11 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
       }
 
       const origin = context?.origin || 'unknown';
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
       const identityIndex = await getAppIdentityIndexForOrigin(
         cryptoWorker,
-        currentUser.profile.username,
+        lookupKey,
         origin,
         DEV_BYPASS
       );
@@ -784,9 +794,11 @@ export function setupMessengerRoutes(params: MessengerRoutesParams): void {
       }
 
       const origin = context?.origin || 'unknown';
+      // Use storagePublicKey for vault lookup (critical for Google login)
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
       const identityIndex = await getAppIdentityIndexForOrigin(
         cryptoWorker,
-        currentUser.profile.username,
+        lookupKey,
         origin,
         DEV_BYPASS
       );

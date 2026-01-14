@@ -33,8 +33,10 @@ export const AccountPickerController: Component = () => {
       appKey = sanitizeDomain(appOrigin);
     }
 
+    // Use storagePublicKey for vault lookup (critical for Google login)
     try {
-      const vaultData = await vaultDataService.getVaultData(currentUser.profile.username);
+      const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+      const vaultData = await vaultDataService.getVaultData(lookupKey);
       if (vaultData?.identities && vaultData.identities.length > 0) {
         // Show ALL identities with their indices
         // Mark which ones are already authorized for UI indication

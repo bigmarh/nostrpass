@@ -575,7 +575,7 @@ export const Dashboard: Component = () => {
 
             {/* Global Settings Modal */}
             <GlobalSettings
-                username={user()?.username || ''}
+                username={user()?.profile?.storagePublicKey || user()?.username || ''}
                 identityCount={vaultData()?.identities?.filter((id: any) => !id.archived).length || 0}
                 isOpen={showGlobalSettings()}
                 onClose={() => setShowGlobalSettings(false)}

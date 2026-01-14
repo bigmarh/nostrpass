@@ -223,7 +223,16 @@ const GlobalSettings: Component<GlobalSettingsProps> = (props) => {
               <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
                 Link additional sign-in methods to your account.
               </p>
-              <LinkGoogleAccount vaultData={props.vaultData} />
+              <LinkGoogleAccount
+                vaultData={props.vaultData}
+                onLinked={async () => {
+                  // Force reload vault data after link/unlink
+                  console.log('[GlobalSettings] Link/unlink completed, refreshing vault data...');
+                  // Import and call reloadVaultData to force refresh the store
+                  const { reloadVaultData } = await import('../stores/vaultStore');
+                  await reloadVaultData();
+                }}
+              />
             </div>
 
             {/* Nostr Sync Section - rendered as a slot */}

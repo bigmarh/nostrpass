@@ -1,4 +1,4 @@
-import { createContext, useContext, ParentComponent, createSignal, onMount } from 'solid-js';
+import { createContext, useContext, ParentComponent, createSignal } from 'solid-js';
 
 interface EnvironmentConfig {
   name: string;
@@ -104,14 +104,13 @@ function detectEnvironment(): string {
   return 'development';
 }
 
-export const EnvironmentProvider: ParentComponent = (props) => {
-  const [environment, setEnvironment] = createSignal<EnvironmentConfig>(ENVIRONMENT_CONFIGS.development);
+// Initialize environment synchronously to avoid race conditions
+function initializeEnvironment(): EnvironmentConfig {
+  const envName = detectEnvironment();
+  const envConfig = { ...ENVIRONMENT_CONFIGS[envName] } || { ...ENVIRONMENT_CONFIGS.development };
 
-  onMount(() => {
-    const envName = detectEnvironment();
-    const envConfig = ENVIRONMENT_CONFIGS[envName] || ENVIRONMENT_CONFIGS.development;
-
-    // Check for storage environment override from URL params (passed by Embassy)
+  // Check for storage environment override from URL params (passed by Embassy)
+  if (typeof window !== 'undefined') {
     const urlParams = new URLSearchParams(window.location.search);
     const storageEnvParam = urlParams.get('storageEnvironment');
 
@@ -119,9 +118,13 @@ export const EnvironmentProvider: ParentComponent = (props) => {
       console.log('[EnvironmentProvider] Storage environment override from URL:', storageEnvParam);
       envConfig.storageEnvironment = storageEnvParam;
     }
+  }
 
-    setEnvironment(envConfig);
-  });
+  return envConfig;
+}
+
+export const EnvironmentProvider: ParentComponent = (props) => {
+  const [environment] = createSignal<EnvironmentConfig>(initializeEnvironment());
 
   const value: EnvironmentContextType = {
     environment,

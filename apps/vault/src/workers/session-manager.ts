@@ -595,6 +595,7 @@ export const sessionManager = {
           // Store LoginObj data in a way that PIN unlock can access it
           // We'll save the encrypted storage keypair along with basic vault metadata
           await vaultDB.saveVault({
+            storagePublicKey: loginObj.storagePublicKey, // PRIMARY KEY - must be set for IndexedDB
             username: params.username,
             publicKey: loginObj.storagePublicKey,
             // Store the PIN-encrypted storage keypair for PIN unlock
@@ -671,6 +672,10 @@ export const sessionManager = {
           vaultData.passwordVerifier = passwordVerifier;
           vaultData.passwordSalt = passwordSalt;
           vaultData.updatedAt = Date.now();
+          // Ensure storagePublicKey is set (may be missing in very old vaults)
+          if (!vaultData.storagePublicKey && vaultData.publicKey) {
+            vaultData.storagePublicKey = vaultData.publicKey;
+          }
 
           // Save to IndexedDB (saveVault will update if already exists)
           await vaultDB.saveVault(vaultData);
@@ -1356,6 +1361,7 @@ export const sessionManager = {
 
     // Store encrypted vault data with default identity and password verifier
     const vaultDataToSave = {
+      storagePublicKey: vault.publicKey, // PRIMARY KEY - must be set for IndexedDB
       username: vault.username,
       publicKey: vault.publicKey,
       xprivEncrypted: vault.xprivEncrypted,
@@ -1465,13 +1471,35 @@ export const sessionManager = {
       throw error;
     }
 
+    // For Google login, the vault is keyed by storagePublicKey, not username (Google UID)
+    // First try to get LoginObj to find the storagePublicKey
+    let storagePublicKeyForLookup: string | undefined;
+    // Get environment from existing session if available, otherwise default to 'production'
+    const existingSession = activeSessions.get(params.username);
+    const environment = existingSession?.environment || 'production';
+    console.log('[Unlock] Using environment:', environment);
+    const cachedLogin = await vaultDB.getLoginObj(params.username, environment);
+    if (cachedLogin?.loginObj?.storagePublicKey) {
+      storagePublicKeyForLookup = cachedLogin.loginObj.storagePublicKey;
+      console.log('[Unlock] Found storagePublicKey from LoginObj:', storagePublicKeyForLookup?.slice(0, 12) + '...');
+    }
+
     // Get cached vault data from IndexedDB (contains storageKeypairEncrypted from login)
-    const cachedData = await vaultDB.getVault(params.username);
+    // Try storagePublicKey first (from LoginObj), then fall back to username
+    let cachedData = storagePublicKeyForLookup
+      ? await vaultDB.getVault(storagePublicKeyForLookup)
+      : null;
+    if (!cachedData) {
+      cachedData = await vaultDB.getVault(params.username);
+    }
     if (!cachedData) {
       throw new Error('Vault not found - please login first');
     }
 
-    console.log('[Unlock] Starting unlock with new architecture', { username: params.username });
+    console.log('[Unlock] Starting unlock with new architecture', {
+      username: params.username,
+      foundByStoragePublicKey: !!storagePublicKeyForLookup && !!cachedData
+    });
 
     ensureNotLocked(params.username);
 
@@ -1550,8 +1578,10 @@ export const sessionManager = {
     console.log('✅ [Unlock] xpriv decrypted and validated successfully');
 
     // Update cached vault with fresh data from Nostr
+    // Ensure storagePublicKey is set (may be missing in old vaults)
     await vaultDB.saveVault({
       ...cachedData,
+      storagePublicKey: cachedData.storagePublicKey || storagePublicKey, // Ensure primary key is set
       xprivEncrypted: vaultData.xprivEncrypted,
       identities: vaultData.identities || [],
       // activeIdentityByApp removed - now stored in localStorage per-browser

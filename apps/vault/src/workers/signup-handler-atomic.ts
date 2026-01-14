@@ -309,15 +309,9 @@ export async function handleAtomicCreateAccount(params: {
       vaultData
     };
 
-    // Store in session manager using storagePublicKey as key (consistent with SessionStateManager)
-    (manager as any).sessions.set(storagePublicKey, session);
-    (manager as any).activeStoragePublicKey = storagePublicKey;
-
-    // Map display name and identifier to storagePublicKey for reverse lookup
-    (manager as any).displayNameToStorageKey.set(identifier, storagePublicKey);
-    if (displayName !== identifier) {
-      (manager as any).displayNameToStorageKey.set(displayName, storagePublicKey);
-    }
+    // Store in session manager using username as key (consistent with SessionStateManager.login)
+    (manager as any).sessions.set(identifier, session);
+    (manager as any).activeUsername = identifier;
 
     // Persist session to IndexedDB for restore on refresh
     await vaultDB.saveSession({
@@ -593,16 +587,22 @@ export async function handleLinkGoogleAccount(params: {
     // ===== Step 1: Verify password by re-deriving key =====
     console.log('[link-google] Verifying password...');
 
-    // Get the stored vault data to get the password salt
-    const vaultData = session.vaultData;
-    if (!vaultData?.passwordSalt) {
-      throw new Error('Cannot verify password - no salt stored');
+    // Get the password salt - try multiple sources for backward compatibility
+    // 1. From LoginObj (new accounts)
+    // 2. From VaultData (accounts created before loginObj stored passwordSalt)
+    let passwordSalt = session.loginObj?.passwordSalt;
+    if (!passwordSalt && session.vaultData?.passwordSalt) {
+      passwordSalt = session.vaultData.passwordSalt;
+      console.log('[link-google] Using passwordSalt from vaultData (fallback)');
+    }
+    if (!passwordSalt) {
+      throw new Error('Cannot verify password - no salt stored in LoginObj or VaultData');
     }
 
     // Derive password key with existing salt
     const passwordDeriveResult = await cryptoPrimitives.deriveKey({
       password,
-      salt: vaultData.passwordSalt
+      salt: passwordSalt
     });
     const passwordKey = passwordDeriveResult.key;
 
@@ -621,6 +621,20 @@ export async function handleLinkGoogleAccount(params: {
       throw new Error('Storage keypair not available in session');
     }
 
+    // Get vaultData from session
+    const vaultData = session.vaultData;
+    if (!vaultData) {
+      throw new Error('Vault data not available in session');
+    }
+
+    // Validate required vaultData fields
+    if (!vaultData.salt) {
+      throw new Error('vaultData.salt (PIN salt) is required but missing');
+    }
+    if (!vaultData.username) {
+      throw new Error('vaultData.username is required but missing');
+    }
+
     // Encrypt storage keypair with PIN
     const storageKeypairJson = JSON.stringify({
       privateKey: storagePrivateKey,
@@ -636,13 +650,21 @@ export async function handleLinkGoogleAccount(params: {
     // This is critical for looking up the VaultObj during unlock
     const originalVaultUsername = vaultData.username;
 
+    // CRITICAL: Use the verified passwordSalt variable (already checked at lines 593-600)
+    // vaultData.passwordSalt might be undefined for older accounts, but passwordSalt is guaranteed to be set
+    if (!passwordSalt) {
+      throw new Error('passwordSalt is required but undefined - this should never happen');
+    }
+
+    console.log('[link-google] Creating LoginObj with passwordSalt:', passwordSalt?.substring(0, 12) + '...');
+
     const googleLoginObj: LoginObj = {
       storagePublicKey,
       storageKeypairEncrypted,
       username: displayName, // Use Google display name for display
       createdAt: Date.now(),
       version: 1,
-      passwordSalt: vaultData.passwordSalt,
+      passwordSalt, // Use the verified passwordSalt variable, NOT vaultData.passwordSalt
       pinSalt: vaultData.salt,
       // Auth provider info
       authProvider: 'google',
@@ -700,8 +722,21 @@ export async function handleLinkGoogleAccount(params: {
     // Store the Google display name (email/name) so we can show which Google account is linked in settings
     // Sync to Nostr so linkedAuthProviders is available on all devices
     console.log('[link-google] Updating vault linkedAuthProviders...');
+    console.log('[link-google] Looking up vault by storagePublicKey:', storagePublicKey?.slice(0, 12) + '...');
+    console.log('[link-google] Fallback username:', originalVaultUsername);
     try {
-      const currentVault = await vaultDB.getVault(storagePublicKey);
+      // Try to find vault by storagePublicKey first (primary), then by username (fallback)
+      let currentVault = await vaultDB.getVault(storagePublicKey);
+      if (!currentVault && originalVaultUsername) {
+        console.log('[link-google] Not found by storagePublicKey, trying username:', originalVaultUsername);
+        currentVault = await vaultDB.getVaultByUsername(originalVaultUsername);
+      }
+      console.log('[link-google] Vault lookup result:', {
+        found: !!currentVault,
+        username: currentVault?.username,
+        storagePublicKey: currentVault?.storagePublicKey?.slice(0, 12) + '...',
+        existingLinkedAuthProviders: currentVault?.linkedAuthProviders?.length || 0
+      });
       if (currentVault) {
         const linkedAuthProviders = currentVault.linkedAuthProviders || [];
 
@@ -726,6 +761,7 @@ export async function handleLinkGoogleAccount(params: {
         }
 
         // Use updateVaultData with syncToNostr to persist to both IndexedDB and Nostr
+        console.log('[link-google] Calling updateVaultData with syncToNostr: true');
         await vaultOperations.updateVaultData({
           storagePublicKey,
           vaultData: {
@@ -734,10 +770,16 @@ export async function handleLinkGoogleAccount(params: {
           },
           options: { syncToNostr: true }
         });
-        console.log('[link-google] Updated vault with linkedAuthProviders and synced to Nostr:', linkedEntry.displayName);
+        console.log('[link-google] ✅ Updated vault with linkedAuthProviders and synced to Nostr:', linkedEntry.displayName);
+      } else {
+        console.error('[link-google] ❌ Vault not found in IndexedDB! Cannot update linkedAuthProviders.');
+        console.error('[link-google] ❌ Tried storagePublicKey:', storagePublicKey?.slice(0, 12) + '...');
+        console.error('[link-google] ❌ Tried username:', originalVaultUsername);
       }
     } catch (e) {
-      console.warn('[link-google] Failed to update linkedAuthProviders (non-critical):', e);
+      // This is actually critical for linkedAuthProviders to persist across devices!
+      console.error('[link-google] ❌ FAILED to update linkedAuthProviders:', e);
+      console.error('[link-google] ❌ linkedAuthProviders will NOT persist to Nostr');
     }
 
     console.log('[link-google] Google account linked successfully!');
@@ -771,17 +813,20 @@ export async function handleUnlinkGoogleAccount(params: {
   const { googleUid, relays } = params;
 
   // Get session manager to verify we have an active session
+  // Use getAuthState() without username param to use activeUsername automatically
   const manager = getSessionStateManager();
-  const activeKey = (manager as any).activeStoragePublicKey;
+  const session = manager.getAuthState(); // Uses activeUsername internally
 
-  if (!activeKey) {
-    throw new Error('No active session - must be logged in to unlink');
-  }
-
-  const session = (manager as any).sessions.get(activeKey);
+  console.log('[unlink-google] Checking session:', {
+    found: !!session,
+    isAuthenticated: session?.isAuthenticated,
+    isUnlocked: session?.isUnlocked,
+    hasStoragePublicKey: !!session?.storagePublicKey,
+    username: session?.username
+  });
 
   if (!session || !session.isAuthenticated) {
-    throw new Error('Must be logged in to unlink Google account');
+    throw new Error('No active session - must be logged in to unlink');
   }
 
   if (!session.isUnlocked) {
@@ -824,11 +869,29 @@ export async function handleUnlinkGoogleAccount(params: {
     console.log('[unlink-google] Removing from linkedAuthProviders...');
 
     try {
-      const currentVault = await vaultDB.getVault(storagePublicKey);
+      // Try to find vault by storagePublicKey first, then by username (fallback)
+      let currentVault = await vaultDB.getVault(storagePublicKey);
+      if (!currentVault && session.username) {
+        console.log('[unlink-google] Vault not found by storagePublicKey, trying username:', session.username);
+        currentVault = await vaultDB.getVaultByUsername(session.username);
+      }
+
+      console.log('[unlink-google] Vault lookup result:', {
+        found: !!currentVault,
+        username: currentVault?.username,
+        linkedAuthProviders: currentVault?.linkedAuthProviders?.length || 0
+      });
+
       if (currentVault && currentVault.linkedAuthProviders) {
         const updatedProviders = currentVault.linkedAuthProviders.filter(
           (p: any) => !(p.provider === 'google' && p.googleUid === googleUid)
         );
+
+        console.log('[unlink-google] Filtering linkedAuthProviders:', {
+          before: currentVault.linkedAuthProviders.length,
+          after: updatedProviders.length,
+          googleUidToRemove: googleUid?.substring(0, 8) + '...'
+        });
 
         // Update vault data and sync to Nostr
         await vaultOperations.updateVaultData({
@@ -840,10 +903,12 @@ export async function handleUnlinkGoogleAccount(params: {
           options: { syncToNostr: true }
         });
 
-        console.log('[unlink-google] Removed from linkedAuthProviders');
+        console.log('[unlink-google] ✅ Removed from linkedAuthProviders');
+      } else {
+        console.warn('[unlink-google] ⚠️ No vault found or no linkedAuthProviders to update');
       }
     } catch (e) {
-      console.warn('[unlink-google] Failed to update linkedAuthProviders (non-critical):', e);
+      console.error('[unlink-google] ❌ Failed to update linkedAuthProviders:', e);
     }
 
     // ===== Step 3: Clean up IndexedDB cache =====

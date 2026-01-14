@@ -120,6 +120,17 @@ export async function saveLoginObj(
   displayName?: string // For Google auth: display name for vault picker UI
 ): Promise<string[]> {
   try {
+    // Validate required fields before attempting to create event
+    if (!loginObj.passwordSalt) {
+      throw new Error('loginObj.passwordSalt is required but undefined - cannot create Nostr event');
+    }
+    if (!identifier) {
+      throw new Error('identifier is required but undefined');
+    }
+    if (!randomPublicKey || !randomPrivateKey) {
+      throw new Error('randomPublicKey and randomPrivateKey are required');
+    }
+
     const loginContent = JSON.stringify(loginObj);
 
     // CRITICAL: Encrypt LoginObj content with password key using NIP-44

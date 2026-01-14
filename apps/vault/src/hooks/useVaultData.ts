@@ -20,13 +20,15 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
   const [error, setError] = createSignal<string | null>(null);
 
   const username = createMemo(() => user()?.profile?.username);
+  // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+  const storageKey = createMemo(() => user()?.profile?.storagePublicKey || user()?.profile?.username);
 
-  // Initialize store when username becomes available
+  // Initialize store when storageKey becomes available
   createEffect(() => {
-    const currentUsername = username();
-    if (currentUsername && autoLoad) {
-      console.log('🔄 [useVaultData] Initializing vault store for:', currentUsername);
-      initVaultStore(currentUsername);
+    const currentStorageKey = storageKey();
+    if (currentStorageKey && autoLoad) {
+      console.log('🔄 [useVaultData] Initializing vault store for:', currentStorageKey);
+      initVaultStore(currentStorageKey);
     }
   });
 

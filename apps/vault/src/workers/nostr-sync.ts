@@ -114,7 +114,10 @@ async function pollOnceAndApply(params: {
           }
         }
         if (!remote) continue;
-        const local = await vaultDB.getVault(username);
+        // Use storagePublicKey (storagePub) as primary key - it's the IndexedDB keyPath
+        // Fall back to username only if storagePub is somehow unavailable
+        console.log('🔑 [Worker Poll] Looking up vault by storagePublicKey:', storagePub?.slice(0, 12) + '...');
+        const local = await vaultDB.getVault(storagePub || username);
 
         // Use timestamp-based comparison like DMs (simpler and more reliable)
         const remoteTimestamp = ev.created_at || 0; // Nostr event timestamp
@@ -138,7 +141,8 @@ async function pollOnceAndApply(params: {
             localIdentities: local?.identities?.length,
           });
           await vaultOperations.updateVaultData({
-            username,
+            storagePublicKey: storagePub,  // Use storagePublicKey as primary key
+            username,  // Keep for fallback and session lookup
             vaultData: remote,
             skipVersionIncrement: true,
             options: { syncToNostr: false } // Don't sync back - we just received this from Nostr!
@@ -195,7 +199,11 @@ export const nostrSync = {
     const sessionManager = getSessionStateManager();
     const session = sessionManager.getAuthState(username);
 
-    const vault = await vaultDB.getVault(username);
+    // Use storagePublicKey from session as primary key (it's the IndexedDB keyPath)
+    // Fall back to username only if session doesn't have storagePublicKey yet
+    const sessionStoragePub = session?.storagePublicKey;
+    console.log('🔑 [Worker.startNostrSubscription] Looking up vault by:', sessionStoragePub ? 'storagePublicKey' : 'username');
+    const vault = await vaultDB.getVault(sessionStoragePub || username);
     if (!vault) throw new Error('Vault not found');
 
     // CRITICAL: Use storagePublicKey for vault events (not personal identity publicKey)
@@ -280,7 +288,9 @@ export const nostrSync = {
 
             if (!remote) return;
 
-            const local = await vaultDB.getVault(username);
+            // Use storagePublicKey as primary key for vault lookup
+            console.log('🔑 [Worker Subscription] Looking up local vault by storagePublicKey:', storagePub?.slice(0, 12) + '...');
+            const local = await vaultDB.getVault(storagePub || username);
 
             // Timestamp-based conflict resolution (simpler and more reliable)
             const remoteTimestamp = ev.created_at || 0; // Nostr event timestamp in seconds
@@ -312,7 +322,8 @@ export const nostrSync = {
                 permissionsPreview: appIds.length > 0 ? appPerms[appIds[0]]?.permissions : null
               });
               await vaultOperations.updateVaultData({
-                username,
+                storagePublicKey: storagePub,  // Use storagePublicKey as primary key
+                username,  // Keep for fallback and session lookup
                 vaultData: remote,
                 skipVersionIncrement: true, // Don't increment version for Nostr downloads
                 options: { syncToNostr: false } // Don't sync back - we just received this from Nostr!
@@ -657,8 +668,24 @@ export const nostrSync = {
 
     // Use SessionStateManager to get session (atomic auth uses this)
     const manager = getSessionStateManager();
-    // Sessions are keyed by storagePublicKey
-    const session = (manager as any).sessions?.get(lookupKey);
+    // Sessions are keyed by USERNAME, not storagePublicKey
+    // Try lookupKey first (in case it's a username), then fall back to vault.username
+    let session = (manager as any).sessions?.get(lookupKey);
+    console.log('🔍 [saveVaultToNostr] Session lookup by lookupKey:', lookupKey, 'found:', !!session);
+    if (!session && vault.username && vault.username !== lookupKey) {
+      console.log('🔍 [saveVaultToNostr] Session not found by storagePublicKey, trying username:', vault.username);
+      session = (manager as any).sessions?.get(vault.username);
+      console.log('🔍 [saveVaultToNostr] Session lookup by username:', vault.username, 'found:', !!session);
+    }
+
+    if (session) {
+      console.log('🔍 [saveVaultToNostr] Session state:', {
+        isUnlocked: session.isUnlocked,
+        hasStoragePrivateKey: !!session.storagePrivateKey,
+        hasXpriv: !!session.xpriv,
+        username: session.username
+      });
+    }
 
     // CRITICAL: Always use the vault's storage public key
     // During account creation, storage keypair is derived at m/44'/1237'/0'/0/8907 (STORAGE_INDEX)
@@ -695,6 +722,14 @@ export const nostrSync = {
     }
 
     if (!priv) {
+      console.error('❌ [saveVaultToNostr] No storage private key available!', {
+        sessionFound: !!session,
+        sessionUsername: session?.username,
+        sessionIsUnlocked: session?.isUnlocked,
+        sessionHasXpriv: !!session?.xpriv,
+        lookupKey: lookupKey?.slice(0, 12) + '...',
+        vaultUsername: vault.username
+      });
       throw new Error('No storage private key available for signing vault event');
     }
 
@@ -719,6 +754,7 @@ export const nostrSync = {
       identities: vault.identities || [],
       activeIdentityByApp: vault.activeIdentityByApp || {},
       appPermissions: (vault as any).appPermissions || {},
+      linkedAuthProviders: (vault as any).linkedAuthProviders || [], // Include linked auth providers (e.g., Google accounts)
       updatedAt: Date.now(),
       version: 1,
     };
@@ -727,6 +763,7 @@ export const nostrSync = {
       identitiesCount: payload.identities.length,
       hasXprivEncrypted: !!payload.xprivEncrypted,
       xprivEncryptedLength: payload.xprivEncrypted?.length,
+      linkedAuthProvidersCount: payload.linkedAuthProviders.length,
     });
 
     // CRITICAL: Encrypt the payload with STORAGE PRIVATE KEY (NIP-04)

@@ -258,6 +258,27 @@ async function updateVaultData(params: {
     toSave.storagePublicKey = lookupKey;
   }
 
+  // MIGRATION: If vault was stored with wrong key (username instead of storagePublicKey),
+  // detect and fix by deleting the old record before saving with correct key
+  const existingVault = await vaultDB.getVault(lookupKey);
+  if (!existingVault && params.vaultData?.username) {
+    // Vault not found by storagePublicKey, try by username
+    const vaultByUsername = await vaultDB.getVaultByUsername(params.vaultData.username);
+    if (vaultByUsername && vaultByUsername.storagePublicKey !== lookupKey) {
+      console.log('🔧 [updateVaultData] Migrating vault from old key to correct storagePublicKey:', {
+        oldKey: vaultByUsername.storagePublicKey?.slice(0, 12) + '...',
+        newKey: lookupKey.slice(0, 12) + '...'
+      });
+      // Delete old vault record only (not session/xpriv) - it's keyed incorrectly
+      try {
+        await vaultDB.deleteVaultOnly(vaultByUsername.storagePublicKey);
+        console.log('✅ [updateVaultData] Deleted old vault record with incorrect key');
+      } catch (e) {
+        console.warn('⚠️ [updateVaultData] Could not delete old vault record:', e);
+      }
+    }
+  }
+
   // CRITICAL: Preserve xprivEncrypted if missing in incoming data
   // This prevents data loss when worker operations update vault without including xprivEncrypted
   if (!toSave.xprivEncrypted) {
@@ -326,10 +347,13 @@ async function updateVaultData(params: {
   if (params.options?.syncToNostr) {
     try {
       console.log('📡 [updateVaultData] Syncing to Nostr...');
+      console.log('📡 [updateVaultData] Params:', { storagePublicKey: lookupKey?.slice(0, 12) + '...', username: toSave.username });
       await nostrSync.saveVaultToNostr({ storagePublicKey: lookupKey, username: toSave.username });
       console.log('✅ [updateVaultData] Vault synced to Nostr successfully');
     } catch (err) {
-      console.warn('⚠️ [updateVaultData] Failed to sync vault to Nostr (non-critical):', err);
+      // Make this error VERY visible - it means data won't persist across devices!
+      console.error('❌❌❌ [updateVaultData] FAILED to sync vault to Nostr:', err);
+      console.error('❌❌❌ [updateVaultData] Data will NOT persist to other devices!');
     }
   } else {
     console.log('⏭️ [updateVaultData] Skipping Nostr sync (syncToNostr not true)');
