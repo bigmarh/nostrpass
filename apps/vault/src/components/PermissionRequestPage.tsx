@@ -105,6 +105,9 @@ export const PermissionRequestPage: Component = () => {
       return;
     }
 
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     let appKey = appOrigin();
     try {
       appKey = sanitizeDomain(new URL(appOrigin()).host || appOrigin());
@@ -117,14 +120,14 @@ export const PermissionRequestPage: Component = () => {
       // This allows the current operation to succeed after user approval
       if (action() === 'signEvent' || action() === 'signData') {
         // Grant 1-minute session permission for the immediate retry
-        await permissionService.grantSessionPermission(currentUser.profile.username, appKey, action(), eventKind(), 1);
+        await permissionService.grantSessionPermission(lookupKey, appKey, action(), eventKind(), 1);
       }
 
       // Save the permission for future requests based on selected level
       if (level === 'ASK_PER_SESSION') {
         if (action() === 'signEvent' || action() === 'signData') {
           // Extend the session to 60 minutes if user selected "Ask per session"
-          await permissionService.grantSessionPermission(currentUser.profile.username, appKey, action(), eventKind(), 60);
+          await permissionService.grantSessionPermission(lookupKey, appKey, action(), eventKind(), 60);
         }
       } else {
         // Save permanent permission setting
@@ -159,7 +162,7 @@ export const PermissionRequestPage: Component = () => {
             }
             break;
         }
-        await permissionService.saveAppPermissions(currentUser.profile.username, appKey, perms, appName(), identityIndex());
+        await permissionService.saveAppPermissions(lookupKey, appKey, perms, appName(), identityIndex());
       }
 
       console.log('[PermissionRequestPage] ✅ Permission saved, level:', level);

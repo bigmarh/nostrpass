@@ -32,17 +32,20 @@ export const Settings: Component = () => {
     const identityPubkey = currentIdentity()?.publicKey;
     if (!currentUser || !cryptoWorker || !identityPubkey) return;
 
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     try {
-      const vaultData = await cryptoWorker.getVaultData({ 
-        username: currentUser.profile.username 
+      const vaultData = await cryptoWorker.getVaultData({
+        username: lookupKey
       });
-      
+
       if (vaultData && vaultData.identities) {
         setAllIdentities(vaultData.identities);
         // Find the identity that matches the pubkey from URL
         let foundIndex = -1;
         let foundIdentity = null;
-        
+
         // For now, since we only have one identity, we'll use the current one
         // In the future, we'll need to derive public keys for each identity
         // and match against the URL parameter
@@ -60,7 +63,7 @@ export const Settings: Component = () => {
             }
           });
         }
-        
+
         if (foundIdentity && foundIndex >= 0) {
           setIdentityIndex(foundIndex);
           setCurrentIdentity(foundIdentity);
@@ -80,7 +83,7 @@ export const Settings: Component = () => {
                 return appKey.startsWith('http') ? appKey : `https://${appKey}`;
               }
             })();
-            const ai = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (vaultData as any).activeIdentityByApp?.[appKey];
+            const ai = getActiveIdentity(lookupKey, appOrigin) ?? (vaultData as any).activeIdentityByApp?.[appKey];
             setActiveIndexForApp(typeof ai === 'number' ? ai : null);
           } catch {}
         } else {
@@ -100,20 +103,23 @@ export const Settings: Component = () => {
     const currentUser = user();
     if (!currentUser || !cryptoWorker || !currentIdentity()) return;
 
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     try {
-      const vaultData = await cryptoWorker.getVaultData({ 
-        username: currentUser.profile.username 
+      const vaultData = await cryptoWorker.getVaultData({
+        username: lookupKey
       });
-      
+
       if (vaultData && vaultData.identities[identityIndex()]) {
         // Update the identity nickname
         vaultData.identities[identityIndex()].nickname = newNickname();
         vaultData.updatedAt = Date.now();
-        
+
         // Save to vault
-        await cryptoWorker.updateVaultData({ 
-          username: currentUser.profile.username, 
-          vaultData 
+        await cryptoWorker.updateVaultData({
+          username: lookupKey,
+          vaultData
         });
         
         // Update local state
@@ -134,6 +140,10 @@ export const Settings: Component = () => {
   const makeActiveForThisApp = async (index: number) => {
     const currentUser = user();
     if (!currentUser || !cryptoWorker) return;
+
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     try {
       const appKey = sanitizeDomain(params.app);
       // Set active identity in localStorage (per-browser, not synced)
@@ -148,10 +158,7 @@ export const Settings: Component = () => {
           return appKey.startsWith('http') ? appKey : `https://${appKey}`;
         }
       })();
-      await setActiveIdentity(currentUser.profile.username, appOrigin, index);
-
-      // Use storagePublicKey for vault lookup (critical for Google login)
-      const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+      await setActiveIdentity(lookupKey, appOrigin, index);
       const vaultData = await cryptoWorker.getVaultData({ username: lookupKey });
       (vaultData as any).activeIdentityByApp = (vaultData as any).activeIdentityByApp || {};
       (vaultData as any).activeIdentityByApp[appKey] = index;
