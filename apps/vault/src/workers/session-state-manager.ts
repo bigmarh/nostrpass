@@ -334,8 +334,15 @@ export class SessionStateManager {
       if (!session.loginObj) {
         console.log('[SessionStateManager] Loading LoginObj from IndexedDB cache...');
         const environment = session.environment || 'production';
-        console.log('[SessionStateManager] Using environment:', environment);
-        const cachedLogin = await vaultDB.getLoginObj(params.username, environment);
+        console.log('[SessionStateManager] Using environment:', environment, 'authProvider:', session.authProvider);
+
+        // For Google login, LoginObj was saved with "${googleUid}_google" as the cache key
+        // We need to match that format when retrieving
+        const cacheKeyUsername = session.authProvider === 'google'
+          ? `${params.username}_google`
+          : params.username;
+        console.log('[SessionStateManager] LoginObj cache key username:', cacheKeyUsername);
+        const cachedLogin = await vaultDB.getLoginObj(cacheKeyUsername, environment);
         if (cachedLogin?.loginObj) {
           session.loginObj = cachedLogin.loginObj;
           storagePublicKeyForLookup = cachedLogin.loginObj.storagePublicKey;
@@ -410,7 +417,11 @@ export class SessionStateManager {
       if (!session.loginObj) {
         console.log('[SessionStateManager] Loading LoginObj into session...');
         const environment = session.environment || 'production';
-        const cachedLogin = await vaultDB.getLoginObj(params.username, environment);
+        // For Google login, LoginObj was saved with "${googleUid}_google" as the cache key
+        const cacheKeyUsername = session.authProvider === 'google'
+          ? `${params.username}_google`
+          : params.username;
+        const cachedLogin = await vaultDB.getLoginObj(cacheKeyUsername, environment);
         if (cachedLogin?.loginObj) {
           session.loginObj = cachedLogin.loginObj;
           console.log('[SessionStateManager] LoginObj loaded into session');
