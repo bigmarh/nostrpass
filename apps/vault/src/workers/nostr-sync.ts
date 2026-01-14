@@ -668,14 +668,31 @@ export const nostrSync = {
 
     // Use SessionStateManager to get session (atomic auth uses this)
     const manager = getSessionStateManager();
-    // Sessions are keyed by USERNAME, not storagePublicKey
-    // Try lookupKey first (in case it's a username), then fall back to vault.username
+    // Sessions are keyed by USERNAME (or Google UID for Google auth), not storagePublicKey
+    // Try multiple lookup strategies:
+    // 1. lookupKey directly (in case it's a username)
+    // 2. vault.username (the display name stored in vault)
+    // 3. Search all sessions for matching storagePublicKey (for Google auth where session key is UID)
     let session = (manager as any).sessions?.get(lookupKey);
-    console.log('🔍 [saveVaultToNostr] Session lookup by lookupKey:', lookupKey, 'found:', !!session);
+    console.log('🔍 [saveVaultToNostr] Session lookup by lookupKey:', lookupKey?.slice(0, 12) + '...', 'found:', !!session);
+
     if (!session && vault.username && vault.username !== lookupKey) {
       console.log('🔍 [saveVaultToNostr] Session not found by storagePublicKey, trying username:', vault.username);
       session = (manager as any).sessions?.get(vault.username);
       console.log('🔍 [saveVaultToNostr] Session lookup by username:', vault.username, 'found:', !!session);
+    }
+
+    // For Google auth: session is keyed by Google UID, not storagePublicKey or display name
+    // Search through all sessions to find one with matching storagePublicKey
+    if (!session && (manager as any).sessions) {
+      console.log('🔍 [saveVaultToNostr] Searching all sessions for matching storagePublicKey...');
+      for (const [sessionKey, sessionValue] of (manager as any).sessions.entries()) {
+        if (sessionValue?.storagePublicKey === lookupKey || sessionValue?.storagePublicKey === vault.storagePublicKey) {
+          session = sessionValue;
+          console.log('🔍 [saveVaultToNostr] Found session by storagePublicKey match, key:', sessionKey);
+          break;
+        }
+      }
     }
 
     if (session) {

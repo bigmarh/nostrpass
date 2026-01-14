@@ -479,27 +479,39 @@ async function publishToNostrBackground(params: {
 
     console.log('[signup-atomic-nostr] Nostr sync successful!');
 
-    // Notify UI of successful sync
-    self.postMessage({
-      type: 'NOSTR_SYNC_COMPLETE',
-      data: {
-        username: displayName,
-        loginRelayCount: loginPublished.length,
-        vaultRelayCount: vaultPublished.length
-      }
-    });
+    // Notify UI of successful sync via BroadcastChannel (works in SharedWorker)
+    try {
+      const channel = new BroadcastChannel('nostrpass-vault');
+      channel.postMessage({
+        type: 'NOSTR_SYNC_COMPLETE',
+        data: {
+          username: displayName,
+          loginRelayCount: loginPublished.length,
+          vaultRelayCount: vaultPublished.length
+        }
+      });
+      channel.close();
+    } catch (broadcastError) {
+      console.warn('[signup-atomic-nostr] Failed to broadcast sync complete:', broadcastError);
+    }
 
   } catch (error) {
     console.error('[signup-atomic-nostr] Nostr sync failed:', error);
 
-    // Notify UI of sync failure
-    self.postMessage({
-      type: 'NOSTR_SYNC_FAILED',
-      data: {
-        username: displayName,
-        error: (error as Error).message
-      }
-    });
+    // Notify UI of sync failure via BroadcastChannel (works in SharedWorker)
+    try {
+      const channel = new BroadcastChannel('nostrpass-vault');
+      channel.postMessage({
+        type: 'NOSTR_SYNC_FAILED',
+        data: {
+          username: displayName,
+          error: (error as Error).message
+        }
+      });
+      channel.close();
+    } catch (broadcastError) {
+      console.warn('[signup-atomic-nostr] Failed to broadcast sync failed:', broadcastError);
+    }
 
     throw error;
   }
