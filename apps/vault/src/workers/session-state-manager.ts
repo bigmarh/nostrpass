@@ -392,19 +392,25 @@ export class SessionStateManager {
         const storagePublicKey = storageKeypair.publicKey;
 
         // Fetch VaultObj from Nostr
+        // CRITICAL: Pass session environment to ensure we query the correct environment
+        // This is essential for Google login where the vault might be in a different environment
+        const sessionEnv = session.environment || 'production';
         console.log('[SessionStateManager] Fetching VaultObj from Nostr...');
         console.log('[SessionStateManager] Using storagePublicKey:', storagePublicKey?.slice(0, 16) + '...');
         console.log('[SessionStateManager] Using relays:', session.relays);
+        console.log('[SessionStateManager] Using environment:', sessionEnv);
         vaultData = await getVaultFromNostr(
           storagePublicKey,
           session.relays || [],
-          storagePrivateKey
+          storagePrivateKey,
+          sessionEnv  // Pass session environment explicitly
         );
 
         if (!vaultData) {
           console.error('[SessionStateManager] VaultObj not found on Nostr!');
           console.error('[SessionStateManager] storagePublicKey:', storagePublicKey);
           console.error('[SessionStateManager] relays:', session.relays);
+          console.error('[SessionStateManager] environment:', sessionEnv);
           console.error('[SessionStateManager] authProvider:', session.authProvider);
           throw new Error('VaultObj not found on Nostr');
         }
