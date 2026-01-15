@@ -511,6 +511,11 @@ class NostrPassEmbassy {
       
       this.iframe.onload = () => {
         if (this.config.debug) console.log('Iframe loaded successfully');
+
+        // Reset ready state on every load - this is critical for Google OAuth flow
+        // where the iframe content reloads after redirect, requiring a fresh handshake
+        this._isReady = false;
+
         // Give the vault a moment to initialize its handlers
         setTimeout(() => {
           if (this.config.debug) console.log('Iframe initialization period complete');
@@ -518,7 +523,7 @@ class NostrPassEmbassy {
           // This triggers the vault to lock onto our origin and respond
           // We retry the handshake a few times in case the vault needs more time to initialize
           const sendHandshake = (attempt: number = 1) => {
-            if (this.messenger && !this._isReady) {
+            if (this.messenger) {
               this.messenger.send('EMBASSY_HANDSHAKE', {
                 origin: window.location.origin,
                 appName: this.config.appName,

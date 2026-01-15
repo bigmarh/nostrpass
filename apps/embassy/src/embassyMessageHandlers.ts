@@ -123,6 +123,13 @@ export const embassyMessageHandlers = function (embassyInstance: NostrPassEmbass
             window.dispatchEvent(new CustomEvent('vault-data-refresh', { detail: data }));
             console.log('📦 [Embassy] ✅ vault-data-refresh event dispatched');
         },
+        IDENTITY_SWITCHED: (data: any) => {
+            console.log('🔄 [Embassy] Identity switched signal received from vault iframe', data);
+            // Dispatch window event for NostrPassButton and other listeners
+            // This allows the button to update its display when identity changes
+            window.dispatchEvent(new CustomEvent('identity-switched', { detail: data }));
+            console.log('🔄 [Embassy] ✅ identity-switched event dispatched');
+        },
         ACCOUNT_PICKER_SELECTED: (data: any) => {
             console.log('✅ [Embassy] Account picker selected signal received from vault iframe', data);
             // Dispatch window event for NostrPassButton and other listeners

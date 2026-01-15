@@ -20,6 +20,41 @@ export type IdentifierType = 'username' | 'google';
 // New event types for the updated auth flow
 // NOTE: LoginObj is PASSWORD-ENCRYPTED when stored on Nostr
 // The fields below represent the DECRYPTED content inside
+export interface LinkedAuthProvider {
+  provider: 'username' | 'google';
+  linkedAt: number;
+  displayName?: string;
+  googleUid?: string;
+}
+
+export interface VaultData {
+  storagePublicKey: string;
+  username: string;
+  publicKey: string;
+  xprivEncrypted: string;
+  salt: string;
+  storageKeypairEncrypted?: string;
+  identities: any[];
+  currentIdentityIndex?: number;
+  activeIdentityByApp?: Record<string, string | null>;
+  recovery?: {
+    questions: string[];
+    xprivRecovery: string;
+    salt: string;
+    version: number;
+  };
+  customRelays?: string[];
+  updatedAt: number;
+  version: number;
+  createdAt?: number;
+  lastSyncedAt?: number;
+  lastUnlocked?: number;
+  derivationPath?: string;
+  sessionExpiry?: number;
+  passwordSalt?: string;
+  linkedAuthProviders?: LinkedAuthProvider[];
+}
+
 export interface LoginObj {
   storagePublicKey: string; // Public key for finding VaultObj on Nostr
   storageKeypairEncrypted: string; // Storage keypair (private+public) encrypted with PIN
@@ -56,11 +91,7 @@ export interface VaultObj {
   // Password salt (optional, for migration/verification)
   passwordSalt?: string;
   // Linked authentication providers (e.g., Google linked to username account)
-  linkedAuthProviders?: Array<{
-    provider: AuthProvider;
-    linkedAt: number;
-    displayName?: string;
-  }>;
+  linkedAuthProviders?: LinkedAuthProvider[];
 }
 
 export interface RecoveryData {

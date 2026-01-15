@@ -4,8 +4,7 @@ import { useAuth } from '../providers/AuthProvider';
 import { PermissionService } from '../services/permissionService';
 import { vaultDataService } from '../services/vaultDataService';
 import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
-import { getActiveIdentity } from '../utils/activeIdentityManager';
-import { desanitizeDomain } from '@nostrpass/nostrHelpers';
+import { getActiveIdentityIndex } from '../stores/vaultStore';
 
 export const PermissionsDashboard: Component = () => {
   const { user } = useAuth();
@@ -20,22 +19,6 @@ export const PermissionsDashboard: Component = () => {
   const [sortBy, setSortBy] = createSignal<'name' | 'granted' | 'lastUsed'>('lastUsed');
   const [sortOrder, setSortOrder] = createSignal<'asc' | 'desc'>('desc');
   const permissionService = PermissionService.getInstance();
-
-  // Helper to get app origin from appId (sanitized domain)
-  const getAppOrigin = (appId: string): string => {
-    try {
-      // Try to reconstruct origin from sanitized domain
-      const domain = desanitizeDomain(appId);
-      // Default to https, but check if it's localhost
-      if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-        return `http://${domain}`;
-      }
-      return `https://${domain}`;
-    } catch {
-      // Fallback: use appId as-is (it might already be an origin)
-      return appId.startsWith('http') ? appId : `https://${appId}`;
-    }
-  };
 
   onMount(async () => {
     await loadPermissions();
@@ -97,8 +80,7 @@ export const PermissionsDashboard: Component = () => {
       // Get active identity from localStorage (per-browser, not synced)
       // Use storagePublicKey for vault lookup (critical for Google login)
       const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
-      const appOrigin = getAppOrigin(appId);
-      const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? (await vaultDataService.getVaultData(lookupKey, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+      const identityIndex = getActiveIdentityIndex(appId) || undefined;
       const appPerm = await permissionService.getAppPermissions(
         currentUser.profile.username,
         appId,
@@ -164,8 +146,7 @@ export const PermissionsDashboard: Component = () => {
       // Get active identity from localStorage (per-browser, not synced)
       // Use storagePublicKey for vault lookup (critical for Google login)
       const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
-      const appOrigin = getAppOrigin(appId);
-      const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? (await vaultDataService.getVaultData(lookupKey, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+      const identityIndex = getActiveIdentityIndex(appId) || undefined;
       await permissionService.saveAppPermissions(
         currentUser.profile.username,
         appId,
@@ -262,8 +243,7 @@ export const PermissionsDashboard: Component = () => {
             // Get active identity from localStorage (per-browser, not synced)
             // Use storagePublicKey for vault lookup (critical for Google login)
             const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile.username;
-            const appOrigin = getAppOrigin(appId);
-            const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? (await vaultDataService.getVaultData(lookupKey, { forceRefresh: true }))?.activeIdentityByApp?.[appId] ?? undefined;
+            const identityIndex = getActiveIdentityIndex(appId) || undefined;
             await permissionService.saveAppPermissions(
               currentUser.profile.username,
               appId,

@@ -92,9 +92,15 @@ const VaultPicker: Component<VaultPickerProps> = (props) => {
                 onClick={() => props.onSelect(vault)}
                 class="w-full p-4 text-left rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
               >
-                <div class="flex items-center justify-between">
-                  <div>
-                    <p class="font-medium text-gray-900 dark:text-white">
+                <div class="flex items-center gap-3">
+                  {/* Vault avatar with initials */}
+                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+                    <span class="text-white text-sm font-bold">
+                      {vault.displayName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?'}
+                    </span>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="font-medium text-gray-900 dark:text-white truncate">
                       {vault.displayName}
                     </p>
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
@@ -102,7 +108,7 @@ const VaultPicker: Component<VaultPickerProps> = (props) => {
                     </p>
                   </div>
                   <svg
-                    class="w-5 h-5 text-gray-400"
+                    class="w-5 h-5 text-gray-400 flex-shrink-0"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"

@@ -5,6 +5,8 @@ import { useAuth, useMessenger } from '../providers';
 import { useVaultData } from '../hooks/useVaultData';
 import { permissionService } from '../services/permissionService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { setActiveIdentityIndex } from '../stores/vaultStore';
+import { vaultDataService } from '../services/vaultDataService';
 
 /**
  * SimpleAuthPage - Dedicated page for simple authorization flow
@@ -81,10 +83,30 @@ export const SimpleAuthPage: Component = () => {
         identityIndex
       );
 
-      // Trigger vault data refresh event to notify embassy
+      // Set this identity as the active identity via vaultStore (updates localStorage + notifies embassy)
+      // Use appKey (sanitized) to match how permissions are stored
+      // Pass lookupKey as fallback in case vaultStore isn't initialized yet
+      await setActiveIdentityIndex(appKey, identityIndex, lookupKey);
+      console.log('[SimpleAuthPage] Updated active identity via vaultStore:', { appKey, identityIndex, lookupKey });
+
+      // Additional notification for embedding app
+      console.log('[SimpleAuthPage] 📤 Sending VAULT_DATA_UPDATED to embassy');
+      send('VAULT_DATA_UPDATED', {
+        username: currentUser.profile.username,
+        timestamp: Date.now(),
+        activeIdentityIndex: identityIndex,
+        activePublicKey: identity()?.publicKey,
+        appKey
+      });
+
+      // Also dispatch window event for components within the vault iframe
       window.dispatchEvent(new CustomEvent('vault-data-refresh', {
         detail: { username: currentUser.profile.username }
       }));
+
+      // Wait a moment for embassy/button to process the update before closing
+      console.log('[SimpleAuthPage] Waiting for button to update...');
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       // Close the vault modal and return to the app
       send('HIDE_VAULT');

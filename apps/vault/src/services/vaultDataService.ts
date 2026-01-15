@@ -2,8 +2,6 @@ import { getCryptoWorker } from './cryptoWorkerSingleton';
 import type { VaultData } from '../workers/db';
 import type { Identity } from '@nostrpass/types';
 import { SimplePool } from 'nostr-tools';
-import { profileCacheService } from './profileCacheService';
-// NDK removed: worker handles realtime subscriptions via nostr-tools
 
 export interface VaultDataOptions {
   forceRefresh?: boolean;
@@ -16,9 +14,7 @@ export interface UpdateVaultDataOptions {
 
 export class VaultDataService {
   private static instance: VaultDataService;
-  private cache = new Map<string, { data: VaultData; timestamp: number }>();
-  private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-  
+
   // Nostr subscription management
   private pool: SimplePool | null = null;
   private activeSubscriptions = new Map<string, { unsubscribe: any; relays: string[] }>();
@@ -32,19 +28,10 @@ export class VaultDataService {
   }
 
   /**
-   * Get vault data for a user with optional caching
+   * Get vault data for a user (always fresh from worker)
+   * Use vaultStore for reactive/cached data in components
    */
-  async getVaultData(username: string, options: VaultDataOptions = {}): Promise<VaultData | null> {
-    const { forceRefresh = false } = options;
-    
-    // Check cache first (unless force refresh is requested)
-    if (!forceRefresh) {
-      const cached = this.cache.get(username);
-      if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
-        return cached.data;
-      }
-    }
-
+  async getVaultData(username: string, _options: VaultDataOptions = {}): Promise<VaultData | null> {
     const cryptoWorker = getCryptoWorker();
     if (!cryptoWorker) {
       throw new Error('Crypto worker not ready');
@@ -52,53 +39,6 @@ export class VaultDataService {
 
     try {
       const vaultData = await cryptoWorker.getVaultData({ username });
-
-      if (vaultData) {
-        // MIGRATION: Convert activeIdentityByApp from index to publicKey
-        if (vaultData.activeIdentityByApp && vaultData.identities) {
-          let needsMigration = false;
-          const migratedActiveIdentityByApp: Record<string, string | null> = {};
-
-          for (const [appKey, value] of Object.entries(vaultData.activeIdentityByApp)) {
-            if (typeof value === 'number') {
-              // Old format: index
-              needsMigration = true;
-              const identity = vaultData.identities[value];
-              if (identity?.publicKey) {
-                migratedActiveIdentityByApp[appKey] = identity.publicKey;
-                console.log(`[VaultDataService] Migrated activeIdentityByApp for ${appKey}: index ${value} → publicKey ${identity.publicKey.slice(0, 8)}...`);
-              } else {
-                migratedActiveIdentityByApp[appKey] = null;
-                console.warn(`[VaultDataService] Could not migrate activeIdentityByApp for ${appKey}: identity at index ${value} not found`);
-              }
-            } else if (typeof value === 'string' || value === null) {
-              // New format: publicKey or null
-              migratedActiveIdentityByApp[appKey] = value;
-            }
-          }
-
-          if (needsMigration) {
-            console.log('[VaultDataService] Migrating activeIdentityByApp from index to publicKey');
-            vaultData.activeIdentityByApp = migratedActiveIdentityByApp;
-
-            // Persist the migration - pass full vaultData, not partial updates
-            await cryptoWorker.updateVaultData({
-              username,
-              vaultData: { ...vaultData, activeIdentityByApp: migratedActiveIdentityByApp },
-              options: { updateTimestamp: true, syncToNostr: true }
-            });
-          }
-        }
-
-        // Cache the result
-        this.cache.set(username, { data: vaultData, timestamp: Date.now() });
-
-        // Cache profiles for fast UI rendering
-        if (vaultData.identities) {
-          profileCacheService.cacheProfiles(username, vaultData.identities);
-        }
-      }
-
       return vaultData;
     } catch (error) {
       console.error('Failed to get vault data:', error);
@@ -162,14 +102,6 @@ export class VaultDataService {
         vaultData: updatedData,
         options: { syncToNostr: true }  // Always true!
       });
-
-      // Update cache
-      this.cache.set(username, { data: updatedData, timestamp: Date.now() });
-
-      // Cache profiles for fast UI rendering
-      if (updatedData.identities) {
-        profileCacheService.cacheProfiles(username, updatedData.identities);
-      }
 
       // STREAMLINED: Sync happens automatically in worker via updateVaultData
       // No need to call syncToNostr here - it's handled by the worker
@@ -315,38 +247,11 @@ export class VaultDataService {
   }
 
   /**
-   * Clear cache for a specific user or all users
+   * Clear cache - no-op since caching was removed
+   * Kept for API compatibility with existing callers
    */
-  clearCache(username?: string): void {
-    if (username) {
-      this.cache.delete(username);
-    } else {
-      this.cache.clear();
-    }
-  }
-
-  /**
-   * Get cache statistics (useful for debugging)
-   */
-  getCacheStats(): { size: number; entries: Array<{ username: string; age: number }> } {
-    const now = Date.now();
-    const entries = Array.from(this.cache.entries()).map(([username, { timestamp }]) => ({
-      username,
-      age: now - timestamp
-    }));
-
-    return {
-      size: this.cache.size,
-      entries
-    };
-  }
-
-  /**
-   * Check if vault data is cached and fresh
-   */
-  isCached(username: string): boolean {
-    const cached = this.cache.get(username);
-    return cached ? (Date.now() - cached.timestamp < this.CACHE_DURATION) : false;
+  clearCache(_username?: string): void {
+    // No-op: cache removed, vaultStore is now the single source of truth
   }
 
   /**

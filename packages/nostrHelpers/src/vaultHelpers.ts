@@ -5,65 +5,12 @@ import { hexToBytes, bytesToHex } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 
 
-// Linked auth provider info stored in vault
-export interface LinkedAuthProvider {
-  provider: 'username' | 'google';
-  linkedAt: number;
-  displayName?: string; // e.g., Google email or display name
-  googleUid?: string; // For Google auth: used for deduplication when re-linking
-}
-
-// Updated VaultData interface for new auth flow
-export interface VaultData {
-  // Core fields - storagePublicKey is the PRIMARY IDENTIFIER for all vault lookups
-  storagePublicKey: string; // Primary key - unique vault identifier (derived from master key)
-  username: string; // Display name only (for UI)
-  publicKey: string; // Same as storagePublicKey (alias for compatibility)
-  xprivEncrypted: string; // PIN-encrypted xpriv (encrypted with PIN, not password)
-  salt: string; // Salt for PIN encryption
-
-  // NEW: Storage keypair from LoginObj (for new double-encryption architecture)
-  storageKeypairEncrypted?: string; // PIN-encrypted storage keypair from LoginObj
-
-  // Identity management
-  identities: any[];
-  currentIdentityIndex?: number; // Currently selected identity index
-  // Active identity per app (persistent selection separate from authorization)
-  // Changed from index (number) to publicKey (string) for stability across identity reordering/deletion
-  activeIdentityByApp?: Record<string, string | null>;
-
-  // Recovery system
-  recovery?: {
-    questions: string[]; // The security questions
-    xprivRecovery: string; // xpriv encrypted with recovery key
-    salt: string; // Salt for answer derivation
-    version: number; // Recovery system version
-  };
-
-  // User preferences
-  customRelays?: string[]; // User's preferred relays (overrides default if set)
-
-  // Metadata
-  updatedAt: number;
-  version: number; // Increments on every save for sync conflict resolution
-  createdAt?: number; // Account creation timestamp
-  lastSyncedAt?: number; // Last sync with Nostr
-  lastUnlocked?: number; // Last time vault was unlocked
-  derivationPath?: string; // BIP32 derivation path used for the vault
-  sessionExpiry?: number; // Session expiry timestamp
-
-  // Security
-  passwordSalt?: string; // Salt for password key derivation
-
-  // Linked authentication providers (e.g., Google linked to username account)
-  linkedAuthProviders?: LinkedAuthProvider[];
-}
+import type { VaultData, LoginObj, VaultObj, IdentifierType } from '@nostrpass/types';
 
 // Alias for backward compatibility
 export type NostrVaultData = VaultData;
 
 // New helper functions for the updated auth flow
-import type { LoginObj, VaultObj, IdentifierType } from '@nostrpass/types';
 
 /**
  * Build the d-tag for LoginObj lookup

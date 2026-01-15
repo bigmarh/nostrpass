@@ -13,6 +13,7 @@
 import type { Accessor, Setter } from 'solid-js';
 import type { User } from '@nostrpass/types';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { getActiveIdentityIndex } from '../../stores/vaultStore';
 
 /**
  * Interface for crypto worker methods used in worker bridge
@@ -101,31 +102,15 @@ export function appKeyFromOrigin(origin: string): string {
  * Get the identity index for a given app origin.
  *
  * This function resolves which identity should be used for a given origin by:
- * 1. Checking activeIdentityByApp mapping in vault data
+ * 1. Checking localStorage for active identity (per-browser)
  * 2. Finding an identity with permissions for the app
  * 3. Triggering account picker if no authorized identity found
  *
  * @param cryptoWorker - The crypto worker instance
  * @param lookupKey - The vault lookup key (storagePublicKey preferred, username as fallback)
- *                    For Google login, this MUST be storagePublicKey, not the Google UID
  * @param origin - The origin requesting access
  * @param DEV_BYPASS - If true, always return index 0 (for development)
  * @returns Promise resolving to the identity index
- *
- * @throws {Error} If no identities found in vault
- * @throws {Error} If account selection is cancelled
- * @throws {Error} If selected identity is not authorized
- *
- * @example
- * ```typescript
- * const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
- * const idx = await getAppIdentityIndexForOrigin(
- *   cryptoWorker,
- *   lookupKey,
- *   'https://app.example.com',
- *   false
- * );
- * ```
  */
 export async function getAppIdentityIndexForOrigin(
   cryptoWorker: CryptoWorker,
@@ -144,13 +129,9 @@ export async function getAppIdentityIndexForOrigin(
   }
 
   const appKey = appKeyFromOrigin(origin);
-  // Changed from index to publicKey for stability across identity reordering/deletion
-  const activePublicKey = (vaultData as any).activeIdentityByApp?.[appKey];
 
-  // Find identity by publicKey
-  let activeIndex = activePublicKey
-    ? (vaultData as any).identities.findIndex((id: any) => id.publicKey === activePublicKey)
-    : -1;
+  // Get active identity from vaultStore (per-browser)
+  let activeIndex = getActiveIdentityIndex(appKey) || -1;
 
   // Try to find identity with permissions for this app if no active set
   if (activeIndex === -1) {
@@ -162,8 +143,11 @@ export async function getAppIdentityIndexForOrigin(
   // If no authorized identity, trigger account picker
   if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {
     const requestId = `account-picker-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const PICKER_TIMEOUT = 30000; // 30 second timeout
 
     return new Promise((resolve, reject) => {
+      let timeoutId: ReturnType<typeof setTimeout>;
+
       const handleSelected = (e: Event) => {
         const ce = e as CustomEvent;
         if (ce.detail.requestId === requestId) {
@@ -181,9 +165,16 @@ export async function getAppIdentityIndexForOrigin(
       };
 
       const cleanup = () => {
+        clearTimeout(timeoutId);
         window.removeEventListener('account-picker-selected', handleSelected as EventListener);
         window.removeEventListener('account-picker-rejected', handleRejected as EventListener);
       };
+
+      // Set timeout to prevent memory leaks from abandoned pickers
+      timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('Account picker timeout'));
+      }, PICKER_TIMEOUT);
 
       window.addEventListener('account-picker-selected', handleSelected as EventListener);
       window.addEventListener('account-picker-rejected', handleRejected as EventListener);

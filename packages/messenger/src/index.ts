@@ -104,11 +104,14 @@ export class SecureMessenger {
 
   // Internal message sending
   private sendMessage(message: MessagePayload, targetOrigin?: string): void {
+    console.log('[SecureMessenger] sendMessage called:', { type: message.type, targetOrigin, verifiedOrigin: this.verifiedResponseOrigin, allowedOrigins: Array.from(this.allowedOrigins), isParent: this.isParent });
+
     const targetWindow = this.isParent ?
       (this.window as any).frames[0] || this.window.document.querySelector('iframe')?.contentWindow :
       this.window.parent;
 
     if (!targetWindow) {
+      console.error('[SecureMessenger] Target window not found');
       throw new Error('Target window not found');
     }
 
@@ -130,10 +133,16 @@ export class SecureMessenger {
       origin = '*';
     } else {
       // Fallback: parent sends to iframe origin, iframe should have verified origin
+      console.error('[SecureMessenger] No verified origin available - cannot send message:', message.type);
       throw new Error('No verified origin available for sending message. Ensure handshake completed.');
     }
 
-    targetWindow.postMessage(message, origin);
+    try {
+      console.log('[SecureMessenger] postMessage:', { type: message.type, origin, isParent: this.isParent, hasTargetWindow: !!targetWindow });
+      targetWindow.postMessage(message, origin);
+    } catch (error) {
+      console.error('[SecureMessenger] postMessage FAILED:', error, { type: message.type, origin });
+    }
   }
 
   // Set up message listener
@@ -179,11 +188,13 @@ export class SecureMessenger {
     }
 
     // Handle regular message with registered handler
+    console.log('[SecureMessenger] Received message:', message.type, 'from:', event.origin);
     const handler = this.messageHandlers.get(message.type);
     if (!handler) {
-      console.warn('No handler for message type:', message.type);
+      console.warn('[SecureMessenger] No handler for message type:', message.type, '| Registered handlers:', Array.from(this.messageHandlers.keys()));
       return;
     }
+    console.log('[SecureMessenger] Found handler for:', message.type);
 
     try {
       const result = await handler(message.data);

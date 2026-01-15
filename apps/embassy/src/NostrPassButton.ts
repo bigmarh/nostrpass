@@ -272,6 +272,44 @@ export class NostrPassButton {
         }
       }
     });
+
+    // Listen for identity-switched events (direct notification from vault when identity changes)
+    window.addEventListener('identity-switched', async (event) => {
+      const customEvent = event as CustomEvent;
+      const { identityIndex, appOrigin } = customEvent.detail || {};
+      console.log('[NostrPassButton] 🔄 Identity switched event received:', { identityIndex, appOrigin });
+
+      if (this.currentUser && identityIndex !== undefined) {
+        // Fetch updated identity info
+        try {
+          const response = await this.embassy.getAllIdentities();
+          const allIdentities = response?.identities || [];
+          const newActiveIdentity = allIdentities.find((id: any) => id.index === identityIndex);
+
+          if (newActiveIdentity) {
+            console.log('[NostrPassButton] Switching to identity:', newActiveIdentity.nickname);
+            this.currentUser = {
+              identityIndex: newActiveIdentity.index,
+              publicKey: newActiveIdentity.publicKey,
+              nickname: newActiveIdentity.nickname,
+              authorized: newActiveIdentity.isAuthorized,
+              npub: newActiveIdentity.npub,
+              avatar: newActiveIdentity.avatar
+            };
+            this.saveSession(this.currentUser);
+
+            if (this.config.onLogin) {
+              this.config.onLogin(this.currentUser);
+            }
+
+            await this.render();
+            console.log('[NostrPassButton] ✅ Button updated after identity switch');
+          }
+        } catch (error) {
+          console.error('[NostrPassButton] ❌ Failed to update after identity switch:', error);
+        }
+      }
+    });
   }
 
   private updateTheme() {
@@ -989,7 +1027,7 @@ export class NostrPassButton {
     let allIdentities: any[] = [];
     try {
       const authStatus = await this.embassy.getAuthStatus();
-      username = authStatus?.username || '';
+      username = authStatus?.displayName || authStatus?.username || '';
     } catch (error) {
       console.warn('Failed to fetch auth status:', error);
     }

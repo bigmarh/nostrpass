@@ -1,4 +1,4 @@
-import type { PermissionLevel, PermissionCategories } from './userTypes';
+import type { PermissionLevel, PermissionCategories, AppPermissions } from './userTypes';
 
 /**
  * Event kinds associated with each permission category
@@ -296,6 +296,65 @@ export function createDefaultAppPermissions(appId: string, appName?: string) {
     permissions: { ...DEFAULT_PERMISSIONS },
     getPublicKey: DEFAULT_GET_PUBLIC_KEY,
   };
+}
+
+export function normalizeAppPermissions(
+  input: any,
+  appId?: string,
+  appName?: string
+): AppPermissions {
+  const base = createDefaultAppPermissions(appId || input?.appId || input?.appDomain || 'unknown', appName || input?.appName);
+
+  const legacyPermissions = input?.permissions;
+  const normalized: AppPermissions = {
+    ...base,
+    ...input,
+    appId: input?.appId || input?.appDomain || base.appId,
+    appName: input?.appName || appName || base.appName,
+    grantedAt: input?.grantedAt || input?.createdAt || base.grantedAt,
+    lastUsedAt: input?.lastUsedAt || input?.lastUsed || base.lastUsedAt,
+    permissions: {
+      ...base.permissions,
+      ...(legacyPermissions?.social ? { social: legacyPermissions.social } : {}),
+      ...(legacyPermissions?.messaging ? { messaging: legacyPermissions.messaging } : {}),
+      ...(legacyPermissions?.signData ? { signData: legacyPermissions.signData } : {}),
+      ...(legacyPermissions?.zaps ? { zaps: legacyPermissions.zaps } : {}),
+      ...(legacyPermissions?.financial ? { financial: legacyPermissions.financial } : {})
+    },
+    getPublicKey: input?.getPublicKey ?? legacyPermissions?.getPublicKey ?? base.getPublicKey
+  };
+
+  // Legacy fallbacks for older permission shapes
+  if (!legacyPermissions && input?.permissions && typeof input.permissions === 'object') {
+    normalized.permissions = {
+      ...normalized.permissions,
+      ...(input.permissions.social ? { social: input.permissions.social } : {}),
+      ...(input.permissions.messaging ? { messaging: input.permissions.messaging } : {}),
+      ...(input.permissions.signData ? { signData: input.permissions.signData } : {}),
+      ...(input.permissions.zaps ? { zaps: input.permissions.zaps } : {}),
+      ...(input.permissions.financial ? { financial: input.permissions.financial } : {})
+    };
+  }
+
+  if (!legacyPermissions && typeof input?.permissions === 'object') {
+    if (input.permissions.signEvent) {
+      normalized.signEvent = input.permissions.signEvent;
+    }
+    if (input.permissions.nip04) {
+      normalized.nip04 = input.permissions.nip04;
+    }
+    if (input.permissions.nip44) {
+      normalized.nip44 = input.permissions.nip44;
+    }
+  }
+
+  if (input?.signEvent) normalized.signEvent = input.signEvent;
+  if (input?.signData) normalized.signData = input.signData;
+  if (input?.nip04) normalized.nip04 = input.nip04;
+  if (input?.nip44) normalized.nip44 = input.nip44;
+  if (input?.getRelays) normalized.getRelays = input.getRelays;
+
+  return normalized;
 }
 
 /**

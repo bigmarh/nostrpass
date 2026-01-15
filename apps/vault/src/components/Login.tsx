@@ -660,8 +660,10 @@ export const Login: Component = () => {
                 setLoadingStatus('Vault unlocked successfully!');
 
                 // After login+unlock, navigate to account picker so user can select identity
-                const appOrigin = params.app ? desanitizeDomain(params.app) : 'unknown';
-                navigate(`/${params.app || 'vault'}/account-picker?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appOrigin)}&afterLogin=true`);
+                // Use params.app directly (sanitized format like "localhost-4000") for consistent key lookup
+                const appOrigin = params.app || 'vault';
+                const appName = params.app ? desanitizeDomain(params.app) : 'unknown';
+                navigate(`/${params.app || 'vault'}/account-picker?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appName)}&afterLogin=true`);
             } else {
                 throw new Error('Failed to unlock vault. Please try again.');
             }

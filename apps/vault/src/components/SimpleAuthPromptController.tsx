@@ -5,7 +5,7 @@ import { useMessenger } from '../providers/MessengerProvider';
 import { vaultDataService } from '../services/vaultDataService';
 import { permissionService } from '../services/permissionService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
-import { setActiveIdentity } from '../utils/activeIdentityManager';
+import { setActiveIdentityIndex } from '../stores/vaultStore';
 
 interface SimpleAuthPromptEventDetail {
   appOrigin: string;
@@ -127,10 +127,12 @@ export const SimpleAuthPromptController: Component = () => {
         d.identityIndex
       );
 
-      // Set this identity as the active identity for this app (per-browser, not synced)
-      await setActiveIdentity(lookupKey, d.appOrigin, d.identityIndex);
+      // Set this identity as the active identity via vaultStore
+      // Use appKey (sanitized) to match how permissions are stored
+      // Pass lookupKey as fallback in case vaultStore isn't initialized yet
+      await setActiveIdentityIndex(appKey, d.identityIndex, lookupKey);
 
-      // Trigger vault data refresh event to notify embassy
+      // Additional notification to embassy
       console.log('[SimpleAuthPromptController] 📤 Sending VAULT_DATA_UPDATED to embassy');
       send('VAULT_DATA_UPDATED', {
         username: currentUser.profile.username,

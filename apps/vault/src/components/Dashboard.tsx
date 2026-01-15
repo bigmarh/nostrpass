@@ -1,4 +1,4 @@
-import { Component, Show, createSignal, onMount, createEffect } from 'solid-js';
+import { Component, Show, createSignal, onMount, createEffect, createMemo } from 'solid-js';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 import { nip19 } from 'nostr-tools';
 
@@ -8,9 +8,8 @@ import { useVaultData } from '../hooks/useVaultData';
 import { IdentityManager } from './IdentityManager';
 import { PinManager } from './PinManager';
 import GlobalSettings from './GlobalSettings';
-import { getActiveIdentity } from '../utils/activeIdentityManager';
+import { getActiveIdentityIndex } from '../stores/vaultStore';
 import { nostrProfileService } from '../services/nostrProfileService';
-import { profileCacheService } from '../services/profileCacheService';
 
 export const Dashboard: Component = () => {
     const { user, logout, isVaultLocked, lockVault, unlockVault } = useAuth();
@@ -28,6 +27,16 @@ export const Dashboard: Component = () => {
 
     // Use the vault data hook
     const { vaultData, loadVaultData, syncToNostr, updateVaultData } = useVaultData({ autoLoad: true });
+
+    // Reactive memo for active identity index - ensures Dashboard re-renders when identity changes
+    // Uses params.app directly since it's already in sanitized format (e.g., "localhost-4000")
+    const activeIdentityIndex = createMemo(() => {
+        const appKey = params.app || null;
+        if (!appKey) return 0;
+        const index = getActiveIdentityIndex(appKey);
+        console.log('[Dashboard] activeIdentityIndex memo:', { appKey, index });
+        return index;
+    });
 
     // Auto-fetch Nostr profiles for identities without profile data
     createEffect(() => {
@@ -55,16 +64,6 @@ export const Dashboard: Component = () => {
                 const updatedIdentities = vault.identities.map((id: any) => {
                     const fetchedProfile = profiles.get(id.publicKey);
                     if (fetchedProfile) {
-                        // Update cache
-                        profileCacheService.updateProfile(username, id.publicKey, {
-                            name: fetchedProfile.name || fetchedProfile.display_name,
-                            picture: fetchedProfile.picture,
-                            about: fetchedProfile.about,
-                            nip05: fetchedProfile.nip05,
-                            website: fetchedProfile.website,
-                            lud16: fetchedProfile.lud16
-                        });
-
                         return {
                             ...id,
                             profile: {
@@ -162,38 +161,6 @@ export const Dashboard: Component = () => {
         } catch (error) {
             console.error('❌ Failed to send HIDE_VAULT message:', error);
         }
-    };
-
-    // Get active identity index (used in template)
-    const _getActiveIdentityIndex = () => {
-        const vault = vaultData();
-        if (!vault?.identities) return 0;
-
-        const appOrigin = params.app ? (() => {
-            try {
-                const domain = desanitizeDomain(params.app);
-                if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-                    return `http://${domain}`;
-                }
-                return `https://${domain}`;
-            } catch {
-                return params.app.startsWith('http') ? params.app : `https://${params.app}`;
-            }
-        })() : null;
-
-        const activeIndex = appOrigin
-            ? (getActiveIdentity(user()?.username || '', appOrigin) ?? vault.activeIdentityByApp?.[params.app!] ?? 0)
-            : 0;
-
-        console.log('[Dashboard] Active identity check:', {
-            appOrigin,
-            'params.app': params.app,
-            fromLocalStorage: getActiveIdentity(user()?.username || '', appOrigin || ''),
-            fromVault: vault.activeIdentityByApp?.[params.app!],
-            activeIndex
-        });
-
-        return activeIndex;
     };
 
     return (
@@ -345,24 +312,8 @@ export const Dashboard: Component = () => {
                                     const vault = vaultData();
                                     if (!vault?.identities) return null;
 
-                                    // Get active identity from localStorage (per-browser) or fallback to vault data
-                                    const appOrigin = params.app ? (() => {
-                                        try {
-                                            const domain = desanitizeDomain(params.app);
-                                            if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-                                                return `http://${domain}`;
-                                            }
-                                            return `https://${domain}`;
-                                        } catch {
-                                            return params.app.startsWith('http') ? params.app : `https://${params.app}`;
-                                        }
-                                    })() : null;
-
-                                    // getActiveIdentity returns number | null from localStorage
-                                    const activeIndex = appOrigin
-                                        ? (getActiveIdentity(user()?.username || '', appOrigin) ?? 0)
-                                        : 0;
-
+                                    // Use the reactive memo for active identity index
+                                    const activeIndex = activeIdentityIndex();
                                     const activeIdentity = vault.identities[activeIndex];
 
                                     if (!activeIdentity) {

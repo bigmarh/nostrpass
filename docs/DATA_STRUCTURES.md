@@ -12,35 +12,43 @@ The main vault data structure stored in IndexedDB and synchronized to Nostr.
 
 ```typescript
 interface VaultData {
-  // User identification
-  username: string;                    // Unique username
-  publicKey: string;                   // Storage identity public key (index 2^31-1)
-  
+  // Core identifiers
+  storagePublicKey: string;            // Primary vault key (derived from master key)
+  username: string;                    // Display name only
+  publicKey: string;                   // Alias of storagePublicKey (compat)
+
   // Encrypted master key
-  encryptedXpriv: string;              // BIP32 xpriv encrypted with PIN/password
-  
-  // Cryptographic salts
-  salt: string;                        // Password derivation salt (hex)
-  pinSalt?: string;                    // PIN derivation salt (hex)
-  
-  // Authentication
-  pinHash?: string;                    // SHA-256 hash of PIN for verification
-  hasPin: boolean;                     // Whether PIN protection is enabled
-  passwordVerifier?: string;           // Encrypted known string for password verification
-  
+  xprivEncrypted: string;              // BIP32 xpriv encrypted with PIN
+  salt: string;                        // PIN derivation salt (hex)
+
+  // Storage keypair (new auth flow)
+  storageKeypairEncrypted?: string;    // PIN-encrypted storage keypair
+
   // Identity management
   identities: Identity[];              // Array of user identities
-  currentIdentityIndex: number;        // Currently active identity (default: 0)
-  
-  // Legacy fields (being migrated)
-  appPermissions?: Record<string, AppPermissions>;  // Moving to per-identity
-  
+  currentIdentityIndex?: number;       // Currently selected identity index
+  activeIdentityByApp?: Record<string, string | null>; // App -> identity publicKey
+
   // Recovery system
   recovery?: RecoveryData;             // PIN recovery configuration
-  
+
+  // User preferences
+  customRelays?: string[];             // User relay overrides
+
   // Metadata
   updatedAt: number;                   // Last update timestamp
-  storagePublicKey?: string;           // Explicit storage key reference
+  version: number;                     // Incremented on every save
+  createdAt?: number;                  // Account creation timestamp
+  lastSyncedAt?: number;               // Last sync with Nostr
+  lastUnlocked?: number;               // Last time vault was unlocked
+  derivationPath?: string;             // BIP32 derivation path
+  sessionExpiry?: number;              // Session expiry timestamp
+
+  // Security
+  passwordSalt?: string;               // Password derivation salt (for LoginObj)
+
+  // Linked authentication providers
+  linkedAuthProviders?: LinkedAuthProvider[];
 }
 ```
 
@@ -101,6 +109,19 @@ interface AppPermissions {
 
 // Permission levels enum
 type PermissionLevel = 'ALLOW' | 'ASK_PER_SESSION' | 'ASK_EVERYTIME' | 'DENY';
+```
+
+### LinkedAuthProvider
+
+Authentication providers linked to a vault.
+
+```typescript
+interface LinkedAuthProvider {
+  provider: 'username' | 'google';
+  linkedAt: number;
+  displayName?: string;
+  googleUid?: string;
+}
 ```
 
 ### RecoveryData

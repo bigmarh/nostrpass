@@ -6,8 +6,8 @@ import RelaysSection from './RelaysSection';
 import SessionsSection from './SessionsSection';
 import { AuditLog } from './AuditLog';
 import type { Identity } from '@nostrpass/types';
-import { sanitizeDomain, desanitizeDomain } from '@nostrpass/nostrHelpers';
-import { getActiveIdentity, setActiveIdentity } from '../utils/activeIdentityManager';
+import { sanitizeDomain } from '@nostrpass/nostrHelpers';
+import { getActiveIdentityIndex, setActiveIdentityIndex } from '../stores/vaultStore';
 
 type SettingsTab = 'identity' | 'permissions' | 'security' | 'audit';
 
@@ -67,21 +67,10 @@ export const Settings: Component = () => {
           setNewNickname(foundIdentity.nickname || 'Personal');
           setIdentityPublicKey(identityPubkey);
           try {
-            const appKey = sanitizeDomain(params.app);
-            // Get active identity from localStorage (per-browser, not synced)
-            const appOrigin = (() => {
-              try {
-                const domain = desanitizeDomain(appKey);
-                if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-                  return `http://${domain}`;
-                }
-                return `https://${domain}`;
-              } catch {
-                return appKey.startsWith('http') ? appKey : `https://${appKey}`;
-              }
-            })();
-            const ai = getActiveIdentity(currentUser.profile.username, appOrigin) ?? (vaultData as any).activeIdentityByApp?.[appKey];
-            setActiveIndexForApp(typeof ai === 'number' ? ai : null);
+        const appKey = sanitizeDomain(params.app);
+        // Get active identity from localStorage (per-browser, not synced)
+        const ai = getActiveIdentityIndex(appKey);
+            setActiveIndexForApp(ai);
           } catch {}
         } else {
           // Identity not found - redirect to dashboard
@@ -135,34 +124,11 @@ export const Settings: Component = () => {
     const currentUser = user();
     if (!currentUser || !cryptoWorker) return;
     try {
+      // Use sanitized appKey directly - this matches how permissions are stored
       const appKey = sanitizeDomain(params.app);
-      // Set active identity in localStorage (per-browser, not synced)
-      const appOrigin = (() => {
-        try {
-          const domain = desanitizeDomain(appKey);
-          if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-            return `http://${domain}`;
-          }
-          return `https://${domain}`;
-        } catch {
-          return appKey.startsWith('http') ? appKey : `https://${appKey}`;
-        }
-      })();
-      await setActiveIdentity(currentUser.profile.username, appOrigin, index);
-
-      // Use storagePublicKey for vault lookup (critical for Google login)
-      const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
-      const vaultData = await cryptoWorker.getVaultData({ username: lookupKey });
-      (vaultData as any).activeIdentityByApp = (vaultData as any).activeIdentityByApp || {};
-      (vaultData as any).activeIdentityByApp[appKey] = index;
-      (vaultData as any).updatedAt = Date.now();
-      await cryptoWorker.updateVaultData({ username: lookupKey, vaultData });
+      await setActiveIdentityIndex(appKey, index);
       setActiveIndexForApp(index);
-      // Optionally sync to Nostr in background
-      try {
-        // PRE model: active identity will be event-sourced soon
-        console.log('[Settings] PRE model: active identity updated locally');
-      } catch {}
+      console.log('[Settings] Updated active identity via vaultStore:', { appKey, index });
     } catch {}
   };
 

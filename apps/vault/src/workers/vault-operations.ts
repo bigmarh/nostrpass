@@ -40,6 +40,18 @@ interface DeleteVaultResult {
 import { broadcastVaultUpdate } from './shared';
 import { nostrSync } from './nostr-sync';
 
+function validateVaultDataShape(vaultData: any): string[] {
+  const issues: string[] = [];
+  if (!vaultData?.storagePublicKey) issues.push('storagePublicKey missing');
+  if (!vaultData?.username) issues.push('username missing');
+  if (!vaultData?.publicKey) issues.push('publicKey missing');
+  if (!vaultData?.xprivEncrypted) issues.push('xprivEncrypted missing');
+  if (!vaultData?.salt) issues.push('salt missing');
+  if (!Array.isArray(vaultData?.identities)) issues.push('identities not array');
+  if (typeof vaultData?.version !== 'number') issues.push('version missing or invalid');
+  return issues;
+}
+
 /**
  * Type for the activeSessions map
  * Used by deleteVault to clear sessions
@@ -136,8 +148,7 @@ async function getVaultData(params: { storagePublicKey?: string; username?: stri
       passwordVerifier: (vaultData as any).passwordVerifier,
       identities: vaultData.identities || [],
       storagePublicKey: vaultData.publicKey,
-      // SECURITY: activeIdentityByApp maps app → publicKey (source of truth for active identity)
-      activeIdentityByApp: (vaultData as any).activeIdentityByApp || {},
+      // activeIdentityByApp removed - now stored in localStorage per-browser
       recovery: (vaultData as any).recovery,
       lastSyncedAt: vaultData.lastSyncedAt,
       updatedAt: vaultData.updatedAt || vaultData.lastUnlocked,
@@ -244,8 +255,10 @@ async function updateVaultData(params: {
 }): Promise<void> {
   await ensureCryptoReady();
 
-  // Determine lookup key - prefer storagePublicKey
-  const lookupKey = params.storagePublicKey || params.vaultData?.storagePublicKey || params.username;
+  // Determine lookup key - prefer explicit storagePublicKey over vaultData value
+  // IMPORTANT: params.storagePublicKey should be trusted over vaultData.storagePublicKey
+  // because vaultData might have incorrect storagePublicKey from earlier bugs
+  const lookupKey = params.storagePublicKey || params.username || params.vaultData?.storagePublicKey;
   if (!lookupKey) {
     console.error('❌ [updateVaultData] No storagePublicKey or username provided');
     throw new Error('No storagePublicKey or username provided');
@@ -253,8 +266,16 @@ async function updateVaultData(params: {
 
   const toSave = { ...params.vaultData };
 
-  // Ensure storagePublicKey is set in the data
-  if (!toSave.storagePublicKey) {
+  // Ensure storagePublicKey is set correctly in the data
+  // ALWAYS use lookupKey as the authoritative storagePublicKey
+  // This fixes vaults that may have incorrect storagePublicKey from earlier bugs
+  if (toSave.storagePublicKey !== lookupKey) {
+    if (toSave.storagePublicKey) {
+      console.log('🔧 [updateVaultData] Correcting storagePublicKey:', {
+        old: toSave.storagePublicKey?.slice(0, 12) + '...',
+        new: lookupKey.slice(0, 12) + '...'
+      });
+    }
     toSave.storagePublicKey = lookupKey;
   }
 
@@ -311,6 +332,16 @@ async function updateVaultData(params: {
   // MIGRATION: Handle legacy encryptedVault field (will be cleaned up by db.saveVault)
   if (!toSave.xprivEncrypted && toSave.encryptedVault) {
     toSave.xprivEncrypted = toSave.encryptedVault;
+  }
+
+  if (!Array.isArray(toSave.identities)) {
+    console.warn('⚠️ [updateVaultData] identities missing or invalid, defaulting to empty array');
+    toSave.identities = [];
+  }
+
+  const schemaIssues = validateVaultDataShape(toSave);
+  if (schemaIssues.length > 0) {
+    console.warn('⚠️ [updateVaultData] Vault data schema issues detected:', schemaIssues);
   }
 
   console.log('💾 [updateVaultData] Saving vault with:', {

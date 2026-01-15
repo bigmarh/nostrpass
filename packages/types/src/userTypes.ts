@@ -116,6 +116,13 @@ export interface AppPermissions {
   
   /** Permission level for reading public key - ALLOW by default */
   getPublicKey: PermissionLevel;
+
+  /** Legacy top-level permissions (kept for backward compatibility) */
+  signEvent?: PermissionLevel;
+  signData?: PermissionLevel;
+  nip04?: PermissionLevel;
+  nip44?: PermissionLevel;
+  getRelays?: PermissionLevel;
   
   /** Session-specific permissions (cleared on new session) */
   sessionPermissions?: {
@@ -123,6 +130,7 @@ export interface AppPermissions {
     messaging: boolean;
     signData: boolean;
     financial: boolean;
+    zaps?: boolean;
     expiresAt: number;
   };
   

@@ -5,6 +5,24 @@ import { useEnvironment } from './EnvironmentProvider';
 import { useAuth } from './AuthProvider';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
 import type { PermissionLevel } from '@nostrpass/types';
+import { getActiveIdentityIndex, getStorageKey } from '../stores/vaultStore';
+
+/**
+ * Get active identity index directly from localStorage
+ * Used as fallback when vaultStore hasn't been initialized yet (e.g., after PIN unlock)
+ */
+function getActiveIdentityFromLocalStorage(storageKey: string, appKey: string): number | null {
+  const key = `nostrpass:activeIdentity:${storageKey}:${appKey}`;
+  const value = localStorage.getItem(key);
+  if (value !== null) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isNaN(parsed) && parsed >= 0) {
+      console.log('[MessengerProvider] Found active identity in localStorage:', { key, index: parsed });
+      return parsed;
+    }
+  }
+  return null;
+}
 
 interface MessengerContextType {
   messenger: IframeMessenger | null;
@@ -100,6 +118,18 @@ export const MessengerProvider: ParentComponent = (props) => {
     
     // For testing: always allow current origin even if not in iframe
     allowedOrigins.push(window.location.origin);
+
+    // Allow parent origin passed by Embassy (critical for production iframe + localhost parent)
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const appDomainParam = urlParams.get('appDomain') || urlParams.get('appOrigin');
+      if (appDomainParam) {
+        const parentOrigin = new URL(appDomainParam).origin;
+        allowedOrigins.push(parentOrigin);
+      }
+    } catch (error) {
+      console.warn('[MessengerProvider] Failed to parse appDomain/appOrigin from URL:', error);
+    }
     
     // Use initWithParent to properly handle wildcard origins and origin verification
     messengerInstance.initWithParent(allowedOrigins);
@@ -251,15 +281,18 @@ export const MessengerProvider: ParentComponent = (props) => {
         const vaultData = await cw.getVaultData({ username: lookupKey });
         const appKey = toAppKey(origin);
 
-        // SECURITY: Use activeIdentityByApp from vault data as source of truth (synced across devices)
-        // This must match what AUTH_STATUS returns to embassy to avoid index mismatch
-        const activePublicKey = vaultData?.activeIdentityByApp?.[appKey];
+        // Get active identity from vaultStore (per-browser)
+        // Note: 0 is a valid index, so we need to check if storageKey is set
+        const storeStorageKey = getStorageKey();
         let activeIndex: number | null = null;
 
-        if (activePublicKey) {
-          // Find identity by publicKey (stable across reordering/deletion)
-          activeIndex = vaultData.identities.findIndex((id: any) => id?.publicKey === activePublicKey);
-          if (activeIndex === -1) activeIndex = null;
+        if (storeStorageKey) {
+          // Store is initialized - use its value (even if 0)
+          activeIndex = getActiveIdentityIndex(appKey);
+        } else if (lookupKey) {
+          // Store not initialized yet - read directly from localStorage
+          console.log('[MessengerProvider] VaultStore not initialized, reading from localStorage directly');
+          activeIndex = getActiveIdentityFromLocalStorage(lookupKey, appKey);
         }
 
         // Fallback: find first authorized identity for this app
@@ -269,8 +302,11 @@ export const MessengerProvider: ParentComponent = (props) => {
         if (activeIndex === -1 || activeIndex === undefined || activeIndex === null) {
           // Instead of throwing, trigger account picker
           const requestId = `account-picker-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const PICKER_TIMEOUT = 30000; // 30 second timeout
 
           return new Promise((resolve, reject) => {
+            let timeoutId: ReturnType<typeof setTimeout>;
+
             const handleSelected = (e: Event) => {
               const ce = e as CustomEvent;
               if (ce.detail.requestId === requestId) {
@@ -288,9 +324,16 @@ export const MessengerProvider: ParentComponent = (props) => {
             };
 
             const cleanup = () => {
+              clearTimeout(timeoutId);
               window.removeEventListener('account-picker-selected', handleSelected as EventListener);
               window.removeEventListener('account-picker-rejected', handleRejected as EventListener);
             };
+
+            // Set timeout to prevent memory leaks from abandoned pickers
+            timeoutId = setTimeout(() => {
+              cleanup();
+              reject(new Error('Account picker timeout'));
+            }, PICKER_TIMEOUT);
 
             window.addEventListener('account-picker-selected', handleSelected as EventListener);
             window.addEventListener('account-picker-rejected', handleRejected as EventListener);
@@ -320,10 +363,12 @@ export const MessengerProvider: ParentComponent = (props) => {
 
   const send = (type: string, data?: any) => {
     const m = messenger();
+    console.log('[MessengerProvider] send called:', { type, data, messengerReady: !!m });
     if (m) {
       m.send(type, data);
+      console.log('[MessengerProvider] Message sent successfully:', type);
     } else {
-      console.warn('Messenger not ready');
+      console.warn('[MessengerProvider] Messenger not ready - message not sent:', type);
     }
   };
 

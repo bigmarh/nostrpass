@@ -5,6 +5,9 @@
 export enum Msg {
   VAULT_READY = 'VAULT_READY',
   AUTH_STATUS = 'AUTH_STATUS',
+  VAULT_DATA_UPDATED = 'VAULT_DATA_UPDATED',
+  ACCOUNT_PICKER_SELECTED = 'ACCOUNT_PICKER_SELECTED',
+  IDENTITY_SWITCHED = 'IDENTITY_SWITCHED',
   SHOW_VAULT = 'SHOW_VAULT',
   HIDE_VAULT = 'HIDE_VAULT',
   NAVIGATE = 'NAVIGATE',
@@ -96,5 +99,32 @@ export interface ManageAccountsResponse extends ResponseBase<'MANAGE_ACCOUNTS_RE
     authorized: boolean;
   }
 }>{}
+
+export interface VaultDataUpdatedPayload {
+  username: string;
+  timestamp: number;
+  activeIdentityIndex?: number;
+  activePublicKey?: string;
+  appKey?: string;
+}
+
+export interface AccountPickerSelectedPayload {
+  requestId?: string;
+  identityIndex: number;
+  identity?: {
+    publicKey?: string;
+    npub?: string;
+    nickname?: string;
+    authorized?: boolean;
+    avatar?: string;
+  };
+}
+
+export interface IdentitySwitchedPayload {
+  username: string;
+  appOrigin: string;
+  identityIndex: number;
+  timestamp: number;
+}
 
 

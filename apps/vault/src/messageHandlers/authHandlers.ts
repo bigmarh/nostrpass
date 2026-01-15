@@ -5,8 +5,25 @@ import { vaultError, ErrorCode } from './errors';
 import { showErrorToast, showSuccessToast } from '../components/Toast';
 import { addAuditEvent } from '../components/AuditLog';
 import { permissionPromptManager } from '../utils/permissionPromptManager';
-import { getActiveIdentity, setActiveIdentity } from '../utils/activeIdentityManager';
+import { getActiveIdentityIndex, setActiveIdentityIndex, getStorageKey } from '../stores/vaultStore';
 import { vaultDataService } from '../services/vaultDataService';
+
+/**
+ * Get active identity index directly from localStorage
+ * Used as fallback when vaultStore hasn't been initialized yet (e.g., on page refresh)
+ */
+function getActiveIdentityFromLocalStorage(storageKey: string, appKey: string): number {
+  const key = `nostrpass:activeIdentity:${storageKey}:${appKey}`;
+  const value = localStorage.getItem(key);
+  if (value !== null) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isNaN(parsed) && parsed >= 0) {
+      console.log('[AUTH_STATUS] Found active identity in localStorage:', { key, index: parsed });
+      return parsed;
+    }
+  }
+  return 0; // default to first identity
+}
 
 function originToAppKey(origin: string): string {
   try {
@@ -705,26 +722,26 @@ export const authHandlers: MessageHandler[] = [
           // appKey already set to appOrigin
         }
 
-        // SECURITY: Get the active identity publicKey from vault data (source of truth), not localStorage
-        // LocalStorage can be manipulated by malicious scripts
-        // Changed from index to publicKey for stability across identity reordering/deletion
-        const activePublicKey = vaultData?.activeIdentityByApp?.[appKey];
+        const displayName = vaultData?.username || currentUser.profile?.username;
 
-        // Find identity by publicKey
-        let activeIdentity = activePublicKey
-          ? vaultData?.identities?.find((id: any) => id.publicKey === activePublicKey)
-          : vaultData?.identities?.[0]; // Fallback to first identity if no active set
+        // Get active identity index from vaultStore (per-browser state)
+        // If store isn't initialized yet (e.g., on page refresh), fall back to localStorage
+        let activeIdentityIndex = getActiveIdentityIndex(appKey);
 
-        // Get the index for backwards compatibility with embassy
-        const activeIdentityIndex = activeIdentity
-          ? vaultData.identities.indexOf(activeIdentity)
-          : 0;
+        // Check if vaultStore is initialized by seeing if it returned from signal or default
+        // If storageKey is null, store isn't initialized - read from localStorage directly
+        const storeStorageKey = getStorageKey();
+        if (!storeStorageKey && lookupKey) {
+          console.log('[AUTH_STATUS] VaultStore not initialized, reading from localStorage directly');
+          activeIdentityIndex = getActiveIdentityFromLocalStorage(lookupKey, appKey);
+        }
+
+        let activeIdentity = vaultData?.identities?.[activeIdentityIndex];
 
         console.log('[AUTH_STATUS] Active identity lookup:', {
           appKey,
-          activePublicKey,
           activeIdentityIndex,
-          activeIdentityByApp: vaultData?.activeIdentityByApp,
+          storeInitialized: !!storeStorageKey,
           identityExists: !!activeIdentity,
           identityArchived: activeIdentity?.archived,
           identityNickname: activeIdentity?.nickname
@@ -733,7 +750,7 @@ export const authHandlers: MessageHandler[] = [
         // If active identity is archived or doesn't exist, find the first non-archived authorized identity
         if (!activeIdentity || activeIdentity?.archived) {
           console.warn('[AUTH_STATUS] Active identity is archived or missing, finding alternative:', {
-            publicKey: activePublicKey,
+            index: activeIdentityIndex,
             nickname: activeIdentity?.nickname,
             appKey
           });
@@ -745,22 +762,25 @@ export const authHandlers: MessageHandler[] = [
 
           if (firstAuthorizedIdentity) {
             const newIndex = vaultData.identities.indexOf(firstAuthorizedIdentity);
+            // Profile name from Nostr takes precedence over nickname for display
+            const identityNickname = firstAuthorizedIdentity.profile?.name || firstAuthorizedIdentity.nickname;
             console.log('[AUTH_STATUS] Found alternative authorized identity:', {
               newIndex,
               publicKey: firstAuthorizedIdentity.publicKey,
-              nickname: firstAuthorizedIdentity.nickname
+              nickname: identityNickname
             });
 
             // Use this identity as active (update in-memory, don't persist yet)
             const response = {
               isAuthenticated: true,
               isLocked,
-              username: currentUser.profile?.username,
+              username: displayName,
+              displayName,
               user: {
                 identityIndex: newIndex,
                 publicKey: firstAuthorizedIdentity.publicKey,
                 npub: firstAuthorizedIdentity.npub,
-                nickname: firstAuthorizedIdentity.nickname,
+                nickname: identityNickname,
                 authorized: true,
                 avatar: firstAuthorizedIdentity.profile?.picture || null
               }
@@ -774,7 +794,8 @@ export const authHandlers: MessageHandler[] = [
           return {
             isAuthenticated: true,
             isLocked,
-            username: currentUser.profile?.username,
+            username: displayName,
+            displayName,
             user: null
           };
         }
@@ -785,12 +806,14 @@ export const authHandlers: MessageHandler[] = [
         const response = {
           isAuthenticated: true,
           isLocked,
-          username: currentUser.profile?.username,
+          username: displayName,
+          displayName,
           user: {
             identityIndex: activeIdentityIndex,
             publicKey: activeIdentity?.publicKey || currentUser.publicKey,
             npub: activeIdentity?.npub,
-            nickname: activeIdentity?.nickname,
+            // Profile name from Nostr takes precedence over nickname for display
+            nickname: activeIdentity?.profile?.name || activeIdentity?.nickname,
             authorized: isAuthorized,
             avatar: activeIdentity?.profile?.picture || null
           }
@@ -805,6 +828,7 @@ export const authHandlers: MessageHandler[] = [
           isAuthenticated: true,
           isLocked: true,
           username: currentUser.profile?.username,
+          displayName,
           user: null // Don't return identity info when vault is locked - we don't know which is active
         };
         console.log('[AUTH_STATUS] Returning error response (vault locked or inaccessible):', errorResponse);
@@ -851,20 +875,16 @@ export const authHandlers: MessageHandler[] = [
           // appKey already set to appOrigin
         }
 
-        // SECURITY: Get active identity publicKey from vault data (source of truth), not localStorage
-        // Changed from index to publicKey for stability across identity reordering/deletion
-        const activePublicKey = vaultData.activeIdentityByApp?.[appKey];
-
-        // Find the index of the active identity (for backwards compatibility with embassy)
-        const activeIdentityIndex = activePublicKey
-          ? vaultData.identities.findIndex((id: any) => id.publicKey === activePublicKey)
-          : null;
+        // Get active identity index from vaultStore (per-browser state)
+        const activeIndex = getActiveIdentityIndex(appKey);
+        const activeIdentityIndex = activeIndex > 0 ? activeIndex : null;
 
         // Return all identities with their authorization status (exclude archived)
+        // Note: Profile name from Nostr takes precedence over nickname for display
         const identities = vaultData.identities
           .map((identity: any, index: number) => ({
             index,
-            nickname: identity.nickname || `Identity ${index + 1}`,
+            nickname: identity.profile?.name || identity.nickname || `Identity ${index + 1}`,
             publicKey: identity.publicKey,
             npub: identity.npub,
             createdAt: identity.createdAt,
@@ -942,27 +962,17 @@ export const authHandlers: MessageHandler[] = [
           throw new Error('Requested identity not authorized for this application');
         }
 
-        // Update active identity in localStorage (per-browser, per-origin)
-        await setActiveIdentity(currentUser.profile.username, appOrigin, identityIndex);
+        // Update active identity in vaultStore (updates localStorage + signal + notifies embassy)
+        // Use appKey (sanitized) to match how permissions are stored
+        // Pass lookupKey as fallback in case vaultStore isn't initialized yet
+        await setActiveIdentityIndex(appKey, identityIndex, lookupKey);
+        console.log('[SWITCH_IDENTITY] Updated active identity via vaultStore:', { appKey, identityIndex, lookupKey });
 
-        // SECURITY: Update vault data with new active identity (source of truth)
-        // Store publicKey instead of index for stability across identity reordering/deletion
-        console.log('[SWITCH_IDENTITY] Updating vault data with active identity:', { appKey, publicKey: identity.publicKey });
-        const updatedActiveIdentityByApp = {
-          ...(vaultData.activeIdentityByApp || {}),
-          [appKey]: identity.publicKey
-        };
-        await vaultDataService.updateVaultData(
-          currentUser.profile.username,
-          { activeIdentityByApp: updatedActiveIdentityByApp }
-        );
-        console.log('[SWITCH_IDENTITY] Updated activeIdentityByApp:', updatedActiveIdentityByApp);
-
-        // Notify parent window about identity switch (NOT vault data update)
+        // Additional notification for parent window (cross-origin, uses postMessage)
         try {
           const { getMessenger } = await import('../providers/MessengerProvider');
           const messenger = getMessenger();
-          if (messenger?.isReady()) {
+          if (messenger) {
             messenger.send('IDENTITY_SWITCHED', {
               username: currentUser.profile.username,
               appOrigin,

@@ -1,9 +1,7 @@
 import { Component, createSignal, Show, onMount } from 'solid-js';
 import { useNavigate, useParams } from '@solidjs/router';
 import { useVaultData } from '../hooks/useVaultData';
-import { profileCacheService } from '../services/profileCacheService';
 import { nostrProfileService } from '../services/nostrProfileService';
-import { useAuth } from '../providers';
 
 const ProfileEdit: Component = () => {
   const navigate = useNavigate();
@@ -138,13 +136,6 @@ const ProfileEdit: Component = () => {
         ...currentVault,
         identities: updatedIdentities
       });
-
-      // Update profile cache for instant UI rendering
-      const username = user()?.profile?.username;
-      if (username && params.pubkey) {
-        profileCacheService.updateProfile(username, params.pubkey, formData);
-        console.log('[ProfileEdit] Updated profile cache for', params.pubkey);
-      }
 
       // Wait briefly for broadcast to propagate
       await new Promise(resolve => setTimeout(resolve, 100));

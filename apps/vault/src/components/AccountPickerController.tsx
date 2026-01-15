@@ -3,7 +3,8 @@ import { AccountPicker } from './AccountPicker';
 import { useAuth } from '../providers/AuthProvider';
 import { vaultDataService } from '../services/vaultDataService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
-import { setActiveIdentity } from '../utils/activeIdentityManager';
+import { setActiveIdentityIndex } from '../stores/vaultStore';
+import { nostrProfileService } from '../services/nostrProfileService';
 
 interface AccountPickerEventDetail {
   appOrigin: string;
@@ -48,12 +49,51 @@ export const AccountPickerController: Component = () => {
 
         setIdentities(allIdentities);
 
+        // Fetch Nostr profiles for identities missing pictures (non-blocking)
+        const identitiesNeedingProfiles = allIdentities.filter(
+          (item: any) => !item.identity.profile?.picture
+        );
+
+        if (identitiesNeedingProfiles.length > 0) {
+          // Fetch profiles in background and update identities when ready
+          (async () => {
+            try {
+              const publicKeys = identitiesNeedingProfiles.map((item: any) => item.identity.publicKey);
+              const profiles = await nostrProfileService.fetchProfiles(publicKeys);
+
+              if (profiles.size > 0) {
+                // Update identities with fetched profiles
+                setIdentities(prev => prev.map(item => {
+                  const fetchedProfile = profiles.get(item.identity.publicKey);
+                  if (fetchedProfile) {
+                    return {
+                      ...item,
+                      identity: {
+                        ...item.identity,
+                        profile: {
+                          ...item.identity.profile,
+                          ...fetchedProfile
+                        }
+                      }
+                    };
+                  }
+                  return item;
+                }));
+              }
+            } catch (error) {
+              console.error('[AccountPicker] Failed to fetch Nostr profiles:', error);
+            }
+          })();
+        }
+
         // If there's only one identity, auto-select it instead of showing the picker
         if (allIdentities.length === 1 && currentDetail) {
           console.log('🔵 [AccountPicker] Only one identity - auto-selecting index 0');
 
-          // Update active identity in localStorage (per-browser, not synced)
-          await setActiveIdentity(currentUser.profile.username, appOrigin, 0);
+          // Update active identity via vaultStore
+          // Use appKey (sanitized) to match how permissions are stored
+          // Pass lookupKey as fallback in case vaultStore isn't initialized yet
+          await setActiveIdentityIndex(appKey, 0, lookupKey);
 
           const isAuthorized = allIdentities[0].isAuthorized;
 
@@ -197,9 +237,14 @@ export const AccountPickerController: Component = () => {
     const selectedIdentityData = identities().find((item: any) => item.index === identityIndex);
     const isAuthorized = selectedIdentityData?.isAuthorized || false;
 
+    // Get lookupKey for fallback
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     try {
-      // Update active identity in localStorage (per-browser, not synced)
-      await setActiveIdentity(currentUser.profile.username, d.appOrigin, identityIndex);
+      // Update active identity via vaultStore
+      // Use appKey (sanitized) to match how permissions are stored
+      // Pass lookupKey as fallback in case vaultStore isn't initialized yet
+      await setActiveIdentityIndex(appKey, identityIndex, lookupKey);
 
       if (isAuthorized) {
         // Identity is already authorized - just dispatch success

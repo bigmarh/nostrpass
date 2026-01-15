@@ -4,7 +4,7 @@ import { AccountPicker } from './AccountPicker';
 import { useAuth, useMessenger } from '../providers';
 import { vaultDataService } from '../services/vaultDataService';
 import { sanitizeDomain } from '@nostrpass/nostrHelpers';
-import { setActiveIdentity } from '../utils/activeIdentityManager';
+import { setActiveIdentityIndex } from '../stores/vaultStore';
 
 /**
  * AccountPickerPage - Dedicated page for account/identity selection
@@ -86,7 +86,7 @@ export const AccountPickerPage: Component = () => {
     try {
       // Use storagePublicKey for vault lookup (primary), fall back to username
       // This is critical for Google login where username is the Google UID
-      const lookupKey = currentUser.storagePublicKey || currentUser.username;
+      const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile?.username;
       console.log('[AccountPickerPage] Fetching vault data for:', lookupKey?.slice(0, 12) + '...');
       const vaultData = await vaultDataService.getVaultData(lookupKey);
       console.log('[AccountPickerPage] Vault data received:', vaultData);
@@ -164,39 +164,18 @@ export const AccountPickerPage: Component = () => {
     }
 
     // Use storagePublicKey for vault lookup (critical for Google login)
-    const lookupKey = currentUser.storagePublicKey || currentUser.username;
+    const lookupKey = currentUser.profile?.storagePublicKey || currentUser.profile?.username;
 
     try {
-      // Update active identity in localStorage (per-browser, for UI hints)
-      // Pass lookupKey for vault validation, but still use username for localStorage key
-      await setActiveIdentity(lookupKey, appOrigin, identityIndex);
+      // Update active identity via vaultStore (updates localStorage + notifies embassy)
+      // Use appKey (sanitized) to match how permissions are stored
+      // Pass lookupKey as fallback in case vaultStore isn't initialized yet
+      await setActiveIdentityIndex(appKey, identityIndex, lookupKey);
+      console.log('[AccountPickerPage] Updated active identity via vaultStore:', { appKey, identityIndex, lookupKey });
 
-      // SECURITY: Update vault data with new active identity (source of truth)
-      // Changed to store publicKey instead of index for stability across identity reordering/deletion
-      console.log('[AccountPickerPage] Updating vault data with active identity:', { appKey, publicKey: selectedPublicKey });
-      const vaultData = await vaultDataService.getVaultData(lookupKey);
-      if (vaultData) {
-        const updatedActiveIdentityByApp = {
-          ...(vaultData.activeIdentityByApp || {}),
-          [appKey]: selectedPublicKey
-        };
-        console.log('[AccountPickerPage] Updated activeIdentityByApp:', updatedActiveIdentityByApp);
-        await vaultDataService.updateVaultData(
-          lookupKey,
-          { activeIdentityByApp: updatedActiveIdentityByApp },
-          { updateTimestamp: true }
-        );
-        console.log('[AccountPickerPage] ✅ Vault data updated successfully');
-
-        // Small delay to ensure vault data is fully persisted to IndexedDB
-        await new Promise(resolve => setTimeout(resolve, 50));
-      } else {
-        console.error('[AccountPickerPage] ❌ No vault data found to update');
-      }
-
-      // Notify embassy of identity change so NostrPassButton can update
+      // Additional notification for embedding app
       send('VAULT_DATA_UPDATED', {
-        username: currentUser.username,
+        username: currentUser.profile?.username,
         timestamp: Date.now(),
         activeIdentityIndex: identityIndex,
         activePublicKey: selectedPublicKey,
@@ -206,7 +185,7 @@ export const AccountPickerPage: Component = () => {
       // Dispatch event for vault components to refresh and show active identity change
       window.dispatchEvent(new CustomEvent('vault-data-refresh', {
         detail: {
-          username: currentUser.username,
+          username: currentUser.profile?.username,
           source: 'account-picker',
           activeIdentityIndex: identityIndex,
           activePublicKey: selectedPublicKey
@@ -234,6 +213,7 @@ export const AccountPickerPage: Component = () => {
           });
         }
         // Close the modal
+        console.log('[AccountPickerPage] Identity already authorized, sending HIDE_VAULT');
         send('HIDE_VAULT');
       } else {
         // Identity not authorized - show simple auth prompt overlay

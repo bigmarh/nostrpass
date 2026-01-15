@@ -529,7 +529,7 @@ export const nostrSync = {
       passwordSalt: vault.passwordSalt,
       passwordVerifier: vault.passwordVerifier,
       identities: vault.identities || [],
-      activeIdentityByApp: vault.activeIdentityByApp || {},
+      // activeIdentityByApp removed - now stored in localStorage per-browser
       recovery: vault.recovery || null,
       customRelays: vault.customRelays || [],
       appPermissions: (vault as any).appPermissions || {},
@@ -769,7 +769,7 @@ export const nostrSync = {
       passwordSalt: (vault as any).passwordSalt, // CRITICAL: Include for password verification
       recovery: (vault as any).recovery, // Include recovery data
       identities: vault.identities || [],
-      activeIdentityByApp: vault.activeIdentityByApp || {},
+      // activeIdentityByApp removed - now stored in localStorage per-browser
       appPermissions: (vault as any).appPermissions || {},
       linkedAuthProviders: (vault as any).linkedAuthProviders || [], // Include linked auth providers (e.g., Google accounts)
       updatedAt: Date.now(),

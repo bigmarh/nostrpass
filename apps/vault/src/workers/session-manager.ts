@@ -22,7 +22,14 @@ import { encrypt as nip04EncryptJS, decrypt as nip04DecryptJS } from 'nostr-tool
 import { encrypt as nip44EncryptJS, decrypt as nip44DecryptJS } from 'nostr-tools/nip44';
 import { vaultDB, type VaultData, type UserSession } from './db';
 import { getEnvironment } from '@nostrpass/nostrHelpers';
-import { PERMISSION_KINDS, type PermissionLevel, type VaultObj } from '@nostrpass/types';
+import {
+  PERMISSION_KINDS,
+  createDefaultAppPermissions,
+  normalizeAppPermissions,
+  type PermissionLevel,
+  type VaultObj,
+  type AppPermissions
+} from '@nostrpass/types';
 import { cryptoPrimitives } from './crypto-primitives';
 import { nostrSync } from './nostr-sync';
 import { getSessionStateManager } from './session-state-manager';
@@ -1331,20 +1338,9 @@ export const sessionManager = {
     });
 
     // Create default app permissions if appDomain provided
-    const appPermissions: Record<string, any> = {};
+    const appPermissions: Record<string, AppPermissions> = {};
     if (params.appDomain) {
-      appPermissions[params.appDomain] = {
-        appDomain: params.appDomain,
-        appName: params.appDomain,
-        permissions: {
-          getPublicKey: 'ALLOW' as PermissionLevel,
-          signEvent: 'ASK_EVERYTIME' as PermissionLevel,
-          nip04: 'ASK_EVERYTIME' as PermissionLevel,
-          nip44: 'ASK_EVERYTIME' as PermissionLevel
-        },
-        createdAt: Date.now(),
-        lastUsed: Date.now()
-      };
+      appPermissions[params.appDomain] = createDefaultAppPermissions(params.appDomain, params.appDomain);
     }
 
     // Create default identity (index 0)
@@ -1976,7 +1972,8 @@ export const sessionManager = {
       (vault.identities.length - 1)
     ));
     const identity = vault.identities[identityIndex] as any;
-    const appPerms = identity?.appPermissions?.[origin];
+    const rawPerms = identity?.appPermissions?.[origin];
+    const appPerms = rawPerms ? normalizeAppPermissions(rawPerms, origin, rawPerms?.appName) : null;
 
     if (!appPerms) {
       return { allowed: false, level: 'ASK_EVERYTIME', needsPrompt: true };
@@ -2125,7 +2122,7 @@ export const sessionManager = {
     const identity = vault.identities[identityIndex] as any;
     const appPerms = (identity.appPermissions || {})[params.origin];
 
-    return appPerms || null;
+    return appPerms ? normalizeAppPermissions(appPerms, params.origin, appPerms?.appName) : null;
   },
 
   /**
@@ -2169,58 +2166,38 @@ export const sessionManager = {
     const identity = { ...updatedVault.identities[identityIndex] };
     identity.appPermissions = { ...(identity.appPermissions || {}) };
 
-    const existing = identity.appPermissions[origin] || {
-      appId: origin,
-      appName: appName || origin,
-      grantedAt: Date.now(),
-      lastUsedAt: Date.now(),
-      permissions: {
-        social: 'ASK_EVERYTIME',
-        messaging: 'ASK_EVERYTIME',
-        signData: 'ASK_EVERYTIME',
-        zaps: 'ASK_EVERYTIME',
-        financial: 'ASK_EVERYTIME',
-      },
-      getPublicKey: 'ALLOW',
-    };
-
-    // Merge top-level and nested permission categories
-    const basePermissions = {
-      social: (existing.permissions && existing.permissions.social) || 'ASK_EVERYTIME',
-      messaging: (existing.permissions && existing.permissions.messaging) || 'ASK_EVERYTIME',
-      signData: (existing.permissions && existing.permissions.signData) || 'ASK_EVERYTIME',
-      zaps: (existing.permissions && existing.permissions.zaps) || 'ASK_EVERYTIME',
-      financial: (existing.permissions && existing.permissions.financial) || 'ASK_EVERYTIME',
-    };
-
-    if (permissions.permissions) {
-      Object.assign(basePermissions, permissions.permissions);
-    }
-    if (permissions.social) basePermissions.social = permissions.social;
-    if (permissions.messaging) basePermissions.messaging = permissions.messaging;
-    if (permissions.signData) basePermissions.signData = permissions.signData;
-    if (permissions.zaps) basePermissions.zaps = permissions.zaps;
-    if (permissions.financial) basePermissions.financial = permissions.financial;
-    if (permissions.nip04) basePermissions.messaging = permissions.nip04;
-    if (permissions.getRelays) basePermissions.financial = permissions.getRelays;
+    const existing = normalizeAppPermissions(identity.appPermissions[origin], origin, appName);
+    const incoming = normalizeAppPermissions(permissions, origin, appName);
 
     const mergedKinds = {
-      ...(existing.kinds || {}),
-      ...(permissions.kinds || {}),
+      ...((existing as any).kinds || {}),
+      ...((incoming as any).kinds || {})
     };
 
-    // Build clean permission object without legacy root-level fields
-    const merged = {
+    const merged: AppPermissions & { kinds?: Record<string, PermissionLevel> } = {
+      ...existing,
+      ...incoming,
       appId: existing.appId || origin,
-      appName: appName || existing.appName || origin,
+      appName: incoming.appName || existing.appName || origin,
       grantedAt: existing.grantedAt || Date.now(),
       lastUsedAt: Date.now(),
-      getPublicKey: permissions.getPublicKey ?? existing.getPublicKey ?? 'ASK_EVERYTIME',
-      kinds: Object.keys(mergedKinds).length > 0 ? mergedKinds : existing.kinds,
-      permissions: basePermissions,
-      // Note: Legacy root-level fields (signData, nip04, getRelays) removed
-      // All permission checks now use the nested permissions object
+      permissions: {
+        ...existing.permissions,
+        ...incoming.permissions
+      },
+      getPublicKey: incoming.getPublicKey ?? existing.getPublicKey
     };
+
+    if (Object.keys(mergedKinds).length > 0) {
+      merged.kinds = mergedKinds;
+    }
+
+    merged.signEvent = incoming.signEvent ?? existing.signEvent;
+    merged.signData = incoming.signData ?? existing.signData;
+    merged.nip04 = incoming.nip04 ?? existing.nip04;
+    merged.nip44 = incoming.nip44 ?? existing.nip44;
+    merged.getRelays = incoming.getRelays ?? existing.getRelays;
+    merged.sessionPermissions = incoming.sessionPermissions ?? existing.sessionPermissions;
 
     identity.appPermissions[origin] = merged;
     updatedVault.identities[identityIndex] = identity;

@@ -54,22 +54,6 @@ export function useVaultData(options: UseVaultDataOptions = {}) {
     try {
       await store.update(updates, options);
 
-      // Notify parent window about vault data update (for embassy integration)
-      try {
-        const currentUsername = username();
-        const { getMessenger } = await import('../providers/MessengerProvider');
-        const messenger = getMessenger();
-
-        if (messenger && currentUsername) {
-          messenger.send('VAULT_DATA_UPDATED', {
-            username: currentUsername,
-            timestamp: Date.now()
-          });
-          console.log('[useVaultData] ✅ VAULT_DATA_UPDATED message sent to embassy');
-        }
-      } catch (err) {
-        console.error('[useVaultData] ❌ Failed to notify parent of vault data update:', err);
-      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update vault data';
       setError(errorMessage);

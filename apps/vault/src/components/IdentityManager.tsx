@@ -1,4 +1,4 @@
-import { Component, Show, createSignal, For, createMemo, createEffect } from 'solid-js';
+import { Component, Show, createSignal, For, createMemo, createEffect, onMount, onCleanup } from 'solid-js';
 import { useNavigate } from '@solidjs/router';
 import { desanitizeDomain } from '@nostrpass/nostrHelpers';
 import { nip19 } from 'nostr-tools';
@@ -6,7 +6,7 @@ import { PermissionsSection } from './PermissionsSection';
 import { PermissionService } from '../services/permissionService';
 import type { AppPermissions, PermissionLevel } from '@nostrpass/types';
 import type { VaultData } from '../workers/db';
-import { getActiveIdentity, setActiveIdentity } from '../utils/activeIdentityManager';
+import { getActiveIdentityIndex, setActiveIdentityIndex, clearActiveIdentityIndex } from '../stores/vaultStore';
 import { useMessenger } from '../providers';
 
 interface IdentityManagerProps {
@@ -53,6 +53,26 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
   const permissionService = PermissionService.getInstance();
 
+  // Signal to trigger re-render when active identity changes in localStorage
+  // (localStorage is not reactive, so we need this signal to trigger memo recomputation)
+  const [activeIdentityVersion, setActiveIdentityVersion] = createSignal(0);
+
+  // Listen for active identity changes from localStorage
+  onMount(() => {
+    const handleActiveIdentityChanged = (e: Event) => {
+      const event = e as CustomEvent<{ username: string; appKey: string; identityIndex: number }>;
+      console.log('[IdentityManager] Active identity changed:', event.detail);
+      // Increment version to trigger memo recomputation
+      setActiveIdentityVersion(v => v + 1);
+    };
+
+    window.addEventListener('active-identity-changed', handleActiveIdentityChanged);
+
+    onCleanup(() => {
+      window.removeEventListener('active-identity-changed', handleActiveIdentityChanged);
+    });
+  });
+
   // Watch for trigger to show add identity modal
   createEffect(() => {
     const trigger = props.triggerAddIdentity;
@@ -61,20 +81,11 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     }
   });
 
-  // Helper to get app origin from appId (sanitized domain)
+  // Helper to get app key for active identity lookup
+  // Returns appId as-is since it's already in sanitized format (e.g., "localhost-4000")
+  // This matches how permissions are stored and how setActiveIdentityIndex stores keys
   const getAppOrigin = (appId: string): string => {
-    try {
-      // Try to reconstruct origin from sanitized domain
-      const domain = desanitizeDomain(appId);
-      // Default to https, but check if it's localhost
-      if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-        return `http://${domain}`;
-      }
-      return `https://${domain}`;
-    } catch {
-      // Fallback: use appId as-is (it might already be an origin)
-      return appId.startsWith('http') ? appId : `https://${appId}`;
-    }
+    return appId;
   };
 
   // Reactive permissions derived from vault data
@@ -85,11 +96,9 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
     if (!vault || !appId) return null;
 
-    // Get active identity from localStorage (per-browser, not synced)
-    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    // Get active identity from vaultStore (per-browser, not synced)
     const appOrigin = getAppOrigin(appId);
-    const lookupKey = props.storagePublicKey || props.username;
-    const identityIndex = getActiveIdentity(lookupKey, appOrigin) ?? vault.activeIdentityByApp?.[appId] ?? 0;
+    const identityIndex = getActiveIdentityIndex(appOrigin);
     const identity = vault.identities?.[identityIndex];
 
     if (!identity) return null;
@@ -120,19 +129,20 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   // Create identities from vault data with proper app permission checking
   const identities = createMemo(() => {
     const vault = props.vaultData;
+    // Include activeIdentityVersion as a dependency to recompute when active identity changes
+    // (activeIdentityVersion is updated when 'active-identity-changed' event fires)
+    const _version = activeIdentityVersion();
 
     if (!vault?.identities) {
       return [];
     }
 
     // Use real vault identities - filter out archived ones and preserve original index
-    // Get active identity from localStorage (per-browser, not synced)
-    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
-    const lookupKey = props.storagePublicKey || props.username;
+    // Get active identity from vaultStore (per-browser)
     const activeIndex = props.appId ? (() => {
       const appOrigin = getAppOrigin(props.appId);
-      const stored = getActiveIdentity(lookupKey, appOrigin);
-      return stored !== null ? stored : (vault.activeIdentityByApp?.[props.appId] ?? null);
+      const idx = getActiveIdentityIndex(appOrigin);
+      return idx > 0 ? idx : null;
     })() : null;
     return vault.identities
       .map((identity: any, originalIndex: number) => ({ identity, originalIndex }))
@@ -276,11 +286,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       console.log('🔧 Permission updates:', JSON.stringify(updates, null, 2));
 
       try {
-        // Get active identity from localStorage (per-browser, not synced)
-        // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+        // Get active identity from vaultStore (per-browser)
         const lookupKey = props.storagePublicKey || props.username;
         const appOrigin = props.appId ? getAppOrigin(props.appId) : undefined;
-        const identityIndex = appOrigin ? (getActiveIdentity(lookupKey, appOrigin) ?? undefined) : (props.vaultData?.activeIdentityByApp?.[props.appId] ?? undefined);
+        const identityIndex = appOrigin ? getActiveIdentityIndex(appOrigin) : undefined;
         await permissionService.saveAppPermissions(
           lookupKey,
           props.appId,
@@ -347,27 +356,12 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
       // Set active identity in localStorage (per-browser, not synced)
       // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
       const appOrigin = getAppOrigin(props.appId);
-      const lookupKey = props.storagePublicKey || props.username;
-      await setActiveIdentity(lookupKey, appOrigin, identityIndex);
-
-      const updatedActive = {
-        ...(currentVault.activeIdentityByApp || {}),
-        [props.appId]: identityIndex
-      };
+      await setActiveIdentityIndex(appOrigin, identityIndex);
 
       console.log('💾 [Authorize] Saving vault data (will auto-sync to Nostr)...');
-      console.log('💾 [Authorize] Updated data:', {
-        identitiesCount: updatedIdentities.length,
-        activeIdentityByApp: updatedActive,
-        identitiesWithPermissions: updatedIdentities.map((id: any, idx: number) => ({
-          index: idx,
-          nickname: id.nickname,
-          appKeys: id.appPermissions ? Object.keys(id.appPermissions) : []
-        }))
-      });
 
       // Save vault data - auto-syncs to Nostr in background by default
-      await props.onUpdateVaultData({ identities: updatedIdentities, activeIdentityByApp: updatedActive });
+      await props.onUpdateVaultData({ identities: updatedIdentities });
 
       console.log('✅ [Authorize] Authorization complete (saved locally + syncing to Nostr)!');
     } catch (error) {
@@ -490,25 +484,9 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         return identity;
       });
 
-      // If this identity was active for this app, clear the active identity
-      const updatedActiveIdentityByApp = { ...(currentVault.activeIdentityByApp || {}) };
-      if (updatedActiveIdentityByApp[appId] === identityIndex) {
-        console.log('[DISCONNECT] Clearing active identity for app:', appId);
-        delete updatedActiveIdentityByApp[appId];
-        // Also clear from localStorage (per-browser, not synced)
-        try {
-          const appOrigin = getAppOrigin(appId);
-          // Note: clearActiveIdentity would be ideal, but we don't have it imported
-          // For now, we'll just let it be overwritten on next selection
-        } catch {}
-      }
-
       // Update vault data - auto-syncs to Nostr in background by default
       console.log('[DISCONNECT] Saving updated vault data (will auto-sync to Nostr)...');
-      await props.onUpdateVaultData({
-        identities: updatedIdentities,
-        activeIdentityByApp: updatedActiveIdentityByApp
-      });
+      await props.onUpdateVaultData({ identities: updatedIdentities });
 
       console.log('✅ [DISCONNECT] Identity disconnected successfully (syncing to Nostr)!');
     } catch (error: any) {
@@ -545,34 +523,10 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
     if (!currentVault) return;
 
     try {
-      // Set active identity in localStorage (per-browser, not synced)
-      // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+      // Set active identity via vaultStore (updates localStorage + signal + notifies embassy)
       const appOrigin = getAppOrigin(props.appId);
-      const lookupKey = props.storagePublicKey || props.username;
-      await setActiveIdentity(lookupKey, appOrigin, identityIndex);
-
-      const updatedActive = {
-        ...(currentVault.activeIdentityByApp || {}),
-        [props.appId]: identityIndex
-      };
-      console.log('💾 [SetActive] Updating vault data with:', updatedActive);
-      // Save vault data - auto-syncs to Nostr in background by default
-      await props.onUpdateVaultData({ activeIdentityByApp: updatedActive });
-
-      // Notify embassy that active identity changed via messenger
-      console.log('📤 [SetActive] Sending VAULT_DATA_UPDATED to embassy');
-      send('VAULT_DATA_UPDATED', {
-        activeIdentityIndex: identityIndex,
-        identity: currentVault.identities[identityIndex]
-      });
-
-      // Also dispatch local window event for vault components
-      window.dispatchEvent(new CustomEvent('vault-data-refresh', {
-        detail: {
-          activeIdentityIndex: identityIndex,
-          identity: currentVault.identities[identityIndex]
-        }
-      }));
+      await setActiveIdentityIndex(appOrigin, identityIndex);
+      console.log('💾 [SetActive] Updated active identity via vaultStore:', { appOrigin, identityIndex });
 
       console.log('✅ [SetActive] Active identity updated successfully');
     } catch (error) {
@@ -584,21 +538,11 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
   const handleUnsetActiveIdentityForApp = async () => {
     console.log('🔄 [UnsetActive] Unsetting active identity for app:', props.appId);
     if (!props.appId) return;
-    const currentVault = props.vaultData;
-    if (!currentVault) return;
 
     try {
-      // Clear active identity from localStorage (per-browser, not synced)
-      // Note: We don't have clearActiveIdentity imported, but setting to null won't work
-      // The value will be ignored on next read since getActiveIdentity returns null for invalid values
-      const updatedActive = {
-        ...(currentVault.activeIdentityByApp || {}),
-        [props.appId]: null
-      };
-      console.log('💾 [UnsetActive] Updating vault data with:', updatedActive);
-      // Save vault data - auto-syncs to Nostr in background by default
-      await props.onUpdateVaultData({ activeIdentityByApp: updatedActive });
-      console.log('✅ [UnsetActive] Active identity cleared successfully');
+      const appOrigin = getAppOrigin(props.appId);
+      clearActiveIdentityIndex(appOrigin);
+      console.log('✅ [UnsetActive] Active identity cleared via vaultStore');
     } catch (error) {
       console.error('Failed to unset active identity for app:', error);
     }
@@ -657,25 +601,8 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
         return id;
       });
 
-      // Update activeIdentityByApp - clear if this identity was active
-      const updatedActiveIdentityByApp = { ...(currentVault.activeIdentityByApp || {}) };
-      Object.keys(updatedActiveIdentityByApp).forEach(appId => {
-        if (updatedActiveIdentityByApp[appId] === toArchive.index) {
-          delete updatedActiveIdentityByApp[appId];
-          // Also clear from localStorage if we have the appId
-          try {
-            const appOrigin = getAppOrigin(appId);
-            // Note: clearActiveIdentity would be ideal, but we don't have it imported
-            // For now, we'll just let it be overwritten on next selection
-          } catch {}
-        }
-      });
-
       // Save (automatically syncs to Nostr)
-      await props.onUpdateVaultData({
-        identities: updatedIdentities,
-        activeIdentityByApp: updatedActiveIdentityByApp
-      });
+      await props.onUpdateVaultData({ identities: updatedIdentities });
 
       console.log('✅ [Archive Identity] Identity archived and auto-synced to Nostr');
       setShowSettingsPanel(false);
