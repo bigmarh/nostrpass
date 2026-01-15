@@ -105,8 +105,11 @@ export const PermissionRequestPage: Component = () => {
       return;
     }
 
-    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
-    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+    // Two different keys are needed:
+    // 1. lookupKey (storagePublicKey) - for vault/permission persistence in IndexedDB
+    // 2. sessionKey (profile.username) - for session permission map (must match checkPermission)
+    const lookupKey = currentUser.storagePublicKey || currentUser.profile?.storagePublicKey || currentUser.username;
+    const sessionKey = currentUser.profile?.username || currentUser.username;
 
     let appKey = appOrigin();
     try {
@@ -118,16 +121,18 @@ export const PermissionRequestPage: Component = () => {
     try {
       // ALWAYS grant a temporary session permission so the pending operation can execute immediately
       // This allows the current operation to succeed after user approval
+      // IMPORTANT: Use sessionKey (profile.username) to match how checkPermission looks up permissions
       if (action() === 'signEvent' || action() === 'signData') {
         // Grant 1-minute session permission for the immediate retry
-        await permissionService.grantSessionPermission(lookupKey, appKey, action(), eventKind(), 1);
+        await permissionService.grantSessionPermission(sessionKey, appKey, action(), eventKind(), 1);
       }
 
       // Save the permission for future requests based on selected level
       if (level === 'ASK_PER_SESSION') {
         if (action() === 'signEvent' || action() === 'signData') {
           // Extend the session to 60 minutes if user selected "Ask per session"
-          await permissionService.grantSessionPermission(lookupKey, appKey, action(), eventKind(), 60);
+          // Use sessionKey to match checkPermission lookup
+          await permissionService.grantSessionPermission(sessionKey, appKey, action(), eventKind(), 60);
         }
       } else {
         // Save permanent permission setting
@@ -167,15 +172,19 @@ export const PermissionRequestPage: Component = () => {
 
       console.log('[PermissionRequestPage] ✅ Permission saved, level:', level);
 
-      // Notify embassy/parent that permission was granted
-      // The app will need to retry the operation since the first attempt failed due to missing permission
+      // Dispatch local window event so permissionPromptManager can resolve its promise
+      // This is critical - the manager is waiting inside this vault iframe for the event
+      window.dispatchEvent(new CustomEvent('permission-granted', {
+        detail: { requestId: requestId(), level }
+      }));
+
+      // Also notify embassy/parent that permission was granted (for external listeners)
       if (requestId()) {
         send('PERMISSION_GRANTED', { requestId: requestId(), level });
       }
 
-      // Close the vault - the operation has already completed (with error)
-      // The calling app should retry the operation now that permission is granted
-      send('HIDE_VAULT');
+      // Close the vault after a small delay to let the sign operation complete
+      setTimeout(() => send('HIDE_VAULT'), 100);
     } catch (err) {
       console.error('Failed to save permission:', err);
       setError('Failed to save permission');
@@ -184,6 +193,12 @@ export const PermissionRequestPage: Component = () => {
 
   const handleDeny = async () => {
     // Cancel button - just deny this one request without saving any permission
+    // Dispatch local window event so permissionPromptManager can reject its promise
+    window.dispatchEvent(new CustomEvent('permission-denied', {
+      detail: { requestId: requestId() }
+    }));
+
+    // Also notify embassy/parent
     if (requestId()) {
       send('PERMISSION_DENIED', { requestId: requestId() });
     }

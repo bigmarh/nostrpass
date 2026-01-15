@@ -923,8 +923,47 @@ export async function getVaultFromNostr(
     console.log('📥 [getVaultFromNostr] Expected d-tag:', expectedDTag);
     console.log('📥 [getVaultFromNostr] Author pubkey:', userPublicKey);
     const filter: Filter = { kinds: [30078], authors: [userPublicKey], '#d': [expectedDTag], limit: 10 };
-    const events = await pool.querySync(relays, filter);
-    console.log(`📥 [getVaultFromNostr] Found ${events.length} events`);
+    let events = await pool.querySync(relays, filter);
+    console.log(`📥 [getVaultFromNostr] Found ${events.length} events with current d-tag format`);
+
+    // Fallback: Try legacy d-tag formats if not found
+    if (events.length === 0) {
+      // Legacy format 1: username as d-tag (very old accounts from DATA_STRUCTURES.md)
+      // This was the original format where d-tag was just the username
+      console.log('📥 [getVaultFromNostr] Primary d-tag not found, trying fallback: broad search for any vault events from this author');
+      console.log('📥 [getVaultFromNostr] Looking for VaultObj with any d-tag from author:', userPublicKey.slice(0, 16) + '...');
+      const fallbackFilter: Filter = {
+        kinds: [30078],
+        authors: [userPublicKey],
+        limit: 20
+      };
+      const fallbackEvents = await pool.querySync(relays, fallbackFilter);
+      console.log(`📥 [getVaultFromNostr] Fallback found ${fallbackEvents.length} events from this author`);
+
+      // Log what we found
+      fallbackEvents.forEach((e, i) => {
+        const dTag = e.tags.find(t => t[0] === 'd')?.[1] || '';
+        const subject = e.tags.find(t => t[0] === 'subject')?.[1] || '';
+        const enc = e.tags.find(t => t[0] === 'encryption')?.[1] || '';
+        console.log(`📥 [getVaultFromNostr] Fallback event ${i}: d-tag=${dTag.slice(0, 50)}... subject=${subject} encryption=${enc}`);
+      });
+
+      // Filter to vault events (subject = encrypted-vault or d-tag contains _vault_)
+      events = fallbackEvents.filter(e => {
+        const subject = e.tags.find(t => t[0] === 'subject')?.[1];
+        const dTag = e.tags.find(t => t[0] === 'd')?.[1] || '';
+        return subject === 'encrypted-vault' || dTag.includes('_vault_');
+      });
+      console.log(`📥 [getVaultFromNostr] Filtered to ${events.length} vault events (matching subject=encrypted-vault OR d-tag contains _vault_)`);
+
+      if (events.length > 0) {
+        events.forEach((e, i) => {
+          const dTag = e.tags.find(t => t[0] === 'd')?.[1];
+          console.log(`📥 [getVaultFromNostr] Fallback event ${i}: d-tag=${dTag}`);
+        });
+      }
+    }
+
     if (events.length > 0) {
       events.forEach((e, i) => {
         const dTag = e.tags.find(t => t[0] === 'd')?.[1];

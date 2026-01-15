@@ -180,6 +180,11 @@ export class SessionStateManager {
       console.log('[SessionStateManager] Fetching from Nostr to verify password...');
       console.log('[SessionStateManager] Using identifierType:', identifierType, 'environment:', environment);
 
+      // Configure NostrPass before fetching LoginObj to ensure correct namespace/environment
+      // This is critical for d-tag matching - namespace must be set before buildLoginDTag is called
+      configureNostrPass({ environment, namespace: namespace || 'nostrpass.com' });
+      console.log('[SessionStateManager] Configured NostrPass with environment:', environment, 'namespace:', namespace || 'nostrpass.com');
+
       let loginResult: { loginObj: LoginObj; passwordSalt: string } | null = null;
 
       // For Google auth with multi-vault: use specific d-tag if provided
