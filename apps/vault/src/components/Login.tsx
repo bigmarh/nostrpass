@@ -35,6 +35,11 @@ export const Login: Component = () => {
     const [googleVaults, setGoogleVaults] = createSignal<GoogleVaultInfo[]>([]);
     const [selectedVault, setSelectedVault] = createSignal<GoogleVaultInfo | null>(null);
 
+    // Orphan Google login recovery state (vault not found on Nostr)
+    const [showOrphanRecovery, setShowOrphanRecovery] = createSignal(false);
+    const [orphanVaultInfo, setOrphanVaultInfo] = createSignal<GoogleVaultInfo | null>(null);
+    const [isUnlinking, setIsUnlinking] = createSignal(false);
+
     // Advanced settings state - initialized after we have environment context
     const [showAdvancedPopover, setShowAdvancedPopover] = createSignal(false);
     const [customNamespace, setCustomNamespace] = createSignal('');
@@ -654,24 +659,78 @@ export const Login: Component = () => {
             setLoadingStatus('Unlocking vault and fetching identities from Nostr...');
 
             // Unlock the vault with the PIN - this will fetch VaultObj from Nostr if needed
-            const success = await unlockVault(pin);
+            // unlockVault now throws on error instead of returning false
+            await unlockVault(pin);
 
-            if (success) {
-                setLoadingStatus('Vault unlocked successfully!');
+            setLoadingStatus('Vault unlocked successfully!');
 
-                // After login+unlock, navigate to account picker so user can select identity
+// After login+unlock, navigate to account picker so user can select identity
                 // Use params.app directly (sanitized format like "localhost-4000") for consistent key lookup
                 const appOrigin = params.app || 'vault';
                 const appName = params.app ? desanitizeDomain(params.app) : 'unknown';
                 navigate(`/${params.app || 'vault'}/account-picker?appOrigin=${encodeURIComponent(appOrigin)}&appName=${encodeURIComponent(appName)}&afterLogin=true`);
-            } else {
-                throw new Error('Failed to unlock vault. Please try again.');
-            }
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to unlock vault');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to unlock vault';
+
+            // Check if this is an orphan Google login (VaultObj not found)
+            // This happens when Google was linked to a vault that no longer exists on Nostr
+            if (errorMessage.includes('VaultObj not found') && googleUser()) {
+                console.log('[Login] Detected orphan Google login - vault not found on Nostr');
+                // Store the vault info for recovery UI
+                const currentVault = selectedVault() || (googleVaults().length > 0 ? googleVaults()[0] : null);
+                setOrphanVaultInfo(currentVault);
+                setShowPinUnlock(false);
+                setShowOrphanRecovery(true);
+                setIsLoading(false);
+                setLoadingStatus('');
+                return;
+            }
+
+            setError(errorMessage);
             setShowPinUnlock(false);
             setIsLoading(false);
             setLoadingStatus('');
+        }
+    };
+
+    // Handle unlinking orphan Google login
+    const handleUnlinkOrphanVault = async () => {
+        const vault = orphanVaultInfo();
+        const user = googleUser();
+        if (!vault || !user) return;
+
+        setIsUnlinking(true);
+        try {
+            // Import the tombstone function
+            const { publishGoogleLoginTombstone } = await import('@nostrpass/nostrHelpers');
+
+            // Get relays for tombstone publish
+            const relays = getRelays();
+
+            // Publish tombstone to mark this LoginObj as deleted
+            // Note: We need the storage keys to publish the tombstone, but we don't have them
+            // So we'll just clear the local state and let the user try again
+            // The orphan LoginObj will remain on Nostr but won't match any vault
+
+            console.log('[Login] Clearing orphan Google login state');
+
+            // Clear Google auth state
+            clearGoogleUser();
+            setShowOrphanRecovery(false);
+            setOrphanVaultInfo(null);
+            setSelectedVault(null);
+            setGoogleVaults([]);
+            setShowGooglePasswordPrompt(false);
+            setGooglePasswordError('');
+
+            // Show success message and return to login
+            setError('');
+            console.log('[Login] Orphan Google login cleared - user can try again or create new vault');
+        } catch (err) {
+            console.error('[Login] Failed to unlink orphan vault:', err);
+            setError('Failed to unlink. Please try again.');
+        } finally {
+            setIsUnlinking(false);
         }
     };
 
@@ -1107,6 +1166,61 @@ export const Login: Component = () => {
                 />
             </Show>
 
+{/* Orphan Google Login Recovery Modal */}
+            <Show when={showOrphanRecovery()}>
+                <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                        <div class="text-center mb-6">
+                            <div class="w-16 h-16 mx-auto mb-4 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center">
+                                <svg class="w-8 h-8 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Vault Not Found</h2>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                                Your Google account is linked to a vault that no longer exists on Nostr. This can happen if:
+                            </p>
+                            <ul class="text-sm text-gray-500 dark:text-gray-400 mt-3 text-left list-disc list-inside space-y-1">
+                                <li>The vault was never fully created</li>
+                                <li>The vault data was lost or corrupted</li>
+                                <li>The link was created in a different environment</li>
+                            </ul>
+                        </div>
+
+                        <div class="space-y-3">
+                            <button
+                                onClick={handleUnlinkOrphanVault}
+                                disabled={isUnlinking()}
+                                class="w-full p-3 rounded-md bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                                <Show when={isUnlinking()}>
+                                    <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                    </svg>
+                                </Show>
+                                {isUnlinking() ? 'Clearing...' : 'Clear Link & Try Again'}
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    setShowOrphanRecovery(false);
+                                    setOrphanVaultInfo(null);
+                                    clearGoogleUser();
+                                }}
+                                disabled={isUnlinking()}
+                                class="w-full p-3 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+
+                        <p class="text-xs text-gray-400 dark:text-gray-500 text-center mt-4">
+                            After clearing, you can sign in with a different Google account or create a new vault.
+                        </p>
+                    </div>
+                </div>
+            </Show>
         </div>
     );
 };

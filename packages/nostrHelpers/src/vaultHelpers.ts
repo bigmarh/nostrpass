@@ -911,11 +911,12 @@ export async function saveVaultToNostr(
 export async function getVaultFromNostr(
   userPublicKey: string,
   relays: string[],
-  storagePrivateKey: string  // Storage private key for vault decryption
+  storagePrivateKey: string,  // Storage private key for vault decryption
+  environment?: string  // Optional environment override (uses session environment for Google login)
 ): Promise<VaultData | null> {
   try {
     const pool = new SimplePool();
-    const env = getEnvironment();
+    const env = environment || getEnvironment();
     const namespace = getNamespace();
     const expectedDTag = `${namespace}_vault_${userPublicKey}_${env}`;
     console.log('📥 [getVaultFromNostr] Querying relays:', relays);

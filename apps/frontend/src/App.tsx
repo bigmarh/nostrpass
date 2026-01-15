@@ -187,7 +187,7 @@ function App() {
 
             <p className="text-center text-sm md:text-lg text-gray-600 leading-relaxed mb-6">
               Drop-in authentication for Decentralized applications.<br/>
-              Add secure, privacy-first auth to your application
+              Sign in with Google or create a username — your keys, your identity,
               in minutes, not days.
             </p>
 
@@ -220,7 +220,52 @@ function App() {
           </p>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Card 1 - Multi-Identity (Tokyo) */}
+            {/* Card 1 - Google Login */}
+            <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group md:col-span-2 lg:col-span-3">
+              <div className="h-48 bg-white relative overflow-hidden flex items-center justify-center">
+                {/* Clean Google-style background */}
+                <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white"></div>
+
+                {/* Google G Logo Recreation */}
+                <div className="relative flex items-center gap-8">
+                  <svg viewBox="0 0 48 48" className="w-16 h-16 md:w-20 md:h-20 drop-shadow-lg group-hover:scale-105 transition-transform">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                  </svg>
+
+                  {/* Arrow pointing to Nostr */}
+                  <div className="flex items-center gap-4">
+                    <svg className="w-8 h-8 md:w-12 md:h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                    <div className="w-16 h-16 md:w-20 md:h-20 group-hover:scale-105 transition-transform">
+                      <img src="/logo.svg" alt="NostrPass" className="w-full h-full drop-shadow-lg" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stat badge */}
+                <div className="absolute top-3 right-3 bg-black text-white text-xs font-bold px-3 py-1.5 rounded-full">
+                  2B+ Google users
+                </div>
+              </div>
+              <div className="p-5 bg-gradient-to-r from-blue-50 via-red-50 via-yellow-50 to-green-50">
+                <div className="flex items-start gap-4">
+                  <div className="flex-1">
+                    <h3 className="font-bold text-xl mb-2">Sign In with Google</h3>
+                    <p className="text-gray-700 text-sm leading-relaxed">
+                      <span className="font-semibold">2 billion people</span> already have a Google account. Now they're one click away from joining Nostr.
+                      Familiar onboarding meets decentralized identity — no seed phrases to memorize, no friction to adoption.
+                      Link Google to an existing vault or let new users get started instantly.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 2 - Multi-Identity (Tokyo) */}
             <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden hover:border-gray-400 hover:shadow-lg transition-all group">
               <div className="h-40 bg-gradient-to-br from-rose-100 to-orange-50 relative overflow-hidden">
                 {/* Tokyo Scene */}
@@ -512,6 +557,7 @@ function App() {
                 <p className="text-gray-600 text-sm">Built on NPS-01, an open protocol anyone can implement. No vendor lock-in. Self-host your own vault. Interoperable by design.</p>
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -656,7 +702,7 @@ function App() {
                 <div className="flex-shrink-0 w-10 h-10 bg-black rounded-lg flex items-center justify-center text-white font-bold">2</div>
                 <div>
                   <h3 className="font-bold text-lg mb-1">Zero Backend Required</h3>
-                  <p className="text-gray-600 text-sm">No user database. No session management. No password resets. Users own their identity — you just verify signatures.</p>
+                  <p className="text-gray-600 text-sm">No user database. No session management. No password resets. Users sign in with Google or username — you just verify signatures.</p>
                 </div>
               </div>
 

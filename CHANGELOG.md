@@ -5,6 +5,33 @@ All notable changes to NostrPass will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-01-13
+
+### Added
+- **Google Sign-In Authentication**: Users can now sign in with Google as an alternative to username/password
+  - Link existing vaults to Google accounts from Vault Settings
+  - Multi-vault support: one Google account can link to multiple vaults
+  - Vault picker UI when signing in with Google if multiple vaults are linked
+  - Unlink Google accounts from vault settings
+- **Firebase Integration**: Added Firebase SDK for Google authentication
+- **New Components**:
+  - `GoogleAuthProvider` - Firebase Google auth context
+  - `LinkGoogleAccount` - Settings component for linking/unlinking Google accounts
+  - `VaultPicker` - UI for selecting between multiple linked vaults
+  - `GooglePasswordPrompt` - Password confirmation for Google auth operations
+
+### Changed
+- Enhanced `vaultHelpers.ts` with Google LoginObj management functions
+- Updated `AuthProvider` to support Google authentication flow with identifier types
+- Added `linkedAuthProviders` field to vault data for tracking linked auth methods
+- Improved relay indexing with `'t'` tags (`gvault_`, `svault_`) for reliable lookups
+
+### Technical Details
+- Version 2 tagging for Google LoginObjs to distinguish from legacy entries
+- Tombstone mechanism for unlinking (marks LoginObj as unlinked without deletion)
+- Storage public key tags for direct vault lookups
+- Display-name tags for human-readable vault identification in picker UI
+
 ## [1.0.0] - 2024-01-12
 
 ### Added

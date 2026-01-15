@@ -98,6 +98,9 @@ export const SimpleAuthPromptController: Component = () => {
       return;
     }
 
+    // Use storagePublicKey for vault lookup (critical for Google login where username is UID)
+    const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
+
     let appKey = d.appOrigin;
     try {
       appKey = sanitizeDomain(new URL(d.appOrigin).host || d.appOrigin);
@@ -127,7 +130,7 @@ export const SimpleAuthPromptController: Component = () => {
         d.identityIndex
       );
 
-      // Set this identity as the active identity via vaultStore
+// Set this identity as the active identity via vaultStore
       // Use appKey (sanitized) to match how permissions are stored
       // Pass lookupKey as fallback in case vaultStore isn't initialized yet
       await setActiveIdentityIndex(appKey, d.identityIndex, lookupKey);

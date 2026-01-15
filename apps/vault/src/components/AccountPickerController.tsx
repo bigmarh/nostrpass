@@ -90,7 +90,7 @@ export const AccountPickerController: Component = () => {
         if (allIdentities.length === 1 && currentDetail) {
           console.log('🔵 [AccountPicker] Only one identity - auto-selecting index 0');
 
-          // Update active identity via vaultStore
+// Update active identity via vaultStore
           // Use appKey (sanitized) to match how permissions are stored
           // Pass lookupKey as fallback in case vaultStore isn't initialized yet
           await setActiveIdentityIndex(appKey, 0, lookupKey);
@@ -237,7 +237,7 @@ export const AccountPickerController: Component = () => {
     const selectedIdentityData = identities().find((item: any) => item.index === identityIndex);
     const isAuthorized = selectedIdentityData?.isAuthorized || false;
 
-    // Get lookupKey for fallback
+// Get lookupKey for fallback
     const lookupKey = currentUser.profile.storagePublicKey || currentUser.profile.username;
 
     try {

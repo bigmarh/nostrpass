@@ -208,8 +208,10 @@ export class SessionStateManager {
 
       // Cache the LoginObj for future logins (after successful password verification)
       // Include environment in cache key to handle same username in different namespaces
-      await vaultDB.saveLoginObj(username, loginResult.loginObj, loginResult.passwordSalt, environment);
-      console.log('[SessionStateManager] Password verified, LoginObj cached successfully');
+      // For Google login, use "${googleUid}_google" format to match link-google handler
+      const cacheKeyUsername = identifierType === 'google' ? `${username}_google` : username;
+      await vaultDB.saveLoginObj(cacheKeyUsername, loginResult.loginObj, loginResult.passwordSalt, environment);
+      console.log('[SessionStateManager] Password verified, LoginObj cached with key:', cacheKeyUsername);
 
       const { loginObj, passwordSalt } = loginResult;
 
@@ -337,8 +339,15 @@ export class SessionStateManager {
       if (!session.loginObj) {
         console.log('[SessionStateManager] Loading LoginObj from IndexedDB cache...');
         const environment = session.environment || 'production';
-        console.log('[SessionStateManager] Using environment:', environment);
-        const cachedLogin = await vaultDB.getLoginObj(params.username, environment);
+        console.log('[SessionStateManager] Using environment:', environment, 'authProvider:', session.authProvider);
+
+        // For Google login, LoginObj was saved with "${googleUid}_google" as the cache key
+        // We need to match that format when retrieving
+        const cacheKeyUsername = session.authProvider === 'google'
+          ? `${params.username}_google`
+          : params.username;
+        console.log('[SessionStateManager] LoginObj cache key username:', cacheKeyUsername);
+        const cachedLogin = await vaultDB.getLoginObj(cacheKeyUsername, environment);
         if (cachedLogin?.loginObj) {
           session.loginObj = cachedLogin.loginObj;
           storagePublicKeyForLookup = cachedLogin.loginObj.storagePublicKey;
@@ -387,18 +396,27 @@ export class SessionStateManager {
 
         // Fetch VaultObj from Nostr
         // Configure environment before query to ensure correct d-tag matching
-        const environment = session.environment || 'production';
+        // CRITICAL: This is essential for Google login where the vault might be in a different environment
+        const sessionEnv = session.environment || 'production';
         const namespace = session.namespace || getNamespace();
-        console.log('[SessionStateManager] Fetching VaultObj from Nostr...', { environment, namespace });
-        configureNostrPass({ environment, namespace });
+        console.log('[SessionStateManager] Fetching VaultObj from Nostr...', { environment: sessionEnv, namespace });
+        console.log('[SessionStateManager] Using storagePublicKey:', storagePublicKey?.slice(0, 16) + '...');
+        console.log('[SessionStateManager] Using relays:', session.relays);
+        configureNostrPass({ environment: sessionEnv, namespace });
 
         vaultData = await getVaultFromNostr(
           storagePublicKey,
           session.relays || [],
-          storagePrivateKey
+          storagePrivateKey,
+          sessionEnv  // Pass session environment explicitly
         );
 
         if (!vaultData) {
+          console.error('[SessionStateManager] VaultObj not found on Nostr!');
+          console.error('[SessionStateManager] storagePublicKey:', storagePublicKey);
+          console.error('[SessionStateManager] relays:', session.relays);
+          console.error('[SessionStateManager] environment:', sessionEnv);
+          console.error('[SessionStateManager] authProvider:', session.authProvider);
           throw new Error('VaultObj not found on Nostr');
         }
 
@@ -418,7 +436,11 @@ export class SessionStateManager {
       if (!session.loginObj) {
         console.log('[SessionStateManager] Loading LoginObj into session...');
         const environment = session.environment || 'production';
-        const cachedLogin = await vaultDB.getLoginObj(params.username, environment);
+        // For Google login, LoginObj was saved with "${googleUid}_google" as the cache key
+        const cacheKeyUsername = session.authProvider === 'google'
+          ? `${params.username}_google`
+          : params.username;
+        const cachedLogin = await vaultDB.getLoginObj(cacheKeyUsername, environment);
         if (cachedLogin?.loginObj) {
           session.loginObj = cachedLogin.loginObj;
           console.log('[SessionStateManager] LoginObj loaded into session');
