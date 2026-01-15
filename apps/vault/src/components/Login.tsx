@@ -690,6 +690,22 @@ export const Login: Component = () => {
                     </div>
                 </div>
                 <div class="flex flex-1 flex-col items-center justify-center min-w-0 pt-2 pb-4 px-6 md:p-6">
+                    {/* Loading state - replaces form while loading */}
+                    <Show when={isLoading() && loadingStatus()}>
+                        <div class="w-full max-w-sm flex flex-col items-center justify-center py-8">
+                            <div class="flex flex-col items-center gap-4">
+                                <div class="relative">
+                                    <div class="w-12 h-12 border-4 border-gray-200 dark:border-gray-700 rounded-full"></div>
+                                    <div class="absolute inset-0 w-12 h-12 border-4 border-transparent border-t-blue-500 dark:border-t-blue-400 rounded-full animate-spin"></div>
+                                </div>
+                                <div class="text-center">
+                                    <p class="text-base font-medium text-gray-900 dark:text-white">{loadingStatus()}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </Show>
+
+                    <Show when={!isLoading() || !loadingStatus()}>
                     <div class="w-full max-w-sm space-y-3">
                         {/* Non-production environment warning */}
                         <Show when={storageEnvironmentName() !== 'production'}>
@@ -932,17 +948,7 @@ export const Login: Component = () => {
                                     Connecting to Nostr relays...
                                 </div>
                             </Show>
-                            
-                            <Show when={isLoading() && loadingStatus()}>
-                                <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-400 px-3 py-2 rounded-md text-sm flex items-center gap-2">
-                                    <svg class="animate-spin h-4 w-4 text-blue-700 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                    {loadingStatus()}
-                                </div>
-                            </Show>
-                            
+
                             <button
                                 type="submit"
                                 class="w-full p-2 rounded-md bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white transition-colors font-medium flex items-center justify-center gap-2"
@@ -990,9 +996,10 @@ export const Login: Component = () => {
                             </div>
                         </div>
                     </div>
+                    </Show>
                 </div>
             </div>
-            
+
             {/* PIN Setup Modal */}
             <Show when={showPinSetup()}>
                 <div class="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-start md:items-center justify-center z-50 overflow-y-auto">
@@ -1015,7 +1022,23 @@ export const Login: Component = () => {
             {/* PIN Unlock Modal (shown after successful login) */}
             <Show when={showPinUnlock()}>
                 <div class="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50">
-                    <div class="bg-white dark:bg-gray-800 w-full max-w-md md:rounded-lg md:shadow-xl md:border-2 md:border-black dark:md:border-gray-700 p-8">
+                    <div class="bg-white dark:bg-gray-800 w-full max-w-md md:rounded-lg md:shadow-xl md:border-2 md:border-black dark:md:border-gray-700 p-8 relative overflow-hidden">
+                        {/* Loading overlay for PIN unlock - covers entire modal */}
+                        <Show when={isLoading() && loadingStatus()}>
+                            <div class="absolute inset-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+                                <div class="flex flex-col items-center gap-4">
+                                    <div class="relative">
+                                        <div class="w-12 h-12 border-4 border-gray-200 dark:border-gray-700 rounded-full"></div>
+                                        <div class="absolute inset-0 w-12 h-12 border-4 border-transparent border-t-blue-500 dark:border-t-blue-400 rounded-full animate-spin"></div>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-base font-medium text-gray-900 dark:text-white">{loadingStatus()}</p>
+                                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Please wait...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </Show>
+
                         <div class="text-center mb-6">
                             <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Enter Your PIN</h2>
                             <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
@@ -1026,16 +1049,6 @@ export const Login: Component = () => {
                         <Show when={error() && showPinUnlock()}>
                             <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-400 px-4 py-2 rounded-md text-sm mb-4">
                                 {error()}
-                            </div>
-                        </Show>
-
-                        <Show when={isLoading() && loadingStatus()}>
-                            <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-400 px-4 py-2 rounded-md text-sm mb-4 flex items-center gap-2">
-                                <svg class="animate-spin h-4 w-4 text-blue-700 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                {loadingStatus()}
                             </div>
                         </Show>
 
@@ -1052,6 +1065,7 @@ export const Login: Component = () => {
                                     setError('Login cancelled');
                                 }}
                                 class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                                disabled={isLoading()}
                             >
                                 Cancel
                             </button>
@@ -1092,6 +1106,7 @@ export const Login: Component = () => {
                     errorMessage={googlePasswordError()}
                 />
             </Show>
+
         </div>
     );
 };
