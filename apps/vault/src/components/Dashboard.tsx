@@ -8,7 +8,7 @@ import { useVaultData } from '../hooks/useVaultData';
 import { IdentityManager } from './IdentityManager';
 import { PinManager } from './PinManager';
 import GlobalSettings from './GlobalSettings';
-import { getActiveIdentityIndex } from '../stores/vaultStore';
+import { getActiveIdentityIndex, useVaultStore } from '../stores/vaultStore';
 import { nostrProfileService } from '../services/nostrProfileService';
 
 export const Dashboard: Component = () => {
@@ -28,11 +28,19 @@ export const Dashboard: Component = () => {
     // Use the vault data hook
     const { vaultData, loadVaultData, syncToNostr, updateVaultData } = useVaultData({ autoLoad: true });
 
+    // Get the reactive signal directly from the store for proper SolidJS dependency tracking
+    const { activeIdentityByApp } = useVaultStore();
+
     // Reactive memo for active identity index - ensures Dashboard re-renders when identity changes
     // Uses params.app directly since it's already in sanitized format (e.g., "localhost-4000")
+    // IMPORTANT: We must access activeIdentityByApp() directly in the memo to establish
+    // the reactive dependency. Calling getActiveIdentityIndex() alone doesn't work because
+    // SolidJS can't track signal access through function calls.
     const activeIdentityIndex = createMemo(() => {
         const appKey = params.app || null;
         if (!appKey) return 0;
+        // Access the signal directly to establish reactive dependency
+        const _allActive = activeIdentityByApp();
         const index = getActiveIdentityIndex(appKey);
         console.log('[Dashboard] activeIdentityIndex memo:', { appKey, index });
         return index;

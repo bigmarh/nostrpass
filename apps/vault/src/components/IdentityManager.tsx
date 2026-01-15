@@ -139,10 +139,11 @@ export const IdentityManager: Component<IdentityManagerProps> = (props) => {
 
     // Use real vault identities - filter out archived ones and preserve original index
     // Get active identity from vaultStore (per-browser)
+    // Note: idx can be 0 which is a valid index, so we check for undefined/null, not > 0
     const activeIndex = props.appId ? (() => {
       const appOrigin = getAppOrigin(props.appId);
       const idx = getActiveIdentityIndex(appOrigin);
-      return idx > 0 ? idx : null;
+      return idx;  // Return the index as-is (0 is valid)
     })() : null;
     return vault.identities
       .map((identity: any, originalIndex: number) => ({ identity, originalIndex }))
