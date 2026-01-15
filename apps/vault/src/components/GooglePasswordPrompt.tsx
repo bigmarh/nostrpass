@@ -62,6 +62,7 @@ const GooglePasswordPrompt: Component<GooglePasswordPromptProps> = (props) => {
                 src={props.googleUser.photoURL!}
                 alt="Profile"
                 class="w-8 h-8 rounded-full"
+                referrerPolicy="no-referrer"
                 onError={(e) => {
                   // Hide broken image and show fallback
                   e.currentTarget.style.display = 'none';

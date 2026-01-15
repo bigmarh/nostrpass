@@ -12,7 +12,7 @@
 
 import type { VaultData } from './db';
 import type { LoginObj } from '@nostrpass/types';
-import { getLoginObj, getLoginObjByDTag, getVaultFromNostr } from '@nostrpass/nostrHelpers';
+import { getLoginObj, getLoginObjByDTag, getVaultFromNostr, configureNostrPass, getNamespace } from '@nostrpass/nostrHelpers';
 import { SecureKeyStorage } from './secure-key-storage';
 import { checkPinLockout, recordFailedPinAttempt, recordSuccessfulPinAttempt, resetPinTracking } from './session-manager';
 
@@ -48,6 +48,7 @@ export interface CompleteSessionState {
   expiresAt: number;
   relays?: string[];  // Relays for Nostr operations
   environment?: string;  // Environment (production, demo, etc.)
+  namespace?: string;  // Namespace for Nostr operations
 
   // LoginObj (cached from login, needed for unlock)
   loginObj?: LoginObj;
@@ -159,6 +160,7 @@ export class SessionStateManager {
     password: string;
     relays: string[];
     environment?: string;
+    namespace?: string;
     identifierType?: 'username' | 'google';
     displayName?: string;
     vaultDTag?: string;  // For multi-vault Google auth: specific d-tag to fetch
@@ -166,7 +168,7 @@ export class SessionStateManager {
   }): Promise<CompleteSessionState> {
     console.log('[SessionStateManager] Starting atomic login for:', params.username, 'type:', params.identifierType);
 
-    const { username, password, relays, environment = 'production', identifierType = 'username', displayName, vaultDTag, vaultPasswordSalt } = params;
+    const { username, password, relays, environment = 'production', namespace, identifierType = 'username', displayName, vaultDTag, vaultPasswordSalt } = params;
 
     try {
       // Step 1: Try to load LoginObj from IndexedDB cache (fast)
@@ -246,6 +248,7 @@ export class SessionStateManager {
         expiresAt: now + this.SESSION_TIMEOUT,
         relays, // Store for later use during unlock
         environment, // Store for use during unlock
+        namespace, // Store for use during unlock
         loginObj // Store for decrypting storage keys during unlock
       };
 
@@ -383,7 +386,12 @@ export class SessionStateManager {
         const storagePublicKey = storageKeypair.publicKey;
 
         // Fetch VaultObj from Nostr
-        console.log('[SessionStateManager] Fetching VaultObj from Nostr...');
+        // Configure environment before query to ensure correct d-tag matching
+        const environment = session.environment || 'production';
+        const namespace = session.namespace || getNamespace();
+        console.log('[SessionStateManager] Fetching VaultObj from Nostr...', { environment, namespace });
+        configureNostrPass({ environment, namespace });
+
         vaultData = await getVaultFromNostr(
           storagePublicKey,
           session.relays || [],

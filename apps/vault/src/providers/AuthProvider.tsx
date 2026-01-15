@@ -345,6 +345,7 @@ export const AuthProvider: ParentComponent = (props) => {
         password,
         relays: getRelays(),
         environment: effectiveEnvironment,
+        namespace: globalNamespace,
         displayName,
         vaultDTag,
         vaultPasswordSalt

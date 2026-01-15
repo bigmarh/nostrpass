@@ -120,6 +120,7 @@ export async function handleAtomicLogin(params: {
   password: string;
   relays: string[];
   environment?: string;
+  namespace?: string;
   displayName?: string;
   vaultDTag?: string;  // For multi-vault Google auth: specific d-tag to fetch
   vaultPasswordSalt?: string;  // For multi-vault: password salt from vault picker
@@ -134,6 +135,7 @@ export async function handleAtomicLogin(params: {
     password: params.password,
     relays: params.relays,
     environment: params.environment,
+    namespace: params.namespace,
     identifierType: params.identifierType || 'username',
     displayName: params.displayName,
     vaultDTag: params.vaultDTag,
