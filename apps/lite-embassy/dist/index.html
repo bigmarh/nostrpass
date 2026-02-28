@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NostrPass Lite Embassy</title>
+    <script type="module" crossorigin src="/assets/index-BqLwbWwz.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-ZVMHamB2.css">
+  </head>
+  <body>
+    <div id="app">
+      <main>
+        <header>
+          <h1>NostrPass Lite Embassy (3rd-Party Host Demo)</h1>
+          <p>
+            This host app never collects username/password/PIN. Authentication happens in the
+            embedded vault.
+          </p>
+        </header>
+
+        <p id="status-line">Initializing...</p>
+        <pre id="status"></pre>
+
+        <section>
+          <h2>Secure Vault</h2>
+          <input
+            id="vault-url"
+            placeholder="Vault URL (example: http://localhost:3410)"
+            autocomplete="off"
+          />
+          <div class="row">
+            <button id="login-with-nostrpass">Login with NostrPass</button>
+            <button id="refresh-auth">Refresh Auth Status</button>
+            <button id="open-vault">Open Vault Frame</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Operations (RPC to Vault)</h2>
+          <textarea id="content" placeholder="Event content"></textarea>
+          <div class="row">
+            <button id="pubkey">Request getPublicKey()</button>
+            <button id="sign">Request signEvent(kind:1)</button>
+            <button id="close-vault">Close Vault Frame</button>
+          </div>
+        </section>
+      </main>
+
+      <aside id="vault-overlay" class="vault-overlay" aria-hidden="true">
+        <div class="vault-shell">
+          <div class="vault-shell-header">
+            <strong>Secure NostrPass Vault</strong>
+            <button id="vault-shell-close" class="close-btn" type="button">Close</button>
+          </div>
+          <iframe id="vault-frame" title="NostrPass Vault"></iframe>
+        </div>
+      </aside>
+    </div>
+
+  </body>
+</html>

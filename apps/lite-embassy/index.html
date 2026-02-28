@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NostrPass Lite Embassy</title>
+  </head>
+  <body>
+    <div id="app">
+      <main>
+        <header>
+          <h1>NostrPass Lite Embassy</h1>
+          <p>Demo host app — credentials never leave the vault iframe.</p>
+        </header>
+
+        <!-- NostrPass Button widget -->
+        <div class="nostr-btn-wrapper">
+          <button id="login-with-nostrpass" class="nostr-btn" type="button">
+            <span class="nostr-btn-idle">
+              <svg width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100" height="100" rx="22" fill="#18181b"/>
+                <path d="M50 18C32.3 18 18 32.3 18 50s14.3 32 32 32 32-14.3 32-32S67.7 18 50 18zm0 10c5.5 0 10 4.5 10 10S55.5 48 50 48s-10-4.5-10-10 4.5-10 10-10zm0 46c-8 0-15.1-3.9-19.5-9.9C32.5 59.4 40.8 56 50 56s17.5 3.4 19.5 8.1C65.1 70.1 58 74 50 74z" fill="white"/>
+              </svg>
+              Sign in with NostrPass
+            </span>
+            <span class="nostr-btn-authed" hidden>
+              <span class="nostr-btn-avatar" id="nostr-btn-avatar"></span>
+              <span class="nostr-btn-name" id="nostr-btn-name"></span>
+              <svg class="nostr-btn-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          </button>
+
+          <!-- Dropdown -->
+          <div id="nostr-btn-dropdown" class="nostr-btn-dropdown" hidden>
+            <div class="nostr-btn-dropdown-profile">
+              <span class="nostr-btn-avatar nostr-btn-avatar-lg" id="nostr-btn-avatar-lg"></span>
+              <div class="nostr-btn-dropdown-info">
+                <span class="nostr-btn-dropdown-name" id="nostr-btn-dropdown-name"></span>
+                <span class="nostr-btn-dropdown-pubkey" id="nostr-btn-dropdown-pubkey"></span>
+              </div>
+            </div>
+            <div class="nostr-btn-dropdown-divider"></div>
+            <button id="nostr-btn-signout" class="nostr-btn-dropdown-item" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+              Sign out
+            </button>
+          </div>
+        </div>
+
+        <p id="status-line">Initializing...</p>
+        <pre id="status"></pre>
+
+        <section>
+          <h2>Vault Config</h2>
+          <input
+            id="vault-url"
+            placeholder="Vault URL (example: http://localhost:3411)"
+            autocomplete="off"
+          />
+          <div class="row">
+            <button id="refresh-auth">Refresh Auth Status</button>
+            <button id="open-vault">Open Vault Frame</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Operations (RPC)</h2>
+          <textarea id="content" placeholder="Event content"></textarea>
+          <div class="row">
+            <button id="pubkey">getPublicKey()</button>
+            <button id="sign">signEvent(kind:1)</button>
+            <button id="close-vault">Close Vault</button>
+          </div>
+        </section>
+      </main>
+
+      <aside id="vault-overlay" class="vault-overlay" aria-hidden="true">
+        <button id="vault-shell-close" class="vault-close-btn" type="button" aria-label="Close">✕</button>
+        <div class="vault-shell">
+          <iframe id="vault-frame" title="NostrPass Vault" allowtransparency="true"></iframe>
+        </div>
+      </aside>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

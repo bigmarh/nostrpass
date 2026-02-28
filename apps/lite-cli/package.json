@@ -1,0 +1,17 @@
+{
+  "name": "@nostrpass/lite-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "nostrpass-lite": "./src/cli.js"
+  },
+  "scripts": {
+    "cli": "node --import tsx ./src/cli.js",
+    "type-check": "node -e \"console.log('No type-check step for JS CLI')\""
+  },
+  "dependencies": {
+    "@nostrpass/lite-core": "workspace:*",
+    "tsx": "^4.21.0"
+  }
+}
