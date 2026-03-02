@@ -1,6 +1,6 @@
 {
   "name": "@nostrpass/lite-embassy",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
     "@nostrpass/lite-core": "workspace:*"
   },
   "devDependencies": {
+    "terser": "^5.46.0",
     "typescript": "^5.3.3",
     "vite": "^5.3.3"
   }
