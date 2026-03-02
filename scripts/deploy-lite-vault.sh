@@ -4,9 +4,12 @@ set -e
 # NostrPass Lite Vault Deployment Script
 # Deploys lite-vault SPA to Google Cloud Storage
 
-BUCKET_NAME="lite-vault.nostrpass.com"
-BUCKET_URL="gs://${BUCKET_NAME}"
+BUCKET_NAME="cdn.nostrpass.com"
+BUCKET_PREFIX="lite-vault"
+BUCKET_URL="gs://${BUCKET_NAME}/${BUCKET_PREFIX}"
 DIST_DIR="apps/lite-vault/dist"
+GCP_PROJECT="${GCP_PROJECT:-nostrpass}"
+GCLOUD_CONFIG="${GCLOUD_CONFIG:-nostrpass}"
 
 # Colors
 RED='\033[0;31m'
@@ -17,6 +20,16 @@ NC='\033[0m'
 
 echo -e "${BLUE}🚀 NostrPass Lite Vault Deployment${NC}"
 echo "==================================="
+
+# Switch to the nostrpass gcloud config
+echo -e "${YELLOW}🔧 Activating gcloud config: ${GCLOUD_CONFIG}${NC}"
+gcloud config configurations activate "$GCLOUD_CONFIG" 2>/dev/null || {
+    echo -e "${RED}❌ Config '${GCLOUD_CONFIG}' not found.${NC}"
+    echo "Run: gcloud config configurations create nostrpass"
+    echo "     gcloud auth login  # use the account that owns nostrpass.firebaseapp.com"
+    echo "     gcloud config set project nostrpass"
+    exit 1
+}
 
 # Checks
 if ! command -v gsutil &> /dev/null; then
@@ -42,37 +55,6 @@ if [ ! -d "$DIST_DIR" ]; then
 fi
 echo -e "${GREEN}✅ Build complete${NC}"
 
-# Create bucket if it doesn't exist
-if ! gsutil ls -b $BUCKET_URL &>/dev/null; then
-    echo -e "${YELLOW}📦 Creating bucket ${BUCKET_NAME}...${NC}"
-    PROJECT_ID=$(gcloud config get-value project)
-    gsutil mb -p "$PROJECT_ID" -c STANDARD -l US $BUCKET_URL
-
-    # Configure as static website (index.html for everything)
-    gsutil web set -m index.html -e index.html $BUCKET_URL
-
-    # Public read
-    gsutil iam ch allUsers:objectViewer $BUCKET_URL
-
-    # CORS — allow any origin to load the iframe
-    cat > /tmp/lite-vault-cors.json <<'CORS'
-[
-  {
-    "origin": ["*"],
-    "method": ["GET", "HEAD"],
-    "responseHeader": ["Content-Type", "Cache-Control", "Access-Control-Allow-Origin"],
-    "maxAgeSeconds": 3600
-  }
-]
-CORS
-    gsutil cors set /tmp/lite-vault-cors.json $BUCKET_URL
-    rm /tmp/lite-vault-cors.json
-
-    echo -e "${GREEN}✅ Bucket created and configured${NC}"
-else
-    echo -e "${YELLOW}ℹ️  Bucket ${BUCKET_NAME} already exists${NC}"
-fi
-
 # Upload hashed assets — long cache, immutable
 echo -e "${YELLOW}📤 Uploading assets (immutable)...${NC}"
 gsutil -m -h "Cache-Control:public, max-age=31536000, immutable" \
@@ -96,11 +78,7 @@ gsutil -h "Cache-Control:no-cache, must-revalidate" \
 echo ""
 echo -e "${GREEN}✅ Lite Vault Deployment Complete!${NC}"
 echo ""
-echo -e "${BLUE}📍 GCS URL:    https://storage.googleapis.com/${BUCKET_NAME}/index.html${NC}"
-echo -e "${BLUE}📍 Custom URL: https://lite-vault.nostrpass.com${NC}"
-echo ""
-echo -e "${YELLOW}DNS (if not already set):${NC}"
-echo "  lite-vault.nostrpass.com  CNAME → c.storage.googleapis.com"
+echo -e "${BLUE}📍 URL: https://cdn.nostrpass.com/lite-vault/index.html${NC}"
 echo ""
 echo -e "${YELLOW}Usage in your app:${NC}"
-echo "  window.initNostrPassLite({ vaultUrl: 'https://lite-vault.nostrpass.com/' })"
+echo "  window.initNostrPassLite({ vaultUrl: 'https://cdn.nostrpass.com/lite-vault/' })"

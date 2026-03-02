@@ -29,6 +29,20 @@ const VAULT_CACHE_PREFIX = 'cache:vault';
 const RESUME_KEY = 'resume';
 const DEFAULT_SESSION_PERMISSION_MINUTES = 60;
 
+/** Stored in sessionStorage (tab-scoped, cleared on tab close) to auto-restore unlocked session on page refresh. */
+interface LiteSessionSnapshot {
+  namespace: string;
+  authMethod: 'password' | 'google';
+  identifier: string;
+  publicKey: string;
+  unlockedPrivateKey: string;
+  relays: string[];
+  loginPayload: LiteLoginPayload;
+  vaultSecret: string;
+  storagePrivateKey: string;
+  vaultPayload: LiteVaultPayload;
+}
+
 /** Session data stored encrypted-with-PIN so the vault can be unlocked after a page refresh. */
 interface LiteResumePayload {
   authMethod: 'password' | 'google';
@@ -103,6 +117,14 @@ export class LiteCore {
 
   async initialize(): Promise<LiteAuthState> {
     this.logStep('initialize:start');
+
+    // Fast path: restore from sessionStorage (tab-scoped, survives page refresh)
+    if (this.tryRestoreFromSessionSnapshot()) {
+      this.logStep('initialize:restoredFromSession');
+      await this.persistAuthState();
+      return this.getAuthState();
+    }
+
     const [cached, resumeToken] = await Promise.all([
       this.storage.get<LiteAuthState>(AUTH_STATE_KEY),
       this.storage.get<string>(RESUME_KEY),
@@ -360,6 +382,8 @@ export class LiteCore {
 
     // Save fresh resume token so next page load can PIN-unlock again
     await this.saveResumeToken(input.pin);
+    // Save to sessionStorage so page refreshes within this tab auto-restore without PIN
+    this.saveSessionSnapshot();
 
     this.authState.isLocked = false;
     await this.persistAuthState();
@@ -372,6 +396,7 @@ export class LiteCore {
       delete this.session!.unlockedPrivateKey;
     }
     this.sessionPermissionGrants.clear();
+    this.clearSessionSnapshot();
     if (this.authState.isAuthenticated) {
       this.authState.isLocked = true;
     }
@@ -383,6 +408,7 @@ export class LiteCore {
     this.session = null;
     this.pendingPermissionRequests.clear();
     this.sessionPermissionGrants.clear();
+    this.clearSessionSnapshot();
     this.authState = {
       initialized: true,
       isAuthenticated: false,
@@ -689,6 +715,7 @@ export class LiteCore {
 
     await this.cacheLoginAndVault(loginDTag, encryptedLoginPayload, publicKey, encryptedVaultPayload);
     await this.saveResumeToken(input.pin);
+    this.saveSessionSnapshot();
     await this.persistAuthState();
     this.logStep('enroll:done', this.authState);
 
@@ -909,6 +936,70 @@ export class LiteCore {
       createdAt: this.now(),
       pubkey: this.session!.loginPayload.storagePublicKey,
     });
+  }
+
+  // ── sessionStorage helpers (tab-scoped, survives page refresh, cleared on tab close) ──
+
+  private sessionSnapshotKey(): string {
+    return `nostrpass-lite:${this.namespace}:session`;
+  }
+
+  private saveSessionSnapshot(): void {
+    if (!this.session?.unlockedPrivateKey) return;
+    const snap: LiteSessionSnapshot = {
+      namespace: this.namespace,
+      authMethod: this.session.authMethod,
+      identifier: this.session.identifier,
+      publicKey: this.session.vaultPayload.publicKey,
+      unlockedPrivateKey: this.session.unlockedPrivateKey,
+      relays: this.session.relays,
+      loginPayload: this.session.loginPayload,
+      vaultSecret: this.session.vaultSecret,
+      storagePrivateKey: this.session.storagePrivateKey,
+      vaultPayload: this.session.vaultPayload,
+    };
+    try {
+      globalThis.sessionStorage?.setItem(this.sessionSnapshotKey(), JSON.stringify(snap));
+    } catch { /* sessionStorage unavailable (e.g. sandboxed iframe) — silently ignore */ }
+  }
+
+  private clearSessionSnapshot(): void {
+    try {
+      globalThis.sessionStorage?.removeItem(this.sessionSnapshotKey());
+    } catch { /* ignore */ }
+  }
+
+  private tryRestoreFromSessionSnapshot(): boolean {
+    try {
+      const raw = globalThis.sessionStorage?.getItem(this.sessionSnapshotKey());
+      if (!raw) return false;
+      const snap = JSON.parse(raw) as LiteSessionSnapshot;
+      if (!snap.unlockedPrivateKey || !snap.publicKey) return false;
+
+      this.session = {
+        authMethod: snap.authMethod,
+        identifier: snap.identifier,
+        authSecret: '',
+        relays: snap.relays,
+        loginPayload: snap.loginPayload,
+        vaultSecret: snap.vaultSecret,
+        storagePrivateKey: snap.storagePrivateKey,
+        vaultPayload: snap.vaultPayload,
+        unlockedPrivateKey: snap.unlockedPrivateKey,
+      };
+      this.authState = {
+        initialized: true,
+        isAuthenticated: true,
+        isLocked: false,
+        authMethod: snap.authMethod,
+        identifier: snap.identifier,
+        publicKey: snap.publicKey,
+      };
+      return true;
+    } catch {
+      this.clearSessionSnapshot();
+      return false;
+    }
   }
 
   private async saveResumeToken(pin: string): Promise<void> {
