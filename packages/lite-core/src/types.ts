@@ -139,3 +139,22 @@ export interface RelayClient {
   }): Promise<{ content: string; createdAt: number; pubkey: string } | null>;
   publish(event: UnsignedEvent & { pubkey: string; id: string; sig: string }): Promise<string[]>;
 }
+
+/**
+ * Optional delegate for performing private-key crypto operations in an isolated
+ * context (e.g., a Web Worker). When provided to LiteCore, the raw private key
+ * never materialises on the main thread — only encrypted blobs and results cross
+ * the boundary.
+ */
+export interface CryptoDelegate {
+  /** Decrypt and load the private key into the delegate using the PIN */
+  loadKey(encryptedPrivateKey: string, pin: string): Promise<{ publicKey: string }>;
+  /** Load a private key directly (e.g., after enrollment when the key is freshly generated) */
+  loadKeyDirect(privateKeyHex: string): Promise<void>;
+  /** Execute a crypto operation using the key held by the delegate */
+  execute<T>(operation: LitePermissionOperation, payload?: Record<string, unknown>): Promise<T>;
+  /** Clear the private key from the delegate (on lock or logout) */
+  clearKey(): Promise<void>;
+  /** Synchronously check whether a key is currently loaded */
+  isKeyLoaded: boolean;
+}

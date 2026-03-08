@@ -1,5 +1,5 @@
 import './index.css'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { nip19 } from 'nostr-tools'
 
 declare global {
@@ -16,9 +16,26 @@ declare global {
 function App() {
   const [showCode, setShowCode] = useState(false)
   const [showDemo, setShowDemo] = useState(false)
+  const [showLiteCode, setShowLiteCode] = useState(false)
+  const [showLiteDemo, setShowLiteDemo] = useState(false)
   const [pubkey, setPubkey] = useState<string | null>(null)
   const [reactions, setReactions] = useState<Array<{id: string, content: string, pubkey: string, created_at: number}>>([])
   const [nostrPassReady, setNostrPassReady] = useState(false)
+
+  // Lite demo state — iframe RPC bridge
+  const LITE_VAULT_URL = 'https://cdn.nostrpass.com/lite-vault/index.html'
+  const LITE_VAULT_ORIGIN = 'https://cdn.nostrpass.com'
+  const RPC_CHANNEL = 'nostrpass-lite-rpc-v1'
+
+  type LiteAuth = { initialized: boolean; isAuthenticated: boolean; isLocked: boolean; identifier?: string; publicKey?: string }
+  const [liteFrameReady, setLiteFrameReady] = useState(false)
+  const [liteAuth, setLiteAuth] = useState<LiteAuth | null>(null)
+  const [liteShowVault, setLiteShowVault] = useState(false)
+  const [liteEvents, setLiteEvents] = useState<Array<{id: string, content: string, pubkey: string, created_at: number}>>([])
+  const [liteSignError, setLiteSignError] = useState('')
+  const vaultFrameRef = useRef<HTMLIFrameElement>(null)
+  const pendingRpcRef = useRef<Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timeout: ReturnType<typeof setTimeout> }>>(new Map())
+  const rpcCounterRef = useRef(0)
 
   // Debug: Log pubkey changes
   useEffect(() => {
@@ -108,6 +125,73 @@ function App() {
       document.head.appendChild(script)
     }
   }, [showDemo, nostrPassReady])
+
+  // Lite vault iframe message bridge
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.origin !== LITE_VAULT_ORIGIN) return
+      const data = event.data as { channel?: string; type?: string; id?: string; ok?: boolean; result?: unknown; error?: string; event?: string; auth?: LiteAuth }
+      if (!data || data.channel !== RPC_CHANNEL) return
+
+      if (data.type === 'response' && data.id) {
+        const pending = pendingRpcRef.current.get(data.id)
+        if (pending) {
+          pendingRpcRef.current.delete(data.id)
+          clearTimeout(pending.timeout)
+          if (data.ok) pending.resolve(data.result)
+          else pending.reject(new Error(data.error ?? 'RPC error'))
+        }
+      } else if (data.type === 'event') {
+        if (data.event === 'READY' || data.event === 'AUTH_STATE') {
+          setLiteFrameReady(true)
+          if (data.auth) {
+            setLiteAuth(data.auth)
+            if (data.auth.isAuthenticated && !data.auth.isLocked) {
+              setLiteShowVault(false)
+            }
+          }
+        } else if (data.event === 'NEEDS_INTERACTION') {
+          if (data.auth) setLiteAuth(data.auth)
+          setLiteShowVault(true)
+        } else if (data.event === 'CLOSE') {
+          setLiteShowVault(false)
+        }
+      }
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [])
+
+  const sendRpc = useCallback((method: string, params?: Record<string, unknown>): Promise<unknown> => {
+    const frame = vaultFrameRef.current
+    if (!frame?.contentWindow) return Promise.reject(new Error('Vault frame not ready'))
+    const id = `rpc-${Date.now()}-${++rpcCounterRef.current}`
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pendingRpcRef.current.delete(id)
+        reject(new Error(`RPC timeout: ${method}`))
+      }, 15000)
+      pendingRpcRef.current.set(id, { resolve, reject, timeout })
+      frame.contentWindow!.postMessage({ channel: RPC_CHANNEL, type: 'request', id, method, params }, LITE_VAULT_ORIGIN)
+    })
+  }, [])
+
+  const handleLiteLogout = useCallback(async () => {
+    await sendRpc('LOGOUT')
+    setLiteAuth(null)
+    setLiteEvents([])
+  }, [sendRpc])
+
+  const handleLiteSign = useCallback(async (content: string) => {
+    setLiteSignError('')
+    try {
+      const event = { kind: 1, created_at: Math.floor(Date.now() / 1000), tags: [['t', 'nostrpass-lite-demo']], content }
+      const signed = await sendRpc('SIGN_EVENT', { event }) as { id: string; pubkey: string; created_at: number }
+      setLiteEvents(prev => [{ id: signed.id, content, pubkey: signed.pubkey, created_at: signed.created_at }, ...prev])
+    } catch (err: any) {
+      setLiteSignError(err?.message ?? 'Signing failed')
+    }
+  }, [sendRpc])
 
   const handleReaction = async (content: string) => {
     if (!pubkey) {
@@ -206,6 +290,78 @@ function App() {
                 <span>Demo</span>
                 <span>&gt;&gt;</span>
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Two Products — Full & Lite */}
+      <div className="border-t border-gray-100 bg-white py-10 px-6">
+        <div className="max-w-5xl mx-auto">
+          <p className="text-center text-sm text-gray-500 font-medium uppercase tracking-widest mb-8">Choose your integration</p>
+          <div className="grid md:grid-cols-2 gap-5">
+            {/* NostrPass Full */}
+            <div className="rounded-2xl border-2 border-gray-200 p-6 hover:border-black hover:shadow-lg transition-all group flex flex-col">
+              <div className="flex items-center gap-3 mb-3">
+                <img src="/logo.svg" alt="NostrPass" className="w-8 h-8" />
+                <div>
+                  <h3 className="font-bold text-lg leading-tight">NostrPass</h3>
+                  <span className="text-xs text-gray-500">Full — Cloud-synced vault</span>
+                </div>
+              </div>
+              <p className="text-gray-600 text-sm flex-1 mb-4">
+                Managed auth with Google Sign-In, cross-device sync, and a polished embedded vault UI. Best for apps that want a complete auth experience out of the box.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCode(true)}
+                  className="flex-1 px-4 py-2 text-sm bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+                >
+                  Docs
+                </button>
+                <button
+                  onClick={() => setShowDemo(true)}
+                  className="flex-1 px-4 py-2 text-sm border-2 border-gray-200 text-gray-700 rounded-lg hover:border-black transition-colors font-medium"
+                >
+                  Try Demo
+                </button>
+              </div>
+            </div>
+
+            {/* NostrPass Lite */}
+            <div className="rounded-2xl border-2 border-green-200 bg-gradient-to-br from-gray-900 to-gray-800 p-6 hover:border-green-400 hover:shadow-lg transition-all group flex flex-col">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 bg-green-900 border border-green-700 rounded-lg flex items-center justify-center">
+                  <span className="text-green-400 text-sm font-bold">L</span>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-lg leading-tight text-white">NostrPass Lite</h3>
+                    <span className="text-xs bg-green-900 text-green-400 border border-green-700 px-2 py-0.5 rounded-full">New</span>
+                  </div>
+                  <span className="text-xs text-gray-400">Lightweight — Keys in your browser</span>
+                </div>
+              </div>
+              <p className="text-gray-400 text-sm flex-1 mb-4">
+                No cloud. No backend. Keys live in an origin-isolated iframe on <code className="text-green-300 text-xs">cdn.nostrpass.com</code> — inaccessible to your page's JS. Syncs via Nostr relays. One script tag.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowLiteCode(true)}
+                  className="flex-1 px-4 py-2 text-sm bg-gray-700 text-white border border-gray-600 rounded-lg hover:bg-gray-600 transition-colors font-medium"
+                >
+                  Docs
+                </button>
+                <button
+                  onClick={() => {
+                    document.getElementById('nostrpass-lite')?.scrollIntoView({ behavior: 'smooth' })
+                    setTimeout(() => setShowLiteDemo(true), 600)
+                  }}
+                  className="flex-1 px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors font-medium"
+                >
+                  Try Lite Demo
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -767,6 +923,181 @@ function App() {
               className="px-8 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
             >
               View Full Documentation
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* NostrPass Lite Section */}
+      <div id="nostrpass-lite" className="bg-gray-900 py-16 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-full px-4 py-1.5 mb-6">
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+              <span className="text-green-400 text-sm font-medium">New</span>
+            </div>
+            <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight text-white">NostrPass Lite</h2>
+            <p className="text-gray-400 max-w-2xl mx-auto">
+              No cloud vault. No iframe. Just a lightweight script that stores encrypted keys in the browser
+              and syncs via Nostr relays — the self-sovereign option.
+            </p>
+          </div>
+
+          {/* Comparison */}
+          <div className="grid md:grid-cols-2 gap-6 mb-12">
+            <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
+                  <img src="/logo.svg" alt="NostrPass" className="w-5 h-5" />
+                </div>
+                <h3 className="text-white font-bold text-lg">NostrPass</h3>
+                <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">Full</span>
+              </div>
+              <ul className="space-y-2 text-sm text-gray-400">
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> Cloud-synced encrypted vault</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> Google Sign-In support</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> Cross-device sync out of the box</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> iframe-isolated key operations</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> NIP-07 compatible</li>
+              </ul>
+              <p className="text-xs text-gray-500 mt-4">Best for apps that want a polished, managed auth experience</p>
+            </div>
+
+            <div className="bg-gray-800 border border-green-800 rounded-xl p-6 relative">
+              <div className="absolute top-4 right-4 text-xs bg-green-900 text-green-400 border border-green-700 px-2 py-0.5 rounded-full">Lightweight</div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 bg-green-900 border border-green-700 rounded-lg flex items-center justify-center">
+                  <span className="text-green-400 text-xs font-bold">L</span>
+                </div>
+                <h3 className="text-white font-bold text-lg">NostrPass Lite</h3>
+              </div>
+              <ul className="space-y-2 text-sm text-gray-400">
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> Keys isolated in <code className="text-green-300 text-xs">cdn.nostrpass.com</code> origin</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> Syncs via Nostr relays — no server</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> Single lightweight CDN script</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> NIP-07 compatible window.nostr</li>
+                <li className="flex items-center gap-2"><span className="text-green-400">✓</span> Full TypeScript support</li>
+              </ul>
+              <p className="text-xs text-gray-500 mt-4">Best for self-sovereign apps that want no third-party dependency</p>
+            </div>
+          </div>
+
+          {/* Code Example */}
+          <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mb-8">
+            <div className="flex items-center justify-between px-6 pt-4 pb-2 border-b border-gray-700">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                <span className="text-gray-400 text-sm ml-2">index.html</span>
+              </div>
+              <button
+                onClick={() => {
+                  const code = `<script src="https://cdn.nostrpass.com/lite-embassy.js"></script>
+<script>
+  // Initialize — async, returns the embassy instance
+  const embassy = await window.initNostrPassLite({
+    appName: 'My App',
+    relays: ['wss://relay.damus.io', 'wss://nos.lol'],
+  });
+
+  // Enroll a new user (identifier + password + PIN)
+  await embassy.enrollWithPassword({
+    identifier: 'alice',
+    authSecret: 'my-password',
+    pin: '123456',
+  });
+
+  // Or login an existing user
+  await embassy.loginWithPassword({ identifier: 'alice', authSecret: 'my-password' });
+
+  // Now use the standard NIP-07 window.nostr API
+  const pubkey = await window.nostr.getPublicKey();
+  const signed = await window.nostr.signEvent({ kind: 1, content: 'gm', tags: [], created_at: Date.now() / 1000 | 0 });
+</script>`;
+                  navigator.clipboard.writeText(code)
+                  const btn = document.getElementById('lite-copy-btn')
+                  if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy' }, 2000) }
+                }}
+                id="lite-copy-btn"
+                className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
+              >
+                Copy
+              </button>
+            </div>
+            <pre className="text-xs sm:text-sm px-6 py-4 overflow-x-auto">
+              <code className="text-blue-300">{`<script `}</code>
+              <code className="text-yellow-300">src</code>
+              <code className="text-white">=</code>
+              <code className="text-green-300">"https://cdn.nostrpass.com/lite-embassy.js"</code>
+              <code className="text-blue-300">{`></script>`}</code>
+              {'\n'}
+              <code className="text-blue-300">{`<script>`}</code>
+              {'\n'}
+              <code className="text-gray-500">{'  // Initialize — async, returns the embassy instance'}</code>
+              {'\n'}
+              <code className="text-purple-300">{'  const '}</code>
+              <code className="text-white">embassy = </code>
+              <code className="text-purple-300">await </code>
+              <code className="text-yellow-300">window</code>
+              <code className="text-white">.initNostrPassLite({'({'}</code>
+              {'\n'}
+              <code className="text-cyan-300">{'    appName'}</code>
+              <code className="text-white">: </code>
+              <code className="text-green-300">'My App'</code>
+              <code className="text-white">,</code>
+              {'\n'}
+              <code className="text-cyan-300">{'    relays'}</code>
+              <code className="text-white">{`: ['wss://relay.damus.io', 'wss://nos.lol'],`}</code>
+              {'\n'}
+              <code className="text-white">{'  });'}</code>
+              {'\n\n'}
+              <code className="text-gray-500">{'  // Enroll a new user'}</code>
+              {'\n'}
+              <code className="text-purple-300">{'  await '}</code>
+              <code className="text-white">embassy.enrollWithPassword({'({'}</code>
+              {'\n'}
+              <code className="text-cyan-300">{'    identifier'}</code>
+              <code className="text-white">: </code>
+              <code className="text-green-300">'alice'</code>
+              <code className="text-white">, </code>
+              <code className="text-cyan-300">authSecret</code>
+              <code className="text-white">: </code>
+              <code className="text-green-300">'my-password'</code>
+              <code className="text-white">, </code>
+              <code className="text-cyan-300">pin</code>
+              <code className="text-white">: </code>
+              <code className="text-green-300">'123456'</code>
+              {'\n'}
+              <code className="text-white">{'  });'}</code>
+              {'\n\n'}
+              <code className="text-gray-500">{'  // Standard NIP-07 window.nostr API'}</code>
+              {'\n'}
+              <code className="text-purple-300">{'  const '}</code>
+              <code className="text-white">pubkey = </code>
+              <code className="text-purple-300">await </code>
+              <code className="text-yellow-300">window.nostr</code>
+              <code className="text-white">.getPublicKey();</code>
+              {'\n'}
+              <code className="text-blue-300">{`</script>`}</code>
+            </pre>
+          </div>
+
+          {/* CTA Buttons */}
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={() => setShowLiteCode(true)}
+              className="px-6 py-3 bg-gray-800 text-white border border-gray-600 rounded-lg hover:bg-gray-700 hover:border-gray-400 transition-colors font-medium flex items-center gap-2"
+            >
+              <span>&lt;&lt;</span>
+              <span>Lite Docs</span>
+            </button>
+            <button
+              onClick={() => setShowLiteDemo(true)}
+              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors font-medium flex items-center gap-2"
+            >
+              <span>Try Lite Demo</span>
+              <span>&gt;&gt;</span>
             </button>
           </div>
         </div>
@@ -1405,6 +1736,314 @@ const legacyDecrypted = await nostr.nip04.decrypt(senderPubkey, legacyEncrypted)
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Lite Code Panel - Slides from left */}
+      <div
+        className={`fixed inset-0 bg-white z-50 transform transition-transform duration-500 ease-in-out ${
+          showLiteCode ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="h-full overflow-y-auto">
+          <div className="max-w-4xl mx-auto p-8">
+            <div className="flex items-center justify-between mb-8">
+              <button
+                onClick={() => setShowLiteCode(false)}
+                className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
+              >
+                &lt;&lt; Back
+              </button>
+              <span className="text-xs bg-green-100 text-green-800 border border-green-200 px-3 py-1 rounded-full font-medium">NostrPass Lite Docs</span>
+            </div>
+
+            <h2 className="text-2xl font-bold mb-2">NostrPass Lite</h2>
+            <p className="text-gray-600 mb-8">A lightweight, no-server Nostr signer — keys secured in an origin-isolated iframe, synced via relays.</p>
+
+            <h3 className="text-xl font-semibold mb-4">Installation</h3>
+            <div className="bg-gray-900 text-white rounded-lg px-6 py-4 mb-6 overflow-x-auto">
+              <pre className="text-sm"><code>{`<!-- CDN (recommended) -->
+<script src="https://cdn.nostrpass.com/lite-embassy.js"></script>
+
+<!-- npm -->
+npm install @nostrpass/lite-embassy`}</code></pre>
+            </div>
+
+            <h3 className="text-xl font-semibold mb-4">Quick Start</h3>
+            <div className="bg-gray-900 text-white rounded-lg px-6 py-4 mb-6 overflow-x-auto">
+              <pre className="text-[0.72rem] md:text-sm"><code>{`// 1. Initialize (auto-installs window.nostr)
+const embassy = await window.initNostrPassLite({
+  appName: 'My App',
+  relays: ['wss://relay.damus.io', 'wss://nos.lol'],
+});
+
+// 2. Enroll a new user
+await embassy.enrollWithPassword({
+  identifier: 'alice',
+  authSecret: 'strong-password',
+  pin: '123456',          // PIN to lock/unlock without re-entering password
+});
+
+// 3. Or login an existing user
+const auth = await embassy.loginWithPassword({
+  identifier: 'alice',
+  authSecret: 'strong-password',
+});
+
+// If vault is locked (e.g. page refresh), unlock with PIN
+if (auth.isLocked) {
+  await embassy.unlock({ pin: '123456' });
+}
+
+// 4. Use the standard NIP-07 window.nostr API
+const pubkey = await window.nostr.getPublicKey();
+const event = { kind: 1, content: 'gm', tags: [], created_at: Date.now() / 1000 | 0 };
+const signed = await window.nostr.signEvent(event);
+
+// NIP-04 / NIP-44 encryption also available
+const encrypted = await window.nostr.nip44.encrypt(recipientPubkey, 'secret message');`}</code></pre>
+            </div>
+
+            <h3 className="text-xl font-semibold mb-4">Configuration</h3>
+            <div className="space-y-3 mb-8">
+              {[
+                { name: 'appName', type: 'string', desc: 'Your app name, shown in permission prompts' },
+                { name: 'relays', type: 'string[]', desc: 'Nostr relay URLs for key sync. Defaults to damus, nos.lol, nostr.band' },
+                { name: 'namespace', type: 'string', desc: 'Storage namespace for key isolation. Default: nostrpass-lite' },
+                { name: 'environment', type: 'string', desc: "Environment tag: 'production' | 'development' | 'staging'" },
+                { name: 'storagePrefix', type: 'string', desc: 'localStorage key prefix. Default: nostrpass-lite-embassy' },
+                { name: 'debug', type: 'boolean', desc: 'Enable verbose console logging. Default: false' },
+                { name: 'installProviderOnInit', type: 'boolean', desc: 'Auto-install window.nostr on init. Default: true' },
+                { name: 'overrideExistingProvider', type: 'boolean', desc: 'Override existing window.nostr (e.g. browser extension). Default: false' },
+                { name: 'rememberByDefault', type: 'boolean', desc: 'Keep session across page loads by default. Default: true' },
+                { name: 'onStatusChange', type: 'function', desc: 'Callback fired on auth state changes (auth_required, signed-in, etc.)' },
+              ].map(({ name, type, desc }) => (
+                <div key={name} className="border-l-4 border-green-500 pl-4 py-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <code className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded">{name}</code>
+                    <span className="text-xs text-gray-400">{type}</span>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-1">{desc}</p>
+                </div>
+              ))}
+            </div>
+
+            <h3 className="text-xl font-semibold mb-4">API Methods</h3>
+            <div className="space-y-3 mb-8">
+              {[
+                { sig: 'enrollWithPassword({ identifier, authSecret, pin })', desc: 'Create a new identity. Generates a Nostr keypair, encrypts with password, locks with PIN.' },
+                { sig: 'loginWithPassword({ identifier, authSecret })', desc: 'Authenticate an existing identity. Returns auth state — may be locked.' },
+                { sig: 'unlock({ pin })', desc: 'Unlock a locked session with PIN. Required after page load if vault is locked.' },
+                { sig: 'importKey({ format, value, identifier, authSecret, pin })', desc: 'Import an existing nsec or hex private key.' },
+                { sig: 'logout()', desc: 'Sign out and clear the active session.' },
+                { sig: 'getAuthState()', desc: 'Synchronously returns { isAuthenticated, isLocked, identifier, publicKey }.' },
+                { sig: 'installNostrProvider({ overrideExisting })', desc: 'Manually install window.nostr provider.' },
+                { sig: 'createNostrPassLiteButton(config)', desc: 'Create a styled login button that reflects auth state.' },
+              ].map(({ sig, desc }) => (
+                <div key={sig} className="border-l-4 border-gray-300 pl-4">
+                  <code className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded break-all">{sig}</code>
+                  <p className="text-sm text-gray-600 mt-1">{desc}</p>
+                </div>
+              ))}
+            </div>
+
+            <h3 className="text-xl font-semibold mb-4">Status Events</h3>
+            <p className="text-gray-600 text-sm mb-4">Listen to the <code className="bg-gray-100 px-1 rounded">nostrpass-lite:status</code> window event to react to auth state changes:</p>
+            <div className="bg-gray-900 text-white rounded-lg px-6 py-4 mb-8 overflow-x-auto">
+              <pre className="text-[0.72rem] md:text-sm"><code>{`window.addEventListener('nostrpass-lite:status', (e) => {
+  const { kind, auth } = e.detail;
+  // kind: 'ready' | 'auth_required' | 'pin_required' | 'processing' | 'success' | 'error'
+  if (kind === 'auth_required') showLoginModal();
+  if (kind === 'pin_required') showPinModal();
+  if (kind === 'ready' && auth.isAuthenticated) showDashboard(auth.publicKey);
+});`}</code></pre>
+            </div>
+
+            <h3 className="text-xl font-semibold mb-4">Login Button</h3>
+            <div className="bg-gray-900 text-white rounded-lg px-6 py-4 mb-8 overflow-x-auto">
+              <pre className="text-[0.72rem] md:text-sm"><code>{`const embassy = await window.initNostrPassLite({ appName: 'My App' });
+
+const btn = embassy.createNostrPassLiteButton({
+  appendTo: '#login-container',   // CSS selector or HTMLElement
+  labelSignedOut: 'Use NostrPass Lite',
+  labelLocked: 'Unlock',
+  labelSignedIn: 'Connected',
+  onClick: (embassy, auth) => {
+    if (!auth.isAuthenticated) showSignupModal();
+    else if (auth.isLocked) showPinModal();
+    else embassy.logout();
+  },
+});`}</code></pre>
+            </div>
+
+            <div className="text-center mt-8">
+              <button
+                onClick={() => { setShowLiteCode(false); setShowLiteDemo(true) }}
+                className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors font-medium"
+              >
+                Try Lite Demo →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Lite Demo Panel - Slides from right */}
+      <div
+        className={`fixed inset-0 bg-white z-50 transform transition-transform duration-500 ease-in-out ${
+          showLiteDemo ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {/* Single vault iframe — always mounted while demo is open, shown full-screen when auth is needed */}
+        {showLiteDemo && (
+          <iframe
+            ref={vaultFrameRef}
+            src={`${LITE_VAULT_URL}?parentOrigin=${encodeURIComponent(window.location.origin)}`}
+            title="NostrPass Lite Vault"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            style={liteShowVault
+              ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: '425px', height: '100dvh', zIndex: 60, border: 'none' }
+              : { position: 'fixed', width: 0, height: 0, border: 'none', visibility: 'hidden' }
+            }
+          />
+        )}
+
+        <div className="h-full overflow-y-auto">
+          <div className="max-w-4xl mx-auto p-8">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold">NostrPass Lite Demo</h2>
+                <p className="text-gray-500 text-sm mt-1">Secured by the lite-vault iframe — keys never touch this page</p>
+              </div>
+              <button
+                onClick={() => setShowLiteDemo(false)}
+                className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
+              >
+                Back &gt;&gt;
+              </button>
+            </div>
+
+            {/* Loading state */}
+            {!liteFrameReady && (
+              <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200 mb-6">
+                <div className="w-4 h-4 border-2 border-gray-400 border-t-black rounded-full animate-spin"></div>
+                <span className="text-gray-600 text-sm">Connecting to lite-vault...</span>
+              </div>
+            )}
+
+            {/* How it works banner */}
+            {liteFrameReady && (
+              <div className="bg-gray-900 text-white rounded-xl p-4 mb-6 flex items-start gap-3">
+                <span className="text-green-400 text-lg mt-0.5">🔒</span>
+                <div>
+                  <p className="text-sm font-semibold text-white mb-0.5">Origin-isolated security</p>
+                  <p className="text-xs text-gray-400">Login and key operations happen inside a <code className="text-green-400">cdn.nostrpass.com</code> iframe. This page never sees your password or private key — only signed events come back via <code className="text-green-400">postMessage</code>.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Not authenticated */}
+            {liteFrameReady && !liteAuth?.isAuthenticated && (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">🗝️</span>
+                </div>
+                <h3 className="text-xl font-bold mb-2">No identity yet</h3>
+                <p className="text-gray-500 text-sm mb-6 max-w-xs mx-auto">Sign in or create an account inside the secure vault. Your credentials never leave the iframe.</p>
+                <button
+                  onClick={() => setLiteShowVault(true)}
+                  className="px-8 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+                >
+                  Open Vault to Sign In
+                </button>
+              </div>
+            )}
+
+            {/* Locked */}
+            {liteFrameReady && liteAuth?.isAuthenticated && liteAuth.isLocked && (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-yellow-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">🔒</span>
+                </div>
+                <h3 className="text-xl font-bold mb-2">Vault Locked</h3>
+                <p className="text-gray-500 text-sm mb-6">Enter your PIN inside the vault to unlock</p>
+                <button
+                  onClick={() => setLiteShowVault(true)}
+                  className="px-8 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+                >
+                  Unlock Vault
+                </button>
+              </div>
+            )}
+
+            {/* Signed in */}
+            {liteFrameReady && liteAuth?.isAuthenticated && !liteAuth.isLocked && (
+              <div>
+                <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4 mb-6 flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                      <span className="text-sm font-semibold text-green-900">
+                        Signed in{liteAuth.identifier ? ` as ${liteAuth.identifier}` : ''}
+                      </span>
+                    </div>
+                    {liteAuth.publicKey && (
+                      <p className="text-xs text-green-700 font-mono break-all">{liteAuth.publicKey.slice(0, 32)}...</p>
+                    )}
+                    <p className="text-xs text-green-600 mt-1">Keys secured in lite-vault iframe · <code>cdn.nostrpass.com</code> origin</p>
+                  </div>
+                  <button onClick={handleLiteLogout} className="text-xs text-gray-500 hover:text-black border border-gray-300 rounded px-2 py-1 shrink-0">Sign out</button>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Sign a Message</h3>
+                    <p className="text-gray-600 text-sm mb-3">Each click sends a <code className="bg-gray-100 px-1 rounded text-xs">SIGN_EVENT</code> RPC to the vault iframe and gets back a signed event</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['🚀 Nostr is the future!', '⚡ NostrPass Lite works!', '🔐 Self-sovereign keys', '✨ No cloud needed', '🌿 Local-first identity', '💜 Built different'].map(msg => (
+                        <button
+                          key={msg}
+                          onClick={() => handleLiteSign(msg)}
+                          className="px-3 py-2 text-xs bg-white border-2 border-gray-200 rounded-lg hover:border-black hover:bg-gray-50 transition-colors text-left"
+                        >
+                          {msg}
+                        </button>
+                      ))}
+                    </div>
+                    {liteSignError && <p className="text-red-500 text-sm mt-3">{liteSignError}</p>}
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Signed Events</h3>
+                    <div className="h-64 overflow-y-auto border-2 border-gray-200 rounded-lg p-3 bg-gray-50">
+                      {liteEvents.length === 0 ? (
+                        <p className="text-gray-400 text-sm text-center mt-8">No events yet — sign one!</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {liteEvents.map(ev => (
+                            <div key={ev.id} className="bg-white border border-gray-200 rounded-lg p-3">
+                              <p className="text-sm mb-1">{ev.content}</p>
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-400">{new Date(ev.created_at * 1000).toLocaleTimeString()}</span>
+                                <a
+                                  href={`https://njump.me/${ev.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-0.5"
+                                >
+                                  View
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

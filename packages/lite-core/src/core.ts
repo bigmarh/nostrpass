@@ -4,6 +4,7 @@ import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { encrypt as nip04Encrypt, decrypt as nip04Decrypt } from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
 import type {
+  CryptoDelegate,
   KeyValueStore,
   LiteAuthState,
   LiteEnrollInput,
@@ -63,6 +64,8 @@ interface LiteCoreOptions {
   allowOffline?: boolean;
   minRelayAcks?: number;
   now?: () => number;
+  /** Optional delegate that performs private-key operations in an isolated context (e.g. a Web Worker). */
+  cryptoDelegate?: CryptoDelegate;
 }
 
 interface LiteSession {
@@ -86,6 +89,7 @@ export class LiteCore {
   private readonly allowOffline: boolean;
   private readonly minRelayAcks: number;
   private readonly now: () => number;
+  private readonly cryptoDelegate?: CryptoDelegate;
 
   private session: LiteSession | null = null;
   private authState: LiteAuthState = {
@@ -113,6 +117,7 @@ export class LiteCore {
       Math.floor(options.minRelayAcks ?? 1)
     );
     this.now = options.now ?? (() => Date.now());
+    this.cryptoDelegate = options.cryptoDelegate;
   }
 
   async initialize(): Promise<LiteAuthState> {
@@ -244,16 +249,31 @@ export class LiteCore {
       storagePublicKey: loginPayload.storagePublicKey,
     });
 
-    const vaultEvent =
-      (await this.relayClient.getLatest({
-        kinds: [KIND],
-        authors: [loginPayload.storagePublicKey],
-        dTags: [loginPayload.vaultDTag],
-        limit: 20,
-      })) ??
-      (await this.storage.get<{ content: string; createdAt: number; pubkey: string }>(
-        this.vaultCacheKey(loginPayload.publicKey)
-      ));
+    // Cache-first vault fetch: return immediately if cached, refresh in background.
+    const cachedVault = await this.storage.get<{ content: string; createdAt: number; pubkey: string }>(
+      this.vaultCacheKey(loginPayload.publicKey)
+    );
+    const vaultFetchFilter = {
+      kinds: [KIND],
+      authors: [loginPayload.storagePublicKey],
+      dTags: [loginPayload.vaultDTag],
+      limit: 20,
+    };
+    const vaultEvent = cachedVault
+      ? cachedVault
+      : await this.relayClient.getLatest(vaultFetchFilter);
+    if (cachedVault) {
+      // Background refresh
+      this.relayClient
+        .getLatest(vaultFetchFilter)
+        .then((fresh) => {
+          if (fresh)
+            this.storage
+              .set(this.vaultCacheKey(loginPayload.publicKey), fresh)
+              .catch(() => {});
+        })
+        .catch(() => {});
+    }
 
     if (!vaultEvent) {
       this.logStep('login:missingVaultRecord', {
@@ -361,23 +381,43 @@ export class LiteCore {
     }
 
     // ── Common unlock path ────────────────────────────────────────────────────
-    try {
-      const privateKeyHex = decryptString(
-        this.session.vaultPayload.privateKeyEncrypted,
-        input.pin
-      );
-      const derived = derivePublicKey(privateKeyHex);
-      if (derived !== this.session.vaultPayload.publicKey) {
-        this.logStep('unlock:pubkeyMismatch', {
-          expected: this.session.vaultPayload.publicKey,
-          got: derived,
-        });
-        return this.errorState('PIN unlock validation failed', 'INVALID_INPUT');
+    if (this.cryptoDelegate) {
+      // Delegate (e.g. Web Worker): key is decrypted inside the worker — never touches main thread.
+      try {
+        const { publicKey } = await this.cryptoDelegate.loadKey(
+          this.session.vaultPayload.privateKeyEncrypted,
+          input.pin
+        );
+        if (publicKey !== this.session.vaultPayload.publicKey) {
+          this.logStep('unlock:pubkeyMismatch', {
+            expected: this.session.vaultPayload.publicKey,
+            got: publicKey,
+          });
+          return this.errorState('PIN unlock validation failed', 'INVALID_INPUT');
+        }
+      } catch {
+        this.logStep('unlock:decryptFailed');
+        return this.errorState('Invalid PIN', 'INVALID_INPUT');
       }
-      this.session.unlockedPrivateKey = privateKeyHex;
-    } catch {
-      this.logStep('unlock:decryptFailed');
-      return this.errorState('Invalid PIN', 'INVALID_INPUT');
+    } else {
+      try {
+        const privateKeyHex = decryptString(
+          this.session.vaultPayload.privateKeyEncrypted,
+          input.pin
+        );
+        const derived = derivePublicKey(privateKeyHex);
+        if (derived !== this.session.vaultPayload.publicKey) {
+          this.logStep('unlock:pubkeyMismatch', {
+            expected: this.session.vaultPayload.publicKey,
+            got: derived,
+          });
+          return this.errorState('PIN unlock validation failed', 'INVALID_INPUT');
+        }
+        this.session.unlockedPrivateKey = privateKeyHex;
+      } catch {
+        this.logStep('unlock:decryptFailed');
+        return this.errorState('Invalid PIN', 'INVALID_INPUT');
+      }
     }
 
     // Save fresh resume token so next page load can PIN-unlock again
@@ -392,6 +432,7 @@ export class LiteCore {
   }
 
   async lock(): Promise<LiteAuthState> {
+    if (this.cryptoDelegate) await this.cryptoDelegate.clearKey();
     if (this.session) {
       delete this.session!.unlockedPrivateKey;
     }
@@ -405,6 +446,7 @@ export class LiteCore {
   }
 
   async logout(): Promise<LiteAuthState> {
+    if (this.cryptoDelegate) await this.cryptoDelegate.clearKey();
     this.session = null;
     this.pendingPermissionRequests.clear();
     this.sessionPermissionGrants.clear();
@@ -437,7 +479,10 @@ export class LiteCore {
       };
     }
 
-    if (request.operation !== 'getPublicKey' && !this.session!.unlockedPrivateKey) {
+    const isUnlocked = this.cryptoDelegate
+      ? this.cryptoDelegate.isKeyLoaded
+      : Boolean(this.session!.unlockedPrivateKey);
+    if (request.operation !== 'getPublicKey' && !isUnlocked) {
       this.logStep('operation:blocked:locked');
       return {
         success: false,
@@ -691,6 +736,9 @@ export class LiteCore {
       offlineFallback: loginPublishes.length === 0,
     });
 
+    if (this.cryptoDelegate) {
+      await this.cryptoDelegate.loadKeyDirect(privateKeyHex);
+    }
     this.session = {
       authMethod: input.authMethod,
       identifier: input.identifier,
@@ -700,7 +748,7 @@ export class LiteCore {
       vaultSecret,
       storagePrivateKey,
       vaultPayload,
-      unlockedPrivateKey: privateKeyHex,
+      unlockedPrivateKey: this.cryptoDelegate ? undefined : privateKeyHex,
     };
     this.sessionPermissionGrants.clear();
 
@@ -729,23 +777,32 @@ export class LiteCore {
     loginDTag: string
   ): Promise<{ content: string; createdAt: number; pubkey: string } | null> {
     this.logStep('loginRecord:fetch:start', { loginDTag });
+
+    // Cache-first: return immediately if we have a local copy, refresh in background.
+    const cached = await this.storage.get<{ content: string; createdAt: number; pubkey: string }>(
+      this.loginCacheKey(loginDTag)
+    );
+    if (cached) {
+      this.logStep('loginRecord:fetch:cacheHit');
+      // Background refresh — don't block login on this.
+      this.relayClient
+        .getLatest({ kinds: [KIND], dTags: [loginDTag], limit: 20 })
+        .then((fresh) => {
+          if (fresh) this.storage.set(this.loginCacheKey(loginDTag), fresh).catch(() => {});
+        })
+        .catch(() => {});
+      return cached;
+    }
+
+    // No cache — must fetch from relay (first login on this device).
     const fromRelay = await this.relayClient.getLatest({
       kinds: [KIND],
       dTags: [loginDTag],
       limit: 20,
     });
-
-    if (fromRelay) {
-      this.logStep('loginRecord:fetch:relayHit');
-      await this.storage.set(this.loginCacheKey(loginDTag), fromRelay);
-      return fromRelay;
-    }
-
-    const cached = await this.storage.get<{ content: string; createdAt: number; pubkey: string }>(
-      this.loginCacheKey(loginDTag)
-    );
-    this.logStep('loginRecord:fetch:cache', { hit: Boolean(cached) });
-    return cached;
+    this.logStep('loginRecord:fetch:relayHit', { hit: Boolean(fromRelay) });
+    if (fromRelay) await this.storage.set(this.loginCacheKey(loginDTag), fromRelay);
+    return fromRelay;
   }
 
   private async cacheLoginAndVault(
@@ -803,6 +860,26 @@ export class LiteCore {
     request: LiteOperationRequest
   ): Promise<LiteOperationResult<T>> {
     this.assertSession();
+
+    // getPublicKey never needs the private key — always handled locally.
+    if (request.operation === 'getPublicKey') {
+      this.logStep('operation:execute:getPublicKey');
+      return { success: true, data: this.session!.vaultPayload.publicKey as T };
+    }
+
+    // Route all private-key operations through the crypto delegate (e.g. Web Worker) when available.
+    if (this.cryptoDelegate) {
+      try {
+        const data = await this.cryptoDelegate.execute<T>(request.operation, request.payload);
+        return { success: true, data };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Operation failed',
+          errorCode: 'INTERNAL_ERROR',
+        };
+      }
+    }
 
     try {
       switch (request.operation) {
@@ -945,6 +1022,9 @@ export class LiteCore {
   }
 
   private saveSessionSnapshot(): void {
+    // When using a crypto delegate, the private key lives in the worker and must not
+    // be materialised in DOM storage. Skip the snapshot — page refresh will show PIN.
+    if (this.cryptoDelegate) return;
     if (!this.session?.unlockedPrivateKey) return;
     const snap: LiteSessionSnapshot = {
       namespace: this.namespace,
@@ -974,8 +1054,38 @@ export class LiteCore {
       const raw = globalThis.sessionStorage?.getItem(this.sessionSnapshotKey());
       if (!raw) return false;
       const snap = JSON.parse(raw) as LiteSessionSnapshot;
-      if (!snap.unlockedPrivateKey || !snap.publicKey) return false;
+      if (!snap.publicKey) return false;
 
+      if (this.cryptoDelegate) {
+        // In delegate mode we never write snapshots (saveSessionSnapshot returns early).
+        // A snapshot here means it was written before the delegate was added.
+        // Migrate: load the key into the worker and wipe the DOM copy.
+        if (!snap.unlockedPrivateKey) return false;
+        this.cryptoDelegate.loadKeyDirect(snap.unlockedPrivateKey).catch(() => {});
+        this.clearSessionSnapshot(); // Remove the plaintext key from sessionStorage
+        this.session = {
+          authMethod: snap.authMethod,
+          identifier: snap.identifier,
+          authSecret: '',
+          relays: snap.relays,
+          loginPayload: snap.loginPayload,
+          vaultSecret: snap.vaultSecret,
+          storagePrivateKey: snap.storagePrivateKey,
+          vaultPayload: snap.vaultPayload,
+          // unlockedPrivateKey intentionally omitted — key lives in the worker
+        };
+        this.authState = {
+          initialized: true,
+          isAuthenticated: true,
+          isLocked: false,
+          authMethod: snap.authMethod,
+          identifier: snap.identifier,
+          publicKey: snap.publicKey,
+        };
+        return true;
+      }
+
+      if (!snap.unlockedPrivateKey) return false;
       this.session = {
         authMethod: snap.authMethod,
         identifier: snap.identifier,

@@ -1,6 +1,7 @@
 import { createSignal, onMount, Show } from 'solid-js';
 import { LiteCore, BrowserLocalStorageStore, NostrRelayClient } from '@nostrpass/lite-core';
 import type { LiteAuthState } from '@nostrpass/lite-core';
+import { WorkerBridge } from './workerBridge';
 import { createLiteNostrApi } from '@nostrpass/lite-api';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, type Auth } from 'firebase/auth';
@@ -48,6 +49,11 @@ interface LiteGoogleUser {
   displayName: string | null;
 }
 
+// ── Crypto delegate (Web Worker) ──────────────────────────────────────────────
+// The worker holds the raw private key in its own memory. The main thread only
+// ever handles encrypted blobs and operation results — never the plaintext key.
+const cryptoDelegate = new WorkerBridge();
+
 // ── Core (singleton outside component) ────────────────────────────────────────
 const core = new LiteCore({
   storage: new BrowserLocalStorageStore('nostrpass-lite-web'),
@@ -57,6 +63,7 @@ const core = new LiteCore({
   relays,
   allowOffline: false,
   minRelayAcks: MIN_RELAY_ACKS,
+  cryptoDelegate,
 });
 
 // ── URL query params ───────────────────────────────────────────────────────────
@@ -514,10 +521,20 @@ export function App() {
   const showLogin = () => auth().initialized && !auth().isAuthenticated && view() === 'login';
   const showSignup = () => auth().initialized && !auth().isAuthenticated && view() === 'signup';
 
+  // ── Close handler — tells parent to dismiss the vault overlay ─────────────────
+  function handleBackdropClick(): void {
+    if (window.parent !== window) {
+      postRpcMessage({ channel: RPC_CHANNEL, type: 'event', event: 'CLOSE' as RpcEventMessage['event'], auth: core.getAuthState() });
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────────
   return (
-    <div class="min-h-dvh flex items-center justify-center p-4">
-      <div class="w-full bg-white rounded-2xl shadow-2xl overflow-hidden">
+    <div
+      class="min-h-dvh flex items-center justify-center p-4"
+      onClick={handleBackdropClick}
+    >
+      <div class="w-full bg-white rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
 
       {/* Permission screen overlays all others */}
       <Show when={showPermission()}>
