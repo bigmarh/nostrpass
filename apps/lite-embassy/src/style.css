@@ -1,0 +1,354 @@
+:root {
+  font-family: "IBM Plex Sans", "Inter", "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  color: #0f172a;
+  background:
+    radial-gradient(circle at 0% 0%, #dbeafe 0%, transparent 45%),
+    radial-gradient(circle at 100% 20%, #e0f2fe 0%, transparent 40%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+}
+
+#app {
+  width: min(860px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+  position: relative;
+}
+
+main {
+  display: grid;
+  gap: 1rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 1.2rem + 1vw, 2.1rem);
+  letter-spacing: -0.02em;
+}
+
+header p {
+  margin: 0.35rem 0 0;
+  color: #334155;
+}
+
+section,
+pre,
+#status-line {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0.9rem;
+  box-shadow: 0 12px 28px -24px rgba(15, 23, 42, 0.85);
+}
+
+#status-line {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+#status-line {
+  display: flex;
+  align-items: center;
+}
+
+pre {
+  margin: 0;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 0.78rem;
+  min-height: 140px;
+  max-height: 32vh;
+  overflow: auto;
+}
+
+section {
+  display: grid;
+  gap: 0.65rem;
+}
+
+section h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+input,
+textarea,
+button {
+  width: 100%;
+  border-radius: 0.72rem;
+  border: 1px solid #94a3b8;
+  padding: 0.6rem 0.72rem;
+  font: inherit;
+}
+
+textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+button {
+  cursor: pointer;
+  border-color: #1d4ed8;
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  color: #eff6ff;
+  font-weight: 600;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+button[data-connected] {
+  border-color: #15803d;
+  background: linear-gradient(180deg, #16a34a 0%, #15803d 100%);
+}
+
+/* ── NostrPass Button Widget ─────────────────────────────────────────────── */
+.nostr-btn-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.nostr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  background: #18181b;
+  color: #fff;
+  border: 1px solid #3f3f46;
+  border-radius: 0.75rem;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: auto;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.nostr-btn:hover {
+  background: #27272a;
+  border-color: #52525b;
+}
+
+.nostr-btn-idle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nostr-btn-authed {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nostr-btn-avatar {
+  width: 1.625rem;
+  height: 1.625rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+  border: 1.5px solid rgba(255,255,255,0.2);
+}
+
+.nostr-btn-avatar-lg {
+  width: 2.5rem;
+  height: 2.5rem;
+  font-size: 1rem;
+}
+
+.nostr-btn-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nostr-btn-chevron {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+/* Dropdown */
+.nostr-btn-dropdown {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.875rem;
+  box-shadow: 0 8px 30px -6px rgba(0,0,0,0.18);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.nostr-btn-dropdown[hidden] {
+  display: none;
+}
+
+.nostr-btn-dropdown-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  background: #fafafa;
+}
+
+.nostr-btn-dropdown-profile .nostr-btn-avatar {
+  border-color: rgba(0,0,0,0.1);
+}
+
+.nostr-btn-dropdown-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.nostr-btn-dropdown-name {
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: #18181b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nostr-btn-dropdown-pubkey {
+  font-size: 0.7rem;
+  color: #71717a;
+  font-family: "IBM Plex Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nostr-btn-dropdown-divider {
+  height: 1px;
+  background: #e4e4e7;
+}
+
+.nostr-btn-dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: #dc2626;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nostr-btn-dropdown-item:hover {
+  background: #fef2f2;
+}
+
+.nostr-btn-dropdown-item svg {
+  opacity: 0.85;
+  flex-shrink: 0;
+  stroke: #dc2626;
+}
+
+.close-btn {
+  width: auto;
+  border-color: #334155;
+  background: #1e293b;
+}
+
+.row {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vault-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+
+.vault-overlay.open {
+  display: flex;
+}
+
+.vault-close-btn {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s;
+  z-index: 21;
+}
+
+.vault-close-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.vault-shell {
+  width: min(420px, calc(100% - 2rem));
+  height: 100%;
+  max-height: 100dvh;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+}
+
+#vault-frame {
+  width: 100%;
+  flex: 1;
+  border: 0;
+  background: transparent;
+}
+
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}

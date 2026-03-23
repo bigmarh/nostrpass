@@ -1,0 +1,28 @@
+{
+  "name": "@nostrpass/lite-vault",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.0.1",
+    "@noble/hashes": "^1.8.0",
+    "@nostrpass/lite-api": "workspace:*",
+    "@nostrpass/lite-core": "workspace:*",
+    "firebase": "^12.7.0",
+    "nostr-tools": "^2.23.3",
+    "solid-js": "^1.8.11"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.3.3",
+    "vite": "^5.3.3",
+    "vite-plugin-solid": "^2.8.2"
+  }
+}

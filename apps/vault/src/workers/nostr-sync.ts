@@ -198,6 +198,7 @@ export const nostrSync = {
     // Get session from SessionStateManager (atomic auth uses this)
     const sessionManager = getSessionStateManager();
     const session = sessionManager.getAuthState(username);
+    const sessionKeys = session ? sessionManager.getSensitiveKeys(username) : {};
 
     // Use storagePublicKey from session as primary key (it's the IndexedDB keyPath)
     // Fall back to username only if session doesn't have storagePublicKey yet
@@ -211,7 +212,7 @@ export const nostrSync = {
     const env = getEnvironment();
 
     // Require unlocked storage key for decryption
-    const storagePriv = session?.storagePrivateKey;
+    const storagePriv = sessionKeys.storagePrivateKey;
     const storagePub = session?.storagePublicKey || pubkey;
     if (!storagePriv) {
       throw new Error('Storage key not available. Unlock required.');
@@ -488,9 +489,6 @@ export const nostrSync = {
       identitiesCount: vault.identities?.length || 0,
       hasXprivEncrypted: !!vault.xprivEncrypted,
       xprivEncryptedLength: vault.xprivEncrypted?.length,
-      xprivEncryptedPreview: vault.xprivEncrypted?.substring(0, 50),
-      salt: vault.salt,
-      saltLength: vault.salt?.length,
       updatedAt: new Date(vault.updatedAt || Date.now()).toISOString(),
       allVaultKeys: Object.keys(vault)
     });
@@ -542,10 +540,6 @@ export const nostrSync = {
       identities: payload.identities,
       hasXprivEncrypted: !!payload.xprivEncrypted,
       xprivEncryptedLength: payload.xprivEncrypted?.length,
-      xprivEncryptedPreview: payload.xprivEncrypted?.substring(0, 50),
-      salt: payload.salt,
-      saltLength: payload.salt?.length,
-      passwordSalt: payload.passwordSalt,
       allPayloadKeys: Object.keys(payload)
     });
 
@@ -668,63 +662,56 @@ export const nostrSync = {
 
     // Use SessionStateManager to get session (atomic auth uses this)
     const manager = getSessionStateManager();
-    // Sessions are keyed by USERNAME (or Google UID for Google auth), not storagePublicKey
-    // Try multiple lookup strategies:
-    // 1. lookupKey directly (in case it's a username)
-    // 2. vault.username (the display name stored in vault)
-    // 3. Search all sessions for matching storagePublicKey (for Google auth where session key is UID)
-    let session = (manager as any).sessions?.get(lookupKey);
+    // Sessions are keyed by username (or Google UID), so try:
+    // 1. lookupKey directly, 2. vault.username, 3. active sessions scan by storagePublicKey.
+    let session = manager.getAuthState(lookupKey);
     console.log('🔍 [saveVaultToNostr] Session lookup by lookupKey:', lookupKey?.slice(0, 12) + '...', 'found:', !!session);
 
     if (!session && vault.username && vault.username !== lookupKey) {
       console.log('🔍 [saveVaultToNostr] Session not found by storagePublicKey, trying username:', vault.username);
-      session = (manager as any).sessions?.get(vault.username);
+      session = manager.getAuthState(vault.username);
       console.log('🔍 [saveVaultToNostr] Session lookup by username:', vault.username, 'found:', !!session);
     }
 
-    // For Google auth: session is keyed by Google UID, not storagePublicKey or display name
-    // Search through all sessions to find one with matching storagePublicKey
-    if (!session && (manager as any).sessions) {
-      console.log('🔍 [saveVaultToNostr] Searching all sessions for matching storagePublicKey...');
-      for (const [sessionKey, sessionValue] of (manager as any).sessions.entries()) {
-        if (sessionValue?.storagePublicKey === lookupKey || sessionValue?.storagePublicKey === vault.storagePublicKey) {
-          session = sessionValue;
-          console.log('🔍 [saveVaultToNostr] Found session by storagePublicKey match, key:', sessionKey);
+    if (!session) {
+      console.log('🔍 [saveVaultToNostr] Searching active sessions for matching storagePublicKey...');
+      for (const activeUsername of manager.getActiveSessions()) {
+        const candidate = manager.getAuthState(activeUsername);
+        if (candidate?.storagePublicKey === lookupKey || candidate?.storagePublicKey === vault.storagePublicKey) {
+          session = candidate;
+          console.log('🔍 [saveVaultToNostr] Found session by storagePublicKey match');
           break;
         }
       }
     }
 
+    const sensitiveKeys = session ? manager.getSensitiveKeys(session.username) : {};
+
     if (session) {
       console.log('🔍 [saveVaultToNostr] Session state:', {
         isUnlocked: session.isUnlocked,
-        hasStoragePrivateKey: !!session.storagePrivateKey,
-        hasXpriv: !!session.xpriv,
-        username: session.username
+        hasStoragePrivateKey: !!sensitiveKeys.storagePrivateKey,
+        hasXpriv: !!sensitiveKeys.xpriv,
       });
     }
 
     // CRITICAL: Always use the vault's storage public key
     // During account creation, storage keypair is derived at m/44'/1237'/0'/0/8907 (STORAGE_INDEX)
     const pub = vault.storagePublicKey || vault.publicKey; // Prefer storagePublicKey if available
-    let priv = session?.storagePrivateKey;
+    let priv = sensitiveKeys.storagePrivateKey;
 
     // If we don't have the storage private key in session, derive it from xpriv
-    if (!priv && session?.xpriv) {
+    if (!priv && sensitiveKeys.xpriv) {
       console.log('🔑 [saveVaultToNostr] Deriving storage keypair from xpriv with STORAGE_INDEX...');
       // IMPORTANT: Use deriveKeypairFromXpriv with STORAGE_INDEX (8907), NOT deriveStorageKeypairFromXpriv!
       // deriveStorageKeypairFromXpriv uses m/44'/1237'/1'/0/0 (wrong path)
       // Account creation uses m/44'/1237'/0'/0/8907 (correct path)
       const derived = await cryptoPrimitives.deriveKeypairFromXpriv({
-        xpriv: session.xpriv,
+        xpriv: sensitiveKeys.xpriv,
         index: STORAGE_INDEX,
       });
       priv = derived.privateKey;
       const derivedPub = derived.publicKey;
-
-      // Cache in session for next time
-      (session as any).storagePrivateKey = priv;
-      (session as any).storagePublicKey = derivedPub;
 
       // Verify it matches vault.storagePublicKey
       if (derivedPub !== pub) {
@@ -743,7 +730,7 @@ export const nostrSync = {
         sessionFound: !!session,
         sessionUsername: session?.username,
         sessionIsUnlocked: session?.isUnlocked,
-        sessionHasXpriv: !!session?.xpriv,
+        sessionHasXpriv: !!sensitiveKeys.xpriv,
         lookupKey: lookupKey?.slice(0, 12) + '...',
         vaultUsername: vault.username
       });
@@ -972,7 +959,8 @@ export const nostrSync = {
     // Get session for decryption
     const sessionManager = getSessionStateManager();
     const session = sessionManager.getAuthState(username);
-    if (!session?.storagePrivateKey) {
+    const sessionKeys = session ? sessionManager.getSensitiveKeys(username) : {};
+    if (!sessionKeys.storagePrivateKey) {
       throw new Error('Storage key not available. Unlock required.');
     }
 
@@ -980,8 +968,8 @@ export const nostrSync = {
     if (!vault) throw new Error('Vault not found');
 
     const pubkey = vault.storagePublicKey || vault.publicKey;
-    const storagePriv = session.storagePrivateKey;
-    const storagePub = session.storagePublicKey || pubkey;
+    const storagePriv = sessionKeys.storagePrivateKey;
+    const storagePub = session?.storagePublicKey || pubkey;
     const env = getEnvironment();
 
     // Query for vault events
@@ -1074,7 +1062,8 @@ export const nostrSync = {
     // Get session for decryption
     const sessionManager = getSessionStateManager();
     const session = sessionManager.getAuthState(username);
-    if (!session?.storagePrivateKey) {
+    const sessionKeys = session ? sessionManager.getSensitiveKeys(username) : {};
+    if (!sessionKeys.storagePrivateKey) {
       throw new Error('Storage key not available. Unlock required.');
     }
 
@@ -1082,8 +1071,8 @@ export const nostrSync = {
     if (!vault) throw new Error('Vault not found');
 
     const pubkey = vault.storagePublicKey || vault.publicKey;
-    const storagePriv = session.storagePrivateKey;
-    const storagePub = session.storagePublicKey || pubkey;
+    const storagePriv = sessionKeys.storagePrivateKey;
+    const storagePub = session?.storagePublicKey || pubkey;
     const env = getEnvironment();
 
     const relays = params.relays || [

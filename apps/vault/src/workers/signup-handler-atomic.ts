@@ -627,7 +627,8 @@ export async function handleLinkGoogleAccount(params: {
 
     // Get the storage keypair from session
     const storagePublicKey = session.storagePublicKey;
-    const storagePrivateKey = session.storagePrivateKey;
+    const sessionKeys = manager.getSensitiveKeys(username);
+    const storagePrivateKey = sessionKeys.storagePrivateKey;
 
     if (!storagePublicKey || !storagePrivateKey) {
       throw new Error('Storage keypair not available in session');
@@ -668,7 +669,7 @@ export async function handleLinkGoogleAccount(params: {
       throw new Error('passwordSalt is required but undefined - this should never happen');
     }
 
-    console.log('[link-google] Creating LoginObj with passwordSalt:', passwordSalt?.substring(0, 12) + '...');
+    console.log('[link-google] Creating LoginObj with verified password metadata');
 
     const googleLoginObj: LoginObj = {
       storagePublicKey,
@@ -860,7 +861,8 @@ export async function handleUnlinkGoogleAccount(params: {
     console.log('[unlink-google] Publishing tombstone event...');
 
     // Get storage private key from session (needed to sign the tombstone with same key as original)
-    const storagePrivateKey = session.storagePrivateKey;
+    const sessionKeys = manager.getSensitiveKeys(session.username);
+    const storagePrivateKey = sessionKeys.storagePrivateKey;
     if (!storagePrivateKey) {
       throw new Error('Storage private key not available - vault must be unlocked');
     }

@@ -1,0 +1,1 @@
+import{m as f,s as u,d as t,o as x}from"./sha256-dpPTZUxC.js";var b=new TextDecoder("utf-8");new TextEncoder;function y(e,r,c){const o=e instanceof Uint8Array?f(e):e;let[d,i]=c.split("?iv="),n=u.getSharedSecret(o,"02"+r),a=m(n),l=t.decode(i),s=t.decode(d),p=x(a,l).decrypt(s);return b.decode(p)}function m(e){return e.slice(1,33)}export{y as decrypt};

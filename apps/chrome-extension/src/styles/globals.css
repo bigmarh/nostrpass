@@ -1,0 +1,59 @@
+
+@import "tailwindcss";
+
+/* Tailwind v4: enable class-based dark mode */
+@theme {
+  --dark-mode: class;
+}
+
+/* Ensure dark: variant uses the `.dark` class on any ancestor (Tailwind v4) */
+@custom-variant dark (&:where(.dark *));
+
+
+.black-outline {
+    @apply md:border-2 md:border-black;
+}
+
+/* App background: transparent for embedded iframe, solid for standalone */
+html {
+    background-color: transparent;
+}
+
+html,
+body {
+    min-height: 100dvh;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    overflow-x: hidden; /* prevent accidental horizontal scrollbar */
+}
+
+/* Do not center on html/body to avoid width overflow */
+
+#root {
+    width: 100%;
+    min-height: 100dvh; /* ensure root always covers full height */
+    background-color: transparent;
+}
+
+/* Mobile: full width */
+#root {
+    display: block;
+}
+
+/* Full-width app: no max-width constraints on root */
+
+/* Shake animation for wrong PIN */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+  20%, 40%, 60%, 80% { transform: translateX(10px); }
+}
+
+.shake-animation {
+  animation: shake 0.5s ease-in-out;
+}
+
+button{
+cursor: pointer;
+}

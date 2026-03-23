@@ -1,0 +1,15 @@
+@import "tailwindcss";
+@theme { --dark-mode: class; }
+
+html, body, #root {
+  height: 100%;
+  min-height: 100%;
+  background: transparent;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+  20%, 40%, 60%, 80% { transform: translateX(8px); }
+}
+.shake-animation { animation: shake 0.5s ease-in-out; }

@@ -1,0 +1,69 @@
+/**
+ * SharedWorker-compatible version of the crypto worker
+ * This file is built as an IIFE for browser compatibility
+ */
+
+// Import all the handlers and dependencies
+import { createWorkerHost } from '@nostrpass/worker-messenger';
+import { handlers, ensureCryptoReady } from './crypto.handlers';
+
+// Detect if we're in a SharedWorker or regular Worker context
+const isSharedWorker = typeof (globalThis as any).SharedWorkerGlobalScope !== 'undefined' && 
+                       self instanceof (globalThis as any).SharedWorkerGlobalScope;
+
+console.log('[CryptoWorker] Starting as', isSharedWorker ? 'SharedWorker' : 'DedicatedWorker');
+
+// Store ports globally for access by broadcast functions
+(globalThis as any).__SHARED_WORKER_PORTS__ = new Set<MessagePort>();
+
+if (isSharedWorker) {
+  // Initialize a single host; it will attach per-port listeners internally
+  createWorkerHost(handlers as any);
+
+  console.log('[SharedWorker] Ready to accept connections');
+  (self as any).addEventListener('connect', (event: MessageEvent) => {
+    const port = (event as any).ports[0] as MessagePort;
+    (globalThis as any).__SHARED_WORKER_PORTS__.add(port);
+    try { port.start(); } catch {}
+    port.postMessage({ type: 'WORKER_READY' });
+    port.addEventListener('close', () => {
+      (globalThis as any).__SHARED_WORKER_PORTS__.delete(port);
+      console.log('[SharedWorker] Port closed, remaining connections:', (globalThis as any).__SHARED_WORKER_PORTS__.size);
+    });
+    console.log('[SharedWorker] Active connections:', (globalThis as any).__SHARED_WORKER_PORTS__.size);
+  });
+} else{
+  // Regular Worker context - use the global scope directly
+  const host = createWorkerHost(handlers as any);
+  console.log('[DedicatedWorker] Host created and ready');
+  
+  // Send ready message for dedicated worker
+  self.postMessage({ type: 'WORKER_READY' });
+}
+
+// Pre-initialize crypto on startup - CRITICAL for SharedWorker
+let cryptoInitPromise = ensureCryptoReady()
+  .then(() => {
+    console.log('[CryptoWorker] Noble crypto initialized successfully');
+    return true;
+  })
+  .catch((error) => {
+    console.error('[CryptoWorker] Failed to initialize crypto:', error);
+    throw error;
+  });
+
+// Ensure crypto is ready before processing any messages in SharedWorker mode
+if (isSharedWorker) {
+  const originalHandlers = { ...handlers };
+  // Wrap all handlers to ensure crypto is ready first
+  for (const key in handlers) {
+    const originalHandler = (handlers as any)[key];
+    (handlers as any)[key] = async (...args: any[]) => {
+      await cryptoInitPromise; // Wait for crypto to be ready
+      return originalHandler(...args);
+    };
+  }
+}
+
+// Export for type checking (won't be used in IIFE build)
+export type CryptoWorkerMethods = typeof handlers;

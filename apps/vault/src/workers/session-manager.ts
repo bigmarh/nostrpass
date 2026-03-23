@@ -451,6 +451,53 @@ function broadcastVaultUpdate(username: string, type: string, data: any) {
   }
 }
 
+/**
+ * Resolve the effective signing/encryption key for a session identity.
+ * Key material is read from SessionStateManager secure storage, not auth state.
+ */
+async function resolveSessionIdentityKey(params: {
+  manager: any;
+  session: any;
+  username: string;
+  identityIndex: number;
+}): Promise<{ privateKey: string; publicKey?: string }> {
+  const { manager, session, username, identityIndex } = params;
+  const identity = session.vaultData?.identities?.[identityIndex];
+
+  if (identity?.isImported && identity.publicKey) {
+    const byokKey = manager.getBYOKPrivateKey(username, identity.publicKey);
+    if (!byokKey) {
+      throw new Error('BYOK key not available - vault may need to be unlocked again');
+    }
+    return {
+      privateKey: byokKey,
+      publicKey: identity.publicKey
+    };
+  }
+
+  const sensitiveKeys = manager.getSensitiveKeys(username);
+
+  if (identityIndex === 0 && sensitiveKeys.privateKey) {
+    return {
+      privateKey: sensitiveKeys.privateKey,
+      publicKey: identity?.publicKey || crypto.getPublicKey(sensitiveKeys.privateKey)
+    };
+  }
+
+  if (sensitiveKeys.xpriv) {
+    const derived = await cryptoPrimitives.deriveKeypairFromXpriv({
+      xpriv: sensitiveKeys.xpriv,
+      index: identityIndex
+    });
+    return {
+      privateKey: derived.privateKey,
+      publicKey: derived.publicKey
+    };
+  }
+
+  throw new Error('No session key available for operation');
+}
+
 // ============================================================================
 // SESSION MANAGER
 // ============================================================================
@@ -853,34 +900,12 @@ export const sessionManager = {
       }
     }
 
-    // Resolve private key for identity
-    let privateKey: string | undefined = undefined;
-    let publicKey: string | undefined = undefined;
-
-    // Check if this is a BYOK identity - get the identity from vault data
-    const identity = session.vaultData?.identities?.[params.identityIndex];
-    if (identity?.isImported && identity.publicKey) {
-      // BYOK identity - get key from secure storage
-      const secureStorage = manager.getSecureStorage(params.username);
-      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
-      if (byokKey) {
-        privateKey = byokKey;
-        publicKey = identity.publicKey;
-        console.log('[WORKER] Using BYOK key for identity:', identity.nickname || identity.publicKey.slice(0, 8));
-      } else {
-        console.error('[WORKER] BYOK key not found for identity:', identity.publicKey.slice(0, 8));
-        throw new Error('BYOK key not available - vault may need to be unlocked again');
-      }
-    } else if (params.identityIndex === 0 && session.privateKey) {
-      privateKey = session.privateKey;
-      publicKey = crypto.getPublicKey(privateKey);
-    } else if (session.xpriv) {
-      const derived = crypto.deriveKeypairFromXpriv(session.xpriv, params.identityIndex);
-      privateKey = derived.privateKey;
-      publicKey = derived.publicKey;
-    }
-
-    if (!privateKey) throw new Error('No session key available for signing');
+    const { privateKey, publicKey } = await resolveSessionIdentityKey({
+      manager,
+      session,
+      username: params.username,
+      identityIndex: params.identityIndex
+    });
 
     // Prepare event
     const evt = { ...params.event };
@@ -948,28 +973,12 @@ export const sessionManager = {
       }
     }
 
-    let privateKey: string | undefined = undefined;
-
-    // Check if this is a BYOK identity - get the identity from vault data
-    const identity = session.vaultData?.identities?.[params.identityIndex];
-    if (identity?.isImported && identity.publicKey) {
-      // BYOK identity - get key from secure storage
-      const secureStorage = manager.getSecureStorage(params.username);
-      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
-      if (byokKey) {
-        privateKey = byokKey;
-        console.log('[WORKER] Using BYOK key for signMessage:', identity.nickname || identity.publicKey.slice(0, 8));
-      } else {
-        console.error('[WORKER] BYOK key not found for signMessage:', identity.publicKey.slice(0, 8));
-        throw new Error('BYOK key not available - vault may need to be unlocked again');
-      }
-    } else if (params.identityIndex === 0 && session.privateKey) {
-      privateKey = session.privateKey;
-    } else if (session.xpriv) {
-      const derived = crypto.deriveKeypairFromXpriv(session.xpriv, params.identityIndex);
-      privateKey = derived.privateKey;
-    }
-    if (!privateKey) throw new Error('No session key available for signing');
+    const { privateKey } = await resolveSessionIdentityKey({
+      manager,
+      session,
+      username: params.username,
+      identityIndex: params.identityIndex
+    });
 
     const signature = crypto.signMessage(params.message, privateKey);
     return { signature };
@@ -1017,27 +1026,12 @@ export const sessionManager = {
       }
     }
 
-    let privateKey: string | undefined = undefined;
-
-    // Check if this is a BYOK identity - get the identity from vault data
-    const identity = session.vaultData?.identities?.[params.identityIndex];
-    if (identity?.isImported && identity.publicKey) {
-      // BYOK identity - get key from secure storage
-      const secureStorage = manager.getSecureStorage(params.username);
-      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
-      if (byokKey) {
-        privateKey = byokKey;
-        console.log('[WORKER] Using BYOK key for NIP-04 encrypt:', identity.nickname || identity.publicKey.slice(0, 8));
-      } else {
-        throw new Error('BYOK key not available - vault may need to be unlocked again');
-      }
-    } else if (params.identityIndex === 0 && session.privateKey) {
-      privateKey = session.privateKey;
-    } else if (session.xpriv) {
-      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
-      privateKey = derived.privateKey;
-    }
-    if (!privateKey) throw new Error('No session key available for encryption');
+    const { privateKey } = await resolveSessionIdentityKey({
+      manager,
+      session,
+      username: params.username,
+      identityIndex: params.identityIndex
+    });
 
     // Use nostr-tools NIP-04 (spec-compliant)
     return nip04EncryptJS(privateKey, params.recipientPubkey, params.plaintext);
@@ -1085,27 +1079,12 @@ export const sessionManager = {
       }
     }
 
-    let privateKey: string | undefined = undefined;
-
-    // Check if this is a BYOK identity - get the identity from vault data
-    const identity = session.vaultData?.identities?.[params.identityIndex];
-    if (identity?.isImported && identity.publicKey) {
-      // BYOK identity - get key from secure storage
-      const secureStorage = manager.getSecureStorage(params.username);
-      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
-      if (byokKey) {
-        privateKey = byokKey;
-        console.log('[WORKER] Using BYOK key for NIP-04 decrypt:', identity.nickname || identity.publicKey.slice(0, 8));
-      } else {
-        throw new Error('BYOK key not available - vault may need to be unlocked again');
-      }
-    } else if (params.identityIndex === 0 && session.privateKey) {
-      privateKey = session.privateKey;
-    } else if (session.xpriv) {
-      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
-      privateKey = derived.privateKey;
-    }
-    if (!privateKey) throw new Error('No session key available for decryption');
+    const { privateKey } = await resolveSessionIdentityKey({
+      manager,
+      session,
+      username: params.username,
+      identityIndex: params.identityIndex
+    });
 
     // Use nostr-tools NIP-04 (spec-compliant)
     return nip04DecryptJS(privateKey, params.senderPubkey, params.ciphertext);
@@ -1148,27 +1127,12 @@ export const sessionManager = {
       }
     }
 
-    let privateKey: string | undefined = undefined;
-
-    // Check if this is a BYOK identity - get the identity from vault data
-    const identity = session.vaultData?.identities?.[params.identityIndex];
-    if (identity?.isImported && identity.publicKey) {
-      // BYOK identity - get key from secure storage
-      const secureStorage = manager.getSecureStorage(params.username);
-      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
-      if (byokKey) {
-        privateKey = byokKey;
-        console.log('[WORKER] Using BYOK key for NIP-44 encrypt:', identity.nickname || identity.publicKey.slice(0, 8));
-      } else {
-        throw new Error('BYOK key not available - vault may need to be unlocked again');
-      }
-    } else if (params.identityIndex === 0 && session.privateKey) {
-      privateKey = session.privateKey;
-    } else if (session.xpriv) {
-      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
-      privateKey = derived.privateKey;
-    }
-    if (!privateKey) throw new Error('No session key available for encryption');
+    const { privateKey } = await resolveSessionIdentityKey({
+      manager,
+      session,
+      username: params.username,
+      identityIndex: params.identityIndex
+    });
 
     // Use nostr-tools NIP-44 (spec-compliant)
     return nip44EncryptJS(privateKey, params.recipientPubkey, params.plaintext);
@@ -1211,27 +1175,12 @@ export const sessionManager = {
       }
     }
 
-    let privateKey: string | undefined = undefined;
-
-    // Check if this is a BYOK identity - get the identity from vault data
-    const identity = session.vaultData?.identities?.[params.identityIndex];
-    if (identity?.isImported && identity.publicKey) {
-      // BYOK identity - get key from secure storage
-      const secureStorage = manager.getSecureStorage(params.username);
-      const byokKey = secureStorage?.getBYOKKey(identity.publicKey);
-      if (byokKey) {
-        privateKey = byokKey;
-        console.log('[WORKER] Using BYOK key for NIP-44 decrypt:', identity.nickname || identity.publicKey.slice(0, 8));
-      } else {
-        throw new Error('BYOK key not available - vault may need to be unlocked again');
-      }
-    } else if (params.identityIndex === 0 && session.privateKey) {
-      privateKey = session.privateKey;
-    } else if (session.xpriv) {
-      const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv: session.xpriv, index: params.identityIndex });
-      privateKey = derived.privateKey;
-    }
-    if (!privateKey) throw new Error('No session key available for decryption');
+    const { privateKey } = await resolveSessionIdentityKey({
+      manager,
+      session,
+      username: params.username,
+      identityIndex: params.identityIndex
+    });
 
     // Use nostr-tools NIP-44 (spec-compliant)
     return nip44DecryptJS(privateKey, params.senderPubkey, params.ciphertext);
@@ -1245,11 +1194,15 @@ export const sessionManager = {
     const sessionManager = getSessionStateManager();
     const session = sessionManager.getAuthState(params.username);
 
-    if (!session || !session.xpriv) {
+    if (!session || !session.isUnlocked) {
       throw new Error('No xpriv in session - please unlock with PIN first');
     }
 
-    const xpriv = session.xpriv;
+    const keys = sessionManager.getSensitiveKeys(params.username);
+    const xpriv = keys.xpriv;
+    if (!xpriv) {
+      throw new Error('No xpriv in secure session storage - please unlock with PIN first');
+    }
 
     // Use cryptoPrimitives directly (already imported)
     const derived = await cryptoPrimitives.deriveKeypairFromXpriv({ xpriv, index: params.index });
@@ -1296,11 +1249,7 @@ export const sessionManager = {
     }
 
     console.log('[hasKeysInSession] Found unlocked session in SessionStateManager');
-    const result = {
-      hasPrivateKey: !!session.privateKey,
-      hasXpriv: !!session.xpriv,
-      hasStorageKeypair: !!(session.storagePrivateKey && session.storagePublicKey)
-    };
+    const result = manager.hasSensitiveKeys(params.username);
     console.log('[hasKeysInSession] Returning:', result);
     return result;
   },

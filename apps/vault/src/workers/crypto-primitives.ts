@@ -197,7 +197,8 @@ export const cryptoPrimitives = {
   },
 
   /**
-   * Derive a key from password and salt using Argon2id
+   * Derive a key from password and salt.
+   * Current browser implementation uses PBKDF2-SHA256.
    */
   deriveKey: async (params: DeriveKeyParams): Promise<DeriveKeyResult> => {
     const crypto = await ensureCryptoReady();
@@ -216,7 +217,7 @@ export const cryptoPrimitives = {
   },
 
   /**
-   * Encrypt data using Argon2id-based encryption
+   * Encrypt data using PBKDF2-derived AES-256-GCM key material.
    */
   encryptData: async (params: EncryptDataParams): Promise<string> => {
     const crypto = await ensureCryptoReady();
@@ -227,12 +228,12 @@ export const cryptoPrimitives = {
       throw new Error('Either key or password must be provided');
     }
 
-    // Use Argon2id-based encryption for better security
+    // Backed by crypto.noble implementation (PBKDF2 + AES-256-GCM)
     return crypto.encryptDataWithArgon2(params.data, encryptionKey);
   },
 
   /**
-   * Decrypt data using Argon2id-based decryption
+   * Decrypt data using PBKDF2-derived AES-256-GCM key material.
    */
   decryptData: async (params: DecryptDataParams): Promise<string> => {
     const crypto = await ensureCryptoReady();
@@ -243,7 +244,7 @@ export const cryptoPrimitives = {
       throw new Error('Either key or password must be provided');
     }
 
-    // Use Argon2id-based decryption for better security
+    // Backed by crypto.noble implementation (PBKDF2 + AES-256-GCM)
     return crypto.decryptDataWithArgon2(params.encryptedData, decryptionKey);
   },
 

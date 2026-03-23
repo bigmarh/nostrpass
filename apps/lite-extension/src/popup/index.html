@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NostrPass Lite</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>NostrPass Lite</h1>
+      <p id="form-error" class="error-banner" hidden></p>
+
+      <section>
+        <h2>Enroll</h2>
+        <input id="enroll-identifier" placeholder="Identifier" />
+        <input id="enroll-secret" type="password" placeholder="Password / auth secret" />
+        <input id="enroll-pin" type="password" placeholder="PIN" />
+        <button id="enroll-button">Create Lite Vault</button>
+      </section>
+
+      <section>
+        <h2>BYOK</h2>
+        <select id="import-format">
+          <option value="nsec">nsec</option>
+          <option value="hex">hex</option>
+        </select>
+        <textarea id="import-value" placeholder="nsec or 64-char hex key"></textarea>
+        <input id="import-identifier" placeholder="Identifier" />
+        <input id="import-secret" type="password" placeholder="Password / auth secret" />
+        <input id="import-pin" type="password" placeholder="PIN" />
+        <button id="import-button">Import Key</button>
+      </section>
+
+      <section>
+        <h2>Login / Unlock</h2>
+        <input id="login-identifier" placeholder="Identifier" />
+        <input id="login-secret" type="password" placeholder="Password / auth secret" />
+        <button id="login-button">Login</button>
+        <input id="unlock-pin" type="password" placeholder="PIN" />
+        <button id="unlock-button">Unlock</button>
+        <button id="lock-button">Lock</button>
+      </section>
+
+      <section id="permission-section" hidden>
+        <h2>Permission Request</h2>
+        <p id="permission-text"></p>
+        <label><input id="remember-permission" type="checkbox" checked />Remember</label>
+        <div class="permission-actions">
+          <button id="deny-permission">Deny</button>
+          <button id="allow-permission">Allow</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Quick Test</h2>
+        <button id="test-get-pubkey">getPublicKey</button>
+        <textarea id="test-content" placeholder="Event content"></textarea>
+        <button id="test-sign-event">signEvent</button>
+      </section>
+
+      <pre id="status"></pre>
+    </main>
+
+    <script type="module" src="./index.ts"></script>
+  </body>
+</html>

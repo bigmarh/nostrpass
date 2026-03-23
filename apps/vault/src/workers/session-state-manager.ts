@@ -62,8 +62,6 @@ export interface CompleteSessionState {
   // Cached vault data
   vaultData?: VaultData;
 
-  // Internal: Reference to secure key storage (not exposed in interface)
-  _secureKeys?: SecureKeyStorage;
 }
 
 /**
@@ -108,12 +106,52 @@ export class SessionStateManager {
   }
 
   /**
-   * Get current auth state
-   * ONE call returns everything - no piecing together
-   *
-   * Note: Keys are retrieved from SecureKeyStorage and returned as strings
-   * for API compatibility. Callers should use the keys immediately and
-   * not store them in variables longer than necessary.
+   * Return sensitive key material for internal worker operations only.
+   * Never include these fields in auth state responses.
+   */
+  getSensitiveKeys(username: string): {
+    xpriv?: string;
+    privateKey?: string;
+    storagePrivateKey?: string;
+  } {
+    const storage = this.secureKeys.get(username);
+    if (!storage) {
+      return {};
+    }
+    return {
+      xpriv: storage.getXpriv() || undefined,
+      privateKey: storage.getPrivateKey() || undefined,
+      storagePrivateKey: storage.getStoragePrivateKey() || undefined
+    };
+  }
+
+  /**
+   * Return a BYOK private key for internal worker operations only.
+   */
+  getBYOKPrivateKey(username: string, publicKey: string): string | undefined {
+    const storage = this.secureKeys.get(username);
+    return storage?.getBYOKKey(publicKey) || undefined;
+  }
+
+  /**
+   * Internal key presence preflight for unlock/sign/encrypt flows.
+   */
+  hasSensitiveKeys(username: string): {
+    hasPrivateKey: boolean;
+    hasXpriv: boolean;
+    hasStorageKeypair: boolean;
+  } {
+    const keys = this.getSensitiveKeys(username);
+    return {
+      hasPrivateKey: !!keys.privateKey,
+      hasXpriv: !!keys.xpriv,
+      hasStorageKeypair: !!(keys.storagePrivateKey && this.sessions.get(username)?.storagePublicKey)
+    };
+  }
+
+  /**
+   * Get current auth state (non-sensitive fields only).
+   * ONE call returns everything needed for auth UX - no key material.
    */
   getAuthState(username?: string): CompleteSessionState | null {
     const targetUsername = username || this.activeUsername;
@@ -137,15 +175,6 @@ export class SessionStateManager {
         this.activeUsername = null;
       }
       return null;
-    }
-
-    // Retrieve keys from secure storage for the response
-    const secureStorage = this.secureKeys.get(targetUsername);
-    if (secureStorage && session.isUnlocked) {
-      // Populate key fields from secure storage
-      session.xpriv = secureStorage.getXpriv() || undefined;
-      session.privateKey = secureStorage.getPrivateKey() || undefined;
-      session.storagePrivateKey = secureStorage.getStoragePrivateKey() || undefined;
     }
 
     return session;
@@ -201,15 +230,12 @@ export class SessionStateManager {
         throw new Error('Account not found or wrong password');
       }
 
-      // DEBUG: Log the full LoginObj structure
-      console.log('[SessionStateManager] ========== LOGIN OBJ DEBUG ==========');
-      console.log('[SessionStateManager] LoginObj keys:', Object.keys(loginResult.loginObj));
-      console.log('[SessionStateManager] LoginObj.storagePublicKey:', loginResult.loginObj.storagePublicKey);
-      console.log('[SessionStateManager] LoginObj.passwordSalt:', loginResult.loginObj.passwordSalt);
-      console.log('[SessionStateManager] LoginObj.pinSalt exists:', !!loginResult.loginObj.pinSalt);
-      console.log('[SessionStateManager] LoginObj.storageKeypairEncrypted exists:', !!loginResult.loginObj.storageKeypairEncrypted);
-      console.log('[SessionStateManager] Result passwordSalt:', loginResult.passwordSalt);
-      console.log('[SessionStateManager] =====================================');
+      // Avoid logging sensitive login payload fields (salt/key metadata).
+      console.log('[SessionStateManager] LoginObj fetched', {
+        hasStoragePublicKey: !!loginResult.loginObj.storagePublicKey,
+        hasPinSalt: !!loginResult.loginObj.pinSalt,
+        hasStorageKeypairEncrypted: !!loginResult.loginObj.storageKeypairEncrypted
+      });
 
       // Cache the LoginObj for future logins (after successful password verification)
       // Include environment in cache key to handle same username in different namespaces
@@ -484,7 +510,6 @@ export class SessionStateManager {
         index: STORAGE_INDEX
       });
       const storagePrivateKey = storageKeypair.privateKey || storageKeypair.get?.('privateKey');
-      const storagePublicKey = storageKeypair.publicKey || storageKeypair.get?.('publicKey');
 
       console.log('[SessionStateManager] Keypairs derived from xpriv');
 
@@ -527,12 +552,6 @@ export class SessionStateManager {
       session.unlockedAt = now;
       session.expiresAt = now + this.SESSION_TIMEOUT;
       session.vaultData = vaultData;
-      session._secureKeys = secureStorage;
-
-      // Populate key fields for API compatibility (retrieved from secure storage)
-      session.xpriv = secureStorage.getXpriv() || undefined;
-      session.privateKey = secureStorage.getPrivateKey() || undefined;
-      session.storagePrivateKey = secureStorage.getStoragePrivateKey() || undefined;
 
       // SECURITY: Record successful PIN attempt (resets attempt counter)
       recordSuccessfulPinAttempt(params.username);
@@ -622,7 +641,6 @@ export class SessionStateManager {
     session.xpriv = undefined;
     session.privateKey = undefined;
     session.storagePrivateKey = undefined;
-    session._secureKeys = undefined;
     session.unlockedAt = 0;
 
     console.log('[SessionStateManager] Session locked, keys securely wiped');

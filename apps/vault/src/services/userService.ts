@@ -11,17 +11,8 @@ const cryptoWorker = getCryptoWorker() as any;
 export async function createUser(): Promise<UserMasterKey> {
   // Generate a new master key (xpriv)
   const result = await cryptoWorker.generateXpriv();
-  console.log('🔑 generateXpriv result:', result);
-  
   const xpriv = result.xpriv;
-  console.log('🔑 xpriv extracted:', {
-    xprivType: typeof xpriv,
-    xprivLength: xpriv?.length,
-    xprivPrefix: xpriv?.substring(0, 10),
-    isString: typeof xpriv === 'string',
-    hasXprivKey: 'xpriv' in result
-  });
-  
+
   // Create the initial "Personal" identity at index 0
   const personalIdentity = await createIdentity(xpriv, 'Personal', 0);
   
