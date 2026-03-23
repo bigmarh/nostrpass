@@ -1,4 +1,5 @@
 import { randomBytes, bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import { schnorr } from '@noble/curves/secp256k1';
 import { generateSecretKey } from 'nostr-tools';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { encrypt as nip04Encrypt, decrypt as nip04Decrypt } from 'nostr-tools/nip04';
@@ -161,6 +162,20 @@ export class LiteCore {
 
   getAuthState(): LiteAuthState {
     return { ...this.authState };
+  }
+
+  getUnlockedPrivateKeyHex(): string | null {
+    return this.session?.unlockedPrivateKey ?? null;
+  }
+
+  async signData(messageHex: string): Promise<string> {
+    const result = await this.requestOperation<string>({
+      origin: 'internal',
+      operation: 'signData',
+      payload: { message: messageHex },
+    });
+    if (!result.success) throw new Error(result.error ?? 'signData failed');
+    return result.data as string;
   }
 
   getPendingPermissionRequest(
@@ -883,10 +898,6 @@ export class LiteCore {
 
     try {
       switch (request.operation) {
-        case 'getPublicKey': {
-          this.logStep('operation:execute:getPublicKey');
-          return { success: true, data: this.session!.vaultPayload.publicKey as T };
-        }
         case 'signEvent': {
           this.logStep('operation:execute:signEvent');
           const rawEvent = request.payload?.event as Record<string, unknown> | undefined;
@@ -907,6 +918,12 @@ export class LiteCore {
 
           const signed = finalizeEvent(unsigned, hexToBytes(this.session!.unlockedPrivateKey!));
           return { success: true, data: signed as T };
+        }
+        case 'signData': {
+          this.logStep('operation:execute:signData');
+          const messageHex = String(request.payload?.message ?? '');
+          const sig = schnorr.sign(hexToBytes(messageHex), hexToBytes(this.session!.unlockedPrivateKey!));
+          return { success: true, data: bytesToHex(sig) as T };
         }
         case 'nip04.encrypt': {
           this.logStep('operation:execute:nip04.encrypt');

@@ -11,9 +11,12 @@ import { gcm } from '@noble/ciphers/aes.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2';
 import { sha256 } from '@noble/hashes/sha256';
 import { hexToBytes } from '@noble/hashes/utils';
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
-import { encrypt as nip04Encrypt, decrypt as nip04Decrypt } from 'nostr-tools/nip04';
-import * as nip44 from 'nostr-tools/nip44';
+import type { LitePermissionOperation } from '@nostrpass/lite-core';
+import {
+  executeWorkerCryptoOperation,
+  isSupportedWorkerOperation,
+  workerPublicKey,
+} from './cryptoWorkerOps';
 
 // ── Key held exclusively in worker closure ─────────────────────────────────────
 let privateKeyHex: string | null = null;
@@ -35,7 +38,7 @@ function decryptAesGcm(encrypted: string, secret: string): string {
 type WorkerMsg =
   | { id: string; type: 'LOAD_KEY';        payload: { encryptedKey: string; pin: string } }
   | { id: string; type: 'LOAD_KEY_DIRECT'; payload: { privateKeyHex: string } }
-  | { id: string; type: 'EXECUTE';         payload: { operation: string } & Record<string, unknown> }
+  | { id: string; type: 'EXECUTE';         payload: { operation: LitePermissionOperation | string } & Record<string, unknown> }
   | { id: string; type: 'CLEAR_KEY' };
 
 self.onmessage = async (e: MessageEvent<WorkerMsg>) => {
@@ -47,8 +50,7 @@ self.onmessage = async (e: MessageEvent<WorkerMsg>) => {
       case 'LOAD_KEY': {
         const { encryptedKey, pin } = e.data.payload;
         const decrypted = decryptAesGcm(encryptedKey, pin);
-        // getPublicKey() already returns a hex string — no bytesToHex needed
-        const pubkey = getPublicKey(hexToBytes(decrypted));
+        const pubkey = workerPublicKey(decrypted);
         privateKeyHex = decrypted;
         result = { publicKey: pubkey };
         break;
@@ -69,59 +71,11 @@ self.onmessage = async (e: MessageEvent<WorkerMsg>) => {
       case 'EXECUTE': {
         if (!privateKeyHex) throw new Error('No key loaded in worker');
         const p = e.data.payload;
-        const op = p.operation;
-
-        switch (op) {
-          case 'signEvent': {
-            const raw = p.event as Record<string, unknown>;
-            if (!raw) throw new Error('Missing event payload');
-            const unsigned = {
-              kind: Number(raw.kind ?? 1),
-              created_at: Number(raw.created_at ?? Math.floor(Date.now() / 1000)),
-              tags: (raw.tags as string[][] | undefined) ?? [],
-              content: String(raw.content ?? ''),
-            };
-            result = finalizeEvent(unsigned, hexToBytes(privateKeyHex));
-            break;
-          }
-
-          case 'nip04.encrypt':
-            result = await nip04Encrypt(
-              privateKeyHex,
-              String(p.pubkey ?? ''),
-              String(p.plaintext ?? '')
-            );
-            break;
-
-          case 'nip04.decrypt':
-            result = await nip04Decrypt(
-              privateKeyHex,
-              String(p.pubkey ?? ''),
-              String(p.ciphertext ?? '')
-            );
-            break;
-
-          case 'nip44.encrypt': {
-            const convKey = nip44.v2.utils.getConversationKey(
-              hexToBytes(privateKeyHex),
-              String(p.pubkey ?? '')
-            );
-            result = nip44.v2.encrypt(String(p.plaintext ?? ''), convKey);
-            break;
-          }
-
-          case 'nip44.decrypt': {
-            const convKey = nip44.v2.utils.getConversationKey(
-              hexToBytes(privateKeyHex),
-              String(p.pubkey ?? '')
-            );
-            result = nip44.v2.decrypt(String(p.ciphertext ?? ''), convKey);
-            break;
-          }
-
-          default:
-            throw new Error(`Unsupported operation in worker: ${op}`);
+        if (!isSupportedWorkerOperation(p.operation)) {
+          throw new Error(`Unsupported operation in worker: ${p.operation}`);
         }
+
+        result = await executeWorkerCryptoOperation(privateKeyHex, p);
         break;
       }
     }

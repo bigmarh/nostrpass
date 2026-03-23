@@ -5,6 +5,7 @@ export type LiteAuthMethod = 'password' | 'google';
 export type LitePermissionOperation =
   | 'getPublicKey'
   | 'signEvent'
+  | 'signData'
   | 'nip04.encrypt'
   | 'nip04.decrypt'
   | 'nip44.encrypt'

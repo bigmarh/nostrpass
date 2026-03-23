@@ -17,7 +17,7 @@ const MIN_RELAY_ACKS = 1;
 const RPC_CHANNEL = 'nostrpass-lite-rpc-v1';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-type RpcMethod = 'PING' | 'FOCUS_AUTH' | 'GET_AUTH_STATE' | 'GET_PUBLIC_KEY' | 'SIGN_EVENT' | 'LOGOUT';
+type RpcMethod = 'PING' | 'FOCUS_AUTH' | 'GET_AUTH_STATE' | 'GET_PUBLIC_KEY' | 'SIGN_EVENT' | 'SIGN_DATA' | 'NIP44_ENCRYPT' | 'NIP44_DECRYPT' | 'LOGOUT';
 
 interface RpcRequestMessage {
   channel: typeof RPC_CHANNEL;
@@ -39,7 +39,7 @@ interface RpcResponseMessage {
 interface RpcEventMessage {
   channel: typeof RPC_CHANNEL;
   type: 'event';
-  event: 'READY' | 'AUTH_STATE' | 'NEEDS_INTERACTION';
+  event: 'READY' | 'AUTH_STATE' | 'NEEDS_INTERACTION' | 'CLOSE';
   auth: LiteAuthState;
 }
 
@@ -279,6 +279,36 @@ export function App() {
             : Math.floor(Date.now() / 1000);
 
         return nostrApi.signEvent({ kind, tags, content, created_at: createdAt });
+      }
+
+      case 'SIGN_DATA': {
+        const message = request.params?.message;
+        if (typeof message !== 'string') throw new Error('SIGN_DATA requires params.message (hex string)');
+        return nostrApi.signData(message);
+      }
+
+      case 'NIP04_ENCRYPT': {
+        const pubkey = String(request.params?.pubkey ?? '');
+        const plaintext = String(request.params?.plaintext ?? '');
+        return nostrApi.nip04.encrypt(pubkey, plaintext);
+      }
+
+      case 'NIP04_DECRYPT': {
+        const pubkey = String(request.params?.pubkey ?? '');
+        const ciphertext = String(request.params?.ciphertext ?? '');
+        return nostrApi.nip04.decrypt(pubkey, ciphertext);
+      }
+
+      case 'NIP44_ENCRYPT': {
+        const pubkey = String(request.params?.pubkey ?? '');
+        const plaintext = String(request.params?.plaintext ?? '');
+        return nostrApi.nip44.encrypt(pubkey, plaintext);
+      }
+
+      case 'NIP44_DECRYPT': {
+        const pubkey = String(request.params?.pubkey ?? '');
+        const ciphertext = String(request.params?.ciphertext ?? '');
+        return nostrApi.nip44.decrypt(pubkey, ciphertext);
       }
 
       default:
@@ -531,10 +561,15 @@ export function App() {
   // ── Render ─────────────────────────────────────────────────────────────────────
   return (
     <div
-      class="min-h-dvh flex items-center justify-center p-4"
+      class={embedMode
+        ? 'w-full min-h-dvh overflow-y-auto flex items-start justify-center bg-transparent px-4 py-6 sm:items-center sm:px-6 sm:py-10'
+        : 'min-h-dvh flex items-center justify-center bg-slate-100 px-4 py-6 sm:px-6'}
       onClick={handleBackdropClick}
     >
-      <div class="w-full bg-white rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div
+        class="w-full max-w-[420px] bg-white rounded-[28px] shadow-[0_32px_90px_rgba(2,6,23,0.38)] ring-1 ring-slate-950/8 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
 
       {/* Permission screen overlays all others */}
       <Show when={showPermission()}>

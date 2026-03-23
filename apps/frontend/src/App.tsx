@@ -938,8 +938,8 @@ function App() {
             </div>
             <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight text-white">NostrPass Lite</h2>
             <p className="text-gray-400 max-w-2xl mx-auto">
-              No cloud vault. No iframe. Just a lightweight script that stores encrypted keys in the browser
-              and syncs via Nostr relays — the self-sovereign option.
+              A lightweight iframe-backed signer with keys isolated on the NostrPass CDN origin and vault state
+              synced via Nostr relays. Built for apps that want a simple web integration without a backend.
             </p>
           </div>
 
@@ -993,27 +993,26 @@ function App() {
               </div>
               <button
                 onClick={() => {
-                  const code = `<script src="https://cdn.nostrpass.com/lite-embassy.js"></script>
+                  const code = `<script src="https://cdn.nostrpass.com/lite-embassy@0.1.2.js"></script>
 <script>
-  // Initialize — async, returns the embassy instance
-  const embassy = await window.initNostrPassLite({
-    appName: 'My App',
-    relays: ['wss://relay.damus.io', 'wss://nos.lol'],
-  });
+  async function bootNostrPassLite() {
+    const embassy = await window.initNostrPassLite({
+      appName: 'My App',
+      appDomain: window.location.origin,
+      vaultUrl: 'https://cdn.nostrpass.com/lite-vault/index.html',
+      relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
+      overrideExistingProvider: false,
+    });
 
-  // Enroll a new user (identifier + password + PIN)
-  await embassy.enrollWithPassword({
-    identifier: 'alice',
-    authSecret: 'my-password',
-    pin: '123456',
-  });
+    embassy.createNostrPassLiteButton({
+      appendTo: '#nostrpass-connect',
+      labelSignedOut: 'Use NostrPass Lite',
+      labelLocked: 'Unlock NostrPass Lite',
+      labelSignedIn: 'Connected',
+    });
+  }
 
-  // Or login an existing user
-  await embassy.loginWithPassword({ identifier: 'alice', authSecret: 'my-password' });
-
-  // Now use the standard NIP-07 window.nostr API
-  const pubkey = await window.nostr.getPublicKey();
-  const signed = await window.nostr.signEvent({ kind: 1, content: 'gm', tags: [], created_at: Date.now() / 1000 | 0 });
+  bootNostrPassLite().catch(console.error);
 </script>`;
                   navigator.clipboard.writeText(code)
                   const btn = document.getElementById('lite-copy-btn')
@@ -1025,62 +1024,27 @@ function App() {
                 Copy
               </button>
             </div>
-            <pre className="text-xs sm:text-sm px-6 py-4 overflow-x-auto">
-              <code className="text-blue-300">{`<script `}</code>
-              <code className="text-yellow-300">src</code>
-              <code className="text-white">=</code>
-              <code className="text-green-300">"https://cdn.nostrpass.com/lite-embassy.js"</code>
-              <code className="text-blue-300">{`></script>`}</code>
-              {'\n'}
-              <code className="text-blue-300">{`<script>`}</code>
-              {'\n'}
-              <code className="text-gray-500">{'  // Initialize — async, returns the embassy instance'}</code>
-              {'\n'}
-              <code className="text-purple-300">{'  const '}</code>
-              <code className="text-white">embassy = </code>
-              <code className="text-purple-300">await </code>
-              <code className="text-yellow-300">window</code>
-              <code className="text-white">.initNostrPassLite({'({'}</code>
-              {'\n'}
-              <code className="text-cyan-300">{'    appName'}</code>
-              <code className="text-white">: </code>
-              <code className="text-green-300">'My App'</code>
-              <code className="text-white">,</code>
-              {'\n'}
-              <code className="text-cyan-300">{'    relays'}</code>
-              <code className="text-white">{`: ['wss://relay.damus.io', 'wss://nos.lol'],`}</code>
-              {'\n'}
-              <code className="text-white">{'  });'}</code>
-              {'\n\n'}
-              <code className="text-gray-500">{'  // Enroll a new user'}</code>
-              {'\n'}
-              <code className="text-purple-300">{'  await '}</code>
-              <code className="text-white">embassy.enrollWithPassword({'({'}</code>
-              {'\n'}
-              <code className="text-cyan-300">{'    identifier'}</code>
-              <code className="text-white">: </code>
-              <code className="text-green-300">'alice'</code>
-              <code className="text-white">, </code>
-              <code className="text-cyan-300">authSecret</code>
-              <code className="text-white">: </code>
-              <code className="text-green-300">'my-password'</code>
-              <code className="text-white">, </code>
-              <code className="text-cyan-300">pin</code>
-              <code className="text-white">: </code>
-              <code className="text-green-300">'123456'</code>
-              {'\n'}
-              <code className="text-white">{'  });'}</code>
-              {'\n\n'}
-              <code className="text-gray-500">{'  // Standard NIP-07 window.nostr API'}</code>
-              {'\n'}
-              <code className="text-purple-300">{'  const '}</code>
-              <code className="text-white">pubkey = </code>
-              <code className="text-purple-300">await </code>
-              <code className="text-yellow-300">window.nostr</code>
-              <code className="text-white">.getPublicKey();</code>
-              {'\n'}
-              <code className="text-blue-300">{`</script>`}</code>
-            </pre>
+            <pre className="text-xs sm:text-sm px-6 py-4 overflow-x-auto"><code>{`<script src="https://cdn.nostrpass.com/lite-embassy@0.1.2.js"></script>
+<script>
+  async function bootNostrPassLite() {
+    const embassy = await window.initNostrPassLite({
+      appName: 'My App',
+      appDomain: window.location.origin,
+      vaultUrl: 'https://cdn.nostrpass.com/lite-vault/index.html',
+      relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
+      overrideExistingProvider: false,
+    });
+
+    embassy.createNostrPassLiteButton({
+      appendTo: '#nostrpass-connect',
+      labelSignedOut: 'Use NostrPass Lite',
+      labelLocked: 'Unlock NostrPass Lite',
+      labelSignedIn: 'Connected',
+    });
+  }
+
+  bootNostrPassLite().catch(console.error);
+</script>`}</code></pre>
           </div>
 
           {/* CTA Buttons */}
@@ -1763,40 +1727,33 @@ const legacyDecrypted = await nostr.nip04.decrypt(senderPubkey, legacyEncrypted)
 
             <h3 className="text-xl font-semibold mb-4">Installation</h3>
             <div className="bg-gray-900 text-white rounded-lg px-6 py-4 mb-6 overflow-x-auto">
-              <pre className="text-sm"><code>{`<!-- CDN (recommended) -->
-<script src="https://cdn.nostrpass.com/lite-embassy.js"></script>
+              <pre className="text-sm"><code>{`<!-- CDN (recommended today) -->
+<script src="https://cdn.nostrpass.com/lite-embassy@0.1.2.js"></script>
 
-<!-- npm -->
-npm install @nostrpass/lite-embassy`}</code></pre>
+<!-- npm package -->
+// publish pending`}</code></pre>
             </div>
 
             <h3 className="text-xl font-semibold mb-4">Quick Start</h3>
             <div className="bg-gray-900 text-white rounded-lg px-6 py-4 mb-6 overflow-x-auto">
-              <pre className="text-[0.72rem] md:text-sm"><code>{`// 1. Initialize (auto-installs window.nostr)
+              <pre className="text-[0.72rem] md:text-sm"><code>{`// 1. Initialize once (auto-installs window.nostr)
 const embassy = await window.initNostrPassLite({
   appName: 'My App',
-  relays: ['wss://relay.damus.io', 'wss://nos.lol'],
+  appDomain: window.location.origin,
+  vaultUrl: 'https://cdn.nostrpass.com/lite-vault/index.html',
+  relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
+  overrideExistingProvider: false,
 });
 
-// 2. Enroll a new user
-await embassy.enrollWithPassword({
-  identifier: 'alice',
-  authSecret: 'strong-password',
-  pin: '123456',          // PIN to lock/unlock without re-entering password
+// 2. Mount the packaged connect button
+embassy.createNostrPassLiteButton({
+  appendTo: '#nostrpass-connect',
+  labelSignedOut: 'Use NostrPass Lite',
+  labelLocked: 'Unlock NostrPass Lite',
+  labelSignedIn: 'Connected',
 });
 
-// 3. Or login an existing user
-const auth = await embassy.loginWithPassword({
-  identifier: 'alice',
-  authSecret: 'strong-password',
-});
-
-// If vault is locked (e.g. page refresh), unlock with PIN
-if (auth.isLocked) {
-  await embassy.unlock({ pin: '123456' });
-}
-
-// 4. Use the standard NIP-07 window.nostr API
+// 3. Use the standard NIP-07 window.nostr API
 const pubkey = await window.nostr.getPublicKey();
 const event = { kind: 1, content: 'gm', tags: [], created_at: Date.now() / 1000 | 0 };
 const signed = await window.nostr.signEvent(event);
@@ -1809,6 +1766,8 @@ const encrypted = await window.nostr.nip44.encrypt(recipientPubkey, 'secret mess
             <div className="space-y-3 mb-8">
               {[
                 { name: 'appName', type: 'string', desc: 'Your app name, shown in permission prompts' },
+                { name: 'appDomain', type: 'string', desc: 'Your host app origin. Defaults to window.location.origin.' },
+                { name: 'vaultUrl', type: 'string', desc: 'Required for the iframe-backed web-app flow. Use https://cdn.nostrpass.com/lite-vault/index.html.' },
                 { name: 'relays', type: 'string[]', desc: 'Nostr relay URLs for key sync. Defaults to damus, nos.lol, nostr.band' },
                 { name: 'namespace', type: 'string', desc: 'Storage namespace for key isolation. Default: nostrpass-lite' },
                 { name: 'environment', type: 'string', desc: "Environment tag: 'production' | 'development' | 'staging'" },
@@ -1832,14 +1791,16 @@ const encrypted = await window.nostr.nip44.encrypt(recipientPubkey, 'secret mess
             <h3 className="text-xl font-semibold mb-4">API Methods</h3>
             <div className="space-y-3 mb-8">
               {[
-                { sig: 'enrollWithPassword({ identifier, authSecret, pin })', desc: 'Create a new identity. Generates a Nostr keypair, encrypts with password, locks with PIN.' },
-                { sig: 'loginWithPassword({ identifier, authSecret })', desc: 'Authenticate an existing identity. Returns auth state — may be locked.' },
-                { sig: 'unlock({ pin })', desc: 'Unlock a locked session with PIN. Required after page load if vault is locked.' },
-                { sig: 'importKey({ format, value, identifier, authSecret, pin })', desc: 'Import an existing nsec or hex private key.' },
-                { sig: 'logout()', desc: 'Sign out and clear the active session.' },
-                { sig: 'getAuthState()', desc: 'Synchronously returns { isAuthenticated, isLocked, identifier, publicKey }.' },
-                { sig: 'installNostrProvider({ overrideExisting })', desc: 'Manually install window.nostr provider.' },
-                { sig: 'createNostrPassLiteButton(config)', desc: 'Create a styled login button that reflects auth state.' },
+                { sig: 'createNostrPassLiteButton(config)', desc: 'Create a packaged connect/unlock button for the hosted vault flow.' },
+                { sig: 'getAuthState()', desc: 'Read the current iframe auth state: initialized, isAuthenticated, isLocked, identifier, publicKey.' },
+                { sig: 'logout()', desc: 'Sign out of the active Lite session.' },
+                { sig: 'window.nostr.getPublicKey()', desc: 'Prompt through Lite if needed, then return the active pubkey.' },
+                { sig: 'window.nostr.signEvent(event)', desc: 'Sign a Nostr event through the iframe-backed signer.' },
+                { sig: 'window.nostr.signData(message)', desc: 'Return a Schnorr signature for arbitrary data.' },
+                { sig: 'window.nostr.nip04.encrypt(pubkey, plaintext)', desc: 'Encrypt a message using NIP-04.' },
+                { sig: 'window.nostr.nip04.decrypt(pubkey, ciphertext)', desc: 'Decrypt a NIP-04 ciphertext.' },
+                { sig: 'window.nostr.nip44.encrypt(pubkey, plaintext)', desc: 'Encrypt a message using NIP-44.' },
+                { sig: 'window.nostr.nip44.decrypt(pubkey, ciphertext)', desc: 'Decrypt a NIP-44 ciphertext.' },
               ].map(({ sig, desc }) => (
                 <div key={sig} className="border-l-4 border-gray-300 pl-4">
                   <code className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded break-all">{sig}</code>
@@ -1862,7 +1823,11 @@ const encrypted = await window.nostr.nip44.encrypt(recipientPubkey, 'secret mess
 
             <h3 className="text-xl font-semibold mb-4">Login Button</h3>
             <div className="bg-gray-900 text-white rounded-lg px-6 py-4 mb-8 overflow-x-auto">
-              <pre className="text-[0.72rem] md:text-sm"><code>{`const embassy = await window.initNostrPassLite({ appName: 'My App' });
+              <pre className="text-[0.72rem] md:text-sm"><code>{`const embassy = await window.initNostrPassLite({
+  appName: 'My App',
+  appDomain: window.location.origin,
+  vaultUrl: 'https://cdn.nostrpass.com/lite-vault/index.html',
+});
 
 const btn = embassy.createNostrPassLiteButton({
   appendTo: '#login-container',   // CSS selector or HTMLElement
@@ -1897,16 +1862,19 @@ const btn = embassy.createNostrPassLiteButton({
       >
         {/* Single vault iframe — always mounted while demo is open, shown full-screen when auth is needed */}
         {showLiteDemo && (
-          <iframe
-            ref={vaultFrameRef}
-            src={`${LITE_VAULT_URL}?parentOrigin=${encodeURIComponent(window.location.origin)}`}
-            title="NostrPass Lite Vault"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            style={liteShowVault
-              ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: '425px', height: '100dvh', zIndex: 60, border: 'none' }
-              : { position: 'fixed', width: 0, height: 0, border: 'none', visibility: 'hidden' }
-            }
-          />
+          <div
+            className={`fixed inset-0 z-[60] transition-opacity duration-200 ${
+              liteShowVault ? 'bg-slate-950/72 backdrop-blur-[4px] opacity-100' : 'pointer-events-none opacity-0'
+            }`}
+          >
+            <iframe
+              ref={vaultFrameRef}
+              src={`${LITE_VAULT_URL}?embed=1&parentOrigin=${encodeURIComponent(window.location.origin)}`}
+              title="NostrPass Lite Vault"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', background: 'transparent' }}
+            />
+          </div>
         )}
 
         <div className="h-full overflow-y-auto">

@@ -161,13 +161,13 @@ export class NostrCrypto {
   }
 
   /**
-   * Encrypt data using AES-256-GCM with Argon2id-derived key
-   * Uses Web Crypto API for native performance
+   * Encrypt data using AES-256-GCM with PBKDF2-derived key material.
+   * Uses Web Crypto API for native performance.
    */
   async encryptData(data: string, password: string): Promise<string> {
     cryptoLog('🔐 [Noble.encryptData] Starting encryption, data length:', data.length);
 
-    // Derive key using PBKDF2 (Argon2id not available in browsers, PBKDF2 is acceptable)
+    // Derive key using PBKDF2-SHA256.
     const { key, salt } = this.deriveKeyFromPassword(password);
 
     // Use Web Crypto API for AES-GCM encryption
@@ -368,14 +368,16 @@ export class NostrCrypto {
   }
 
   /**
-   * Encrypt data with Argon2 (using PBKDF2 fallback for browser compatibility)
+   * Encrypt data wrapper for compatibility.
+   * Uses PBKDF2-SHA256 in browser runtime.
    */
   async encryptDataWithArgon2(data: string, password: string): Promise<string> {
     return this.encryptData(data, password);
   }
 
   /**
-   * Decrypt data with Argon2 (using PBKDF2 fallback for browser compatibility)
+   * Decrypt data wrapper for compatibility.
+   * Uses PBKDF2-SHA256 in browser runtime.
    */
   async decryptDataWithArgon2(encryptedData: string, password: string): Promise<string> {
     return this.decryptData(encryptedData, password);

@@ -33,7 +33,6 @@ declare global {
       options?: { forceNewInstance?: boolean }
     ) => Promise<NostrPassLiteEmbassy>;
     nostrPassLite?: NostrPassLiteEmbassy;
-    nostr?: unknown;
   }
 }
 

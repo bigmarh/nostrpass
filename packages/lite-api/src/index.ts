@@ -102,6 +102,10 @@ export function createLiteNostrApi(core: LiteCore, options: LiteNostrApiOptions 
       return runWithPermissionRetry(core, 'signEvent', { event }, options);
     },
 
+    async signData(message: string, _opts?: NostrOperationOptions): Promise<string> {
+      return runWithPermissionRetry<string>(core, 'signData', { message }, options);
+    },
+
     nip04: {
       async encrypt(pubkey: string, plaintext: string, _opts?: NostrOperationOptions) {
         return runWithPermissionRetry<string>(
@@ -148,7 +152,7 @@ export function installWindowNostr(
 ): void {
   const api = createLiteNostrApi(core, options);
 
-  if (options.overrideExisting || !(window as Window & { nostr?: unknown }).nostr) {
-    (window as Window & { nostr?: unknown }).nostr = api;
+  if (options.overrideExisting || !(window as unknown as { nostr?: unknown }).nostr) {
+    (window as unknown as { nostr?: unknown }).nostr = api;
   }
 }

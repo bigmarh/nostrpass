@@ -35,6 +35,8 @@ export interface LiteEmbassyStatus {
 export interface LiteEmbassyConfig {
   appName?: string;
   appDomain?: string;
+  /** URL of the hosted lite-vault app (e.g. https://cdn.nostrpass.com). When set, enables iframe mode — the vault handles all auth UI and key operations inside an origin-isolated iframe. */
+  vaultUrl?: string;
   namespace?: string;
   environment?: string;
   relays?: string[];
@@ -75,6 +77,7 @@ interface SignedEvent extends UnsignedEvent {
 export interface LiteNostrProvider {
   getPublicKey(options?: NostrOperationOptions): Promise<string>;
   signEvent(event: UnsignedEvent, options?: NostrOperationOptions): Promise<SignedEvent>;
+  signData(message: string, options?: NostrOperationOptions): Promise<string>;
   nip04: {
     encrypt(pubkey: string, plaintext: string, options?: NostrOperationOptions): Promise<string>;
     decrypt(pubkey: string, ciphertext: string, options?: NostrOperationOptions): Promise<string>;
@@ -182,6 +185,46 @@ function ensureButtonStyles(): void {
   document.head.appendChild(style);
 }
 
+// ── Iframe RPC types ─────────────────────────────────────────────────────────
+
+const IFRAME_RPC_CHANNEL = 'nostrpass-lite-rpc-v1';
+
+interface IframeRpcRequest {
+  channel: typeof IFRAME_RPC_CHANNEL;
+  type: 'request';
+  id: string;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+interface IframeRpcResponse {
+  channel: typeof IFRAME_RPC_CHANNEL;
+  type: 'response';
+  id: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+interface IframeRpcEvent {
+  channel: typeof IFRAME_RPC_CHANNEL;
+  type: 'event';
+  event: 'READY' | 'AUTH_STATE' | 'NEEDS_INTERACTION' | 'CLOSE';
+  auth?: LiteAuthState & { identifier?: string };
+}
+
+function isIframeRpcResponse(v: unknown): v is IframeRpcResponse {
+  const m = v as Partial<IframeRpcResponse>;
+  return m?.channel === IFRAME_RPC_CHANNEL && m?.type === 'response' && typeof m?.id === 'string';
+}
+
+function isIframeRpcEvent(v: unknown): v is IframeRpcEvent {
+  const m = v as Partial<IframeRpcEvent>;
+  return m?.channel === IFRAME_RPC_CHANNEL && m?.type === 'event';
+}
+
+// ── Embassy class ─────────────────────────────────────────────────────────────
+
 export class NostrPassLiteEmbassy {
   private readonly config: LiteEmbassyConfig;
   private readonly core: LiteCore;
@@ -190,6 +233,17 @@ export class NostrPassLiteEmbassy {
   private initialized = false;
   private providerInstalled = false;
   private previousProvider: unknown = undefined;
+
+  // Iframe mode state
+  private iframeMode = false;
+  private iframe: HTMLIFrameElement | null = null;
+  private overlay: HTMLDivElement | null = null;
+  private frameReady = false;
+  private frameReadyWaiters: Array<() => void> = [];
+  private pendingRpc = new Map<string, { resolve: (v: unknown) => void; reject: (e: unknown) => void; timeoutId: ReturnType<typeof setTimeout> }>();
+  private rpcCounter = 0;
+  private activeVaultOrigin: string | null = null;
+  private iframeAuthState: LiteAuthState = { initialized: false, isAuthenticated: false, isLocked: true };
 
   constructor(config: LiteEmbassyConfig = {}) {
     this.config = config;
@@ -213,6 +267,7 @@ export class NostrPassLiteEmbassy {
     this.provider = {
       getPublicKey: (options) => this.getPublicKey(options),
       signEvent: (event, options) => this.signEvent(event, options),
+      signData: (message, options) => this.signData(message, options),
       nip04: {
         encrypt: (pubkey, plaintext, options) => this.nip04Encrypt(pubkey, plaintext, options),
         decrypt: (pubkey, ciphertext, options) => this.nip04Decrypt(pubkey, ciphertext, options),
@@ -226,9 +281,193 @@ export class NostrPassLiteEmbassy {
     };
   }
 
+  // ── Iframe mode ─────────────────────────────────────────────────────────────
+
+  private buildVaultFrameUrl(vaultUrl: string): string {
+    const url = new URL(vaultUrl);
+    url.searchParams.set('embed', '1');
+    url.searchParams.set('parentOrigin', window.location.origin);
+    return url.toString();
+  }
+
+  private setupIframeMode(vaultUrl: string): void {
+    if (typeof document === 'undefined') return;
+
+    this.activeVaultOrigin = new URL(vaultUrl).origin;
+
+    // Overlay container
+    const overlay = document.createElement('div');
+    overlay.id = 'nostrpass-lite-overlay';
+    Object.assign(overlay.style, {
+      display: 'none',
+      position: 'fixed',
+      inset: '0',
+      zIndex: '99999',
+      background: 'rgba(2, 6, 23, 0.72)',
+      backdropFilter: 'blur(4px)',
+    });
+
+    // Modal shell
+    const shell = document.createElement('div');
+    Object.assign(shell.style, {
+      position: 'relative',
+      width: '100%',
+      height: '100%',
+      overflow: 'hidden',
+    });
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    Object.assign(closeBtn.style, {
+      position: 'absolute',
+      top: '18px',
+      right: '18px',
+      zIndex: '1',
+      background: 'rgba(15, 23, 42, 0.72)',
+      border: '1px solid rgba(255,255,255,0.16)',
+      color: '#f8fafc',
+      borderRadius: '999px',
+      padding: '8px 11px',
+      cursor: 'pointer',
+      fontSize: '13px',
+      lineHeight: '1',
+      boxShadow: '0 10px 30px rgba(2, 6, 23, 0.35)',
+      backdropFilter: 'blur(10px)',
+    });
+    closeBtn.addEventListener('click', () => this.hideIframeModal());
+
+    // Iframe
+    const iframe = document.createElement('iframe');
+    iframe.src = this.buildVaultFrameUrl(vaultUrl);
+    iframe.allow = 'clipboard-write';
+    Object.assign(iframe.style, {
+      width: '100%',
+      height: '100%',
+      border: 'none',
+      background: 'transparent',
+    });
+
+    shell.appendChild(closeBtn);
+    shell.appendChild(iframe);
+    overlay.appendChild(shell);
+    document.body.appendChild(overlay);
+
+    this.iframe = iframe;
+    this.overlay = overlay;
+
+    // Message bridge
+    window.addEventListener('message', (event: MessageEvent) => {
+      if (event.source !== this.iframe?.contentWindow) return;
+      if (this.activeVaultOrigin && event.origin !== this.activeVaultOrigin) return;
+
+      if (isIframeRpcResponse(event.data)) {
+        const entry = this.pendingRpc.get(event.data.id);
+        if (!entry) return;
+        this.pendingRpc.delete(event.data.id);
+        clearTimeout(entry.timeoutId);
+        if (event.data.ok) {
+          entry.resolve(event.data.result);
+        } else {
+          entry.reject(new Error(event.data.error ?? 'RPC error'));
+        }
+        return;
+      }
+
+      if (isIframeRpcEvent(event.data)) {
+        this.handleIframeEvent(event.data);
+      }
+    });
+  }
+
+  private handleIframeEvent(event: IframeRpcEvent): void {
+    if (event.event === 'READY' || event.event === 'AUTH_STATE') {
+      if (!this.frameReady) {
+        this.frameReady = true;
+        const waiters = this.frameReadyWaiters.splice(0);
+        for (const fn of waiters) fn();
+      }
+      if (event.auth) {
+        this.iframeAuthState = {
+          initialized: event.auth.initialized,
+          isAuthenticated: event.auth.isAuthenticated,
+          isLocked: event.auth.isLocked,
+          publicKey: (event.auth as { publicKey?: string }).publicKey,
+        };
+      }
+      const auth = this.iframeAuthState;
+      if (auth.isAuthenticated && !auth.isLocked) {
+        this.hideIframeModal();
+        this.emitStatus('ready', { source: 'iframe' }, auth);
+      } else if (!auth.isAuthenticated) {
+        this.emitStatus('auth_required', { source: 'iframe' }, auth);
+      } else {
+        this.emitStatus('pin_required', { source: 'iframe' }, auth);
+      }
+    } else if (event.event === 'NEEDS_INTERACTION') {
+      this.showIframeModal();
+    } else if (event.event === 'CLOSE') {
+      this.hideIframeModal();
+    }
+  }
+
+  showIframeModal(): void {
+    if (!this.overlay) return;
+    this.overlay.style.display = 'flex';
+  }
+
+  hideIframeModal(): void {
+    if (!this.overlay) return;
+    this.overlay.style.display = 'none';
+  }
+
+  private waitForFrameReady(): Promise<void> {
+    if (this.frameReady) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.frameReadyWaiters = this.frameReadyWaiters.filter(fn => fn !== onReady);
+        reject(new Error('NostrPass vault frame did not respond. Check the vault URL.'));
+      }, 15000);
+      const onReady = () => { clearTimeout(timeoutId); resolve(); };
+      this.frameReadyWaiters.push(onReady);
+    });
+  }
+
+  private async requestRpc<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    await this.waitForFrameReady();
+    const targetWindow = this.iframe?.contentWindow;
+    if (!targetWindow || !this.activeVaultOrigin) throw new Error('Vault frame not ready');
+
+    const id = `rpc-${Date.now()}-${++this.rpcCounter}`;
+    const payload: IframeRpcRequest = { channel: IFRAME_RPC_CHANNEL, type: 'request', id, method, params };
+
+    return new Promise<T>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingRpc.delete(id);
+        reject(new Error(`RPC timeout: ${method}`));
+      }, 15000);
+      this.pendingRpc.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+        timeoutId,
+      });
+      targetWindow.postMessage(payload, this.activeVaultOrigin!);
+    });
+  }
+
+  // ── initialize ───────────────────────────────────────────────────────────────
+
   async initialize(): Promise<LiteAuthState> {
     if (this.initialized) {
-      return this.core.getAuthState();
+      return this.iframeMode ? this.iframeAuthState : this.core.getAuthState();
+    }
+
+    if (this.config.vaultUrl && typeof document !== 'undefined') {
+      this.iframeMode = true;
+      this.setupIframeMode(this.config.vaultUrl);
+      this.initialized = true;
+      this.installNostrProvider({ overrideExisting: this.config.overrideExistingProvider ?? false });
+      return this.iframeAuthState;
     }
 
     this.emitStatus('processing', { action: 'initialize' });
@@ -246,7 +485,11 @@ export class NostrPassLiteEmbassy {
   }
 
   getAuthState(): LiteAuthState {
-    return this.core.getAuthState();
+    return this.iframeMode ? this.iframeAuthState : this.core.getAuthState();
+  }
+
+  getUnlockedPrivateKeyHex(): string | null {
+    return this.core.getUnlockedPrivateKeyHex();
   }
 
   async enrollWithPassword(input: {
@@ -257,6 +500,16 @@ export class NostrPassLiteEmbassy {
     overwriteExistingVault?: boolean;
   }) {
     return this.runAction('enroll', () => this.core.enrollWithPassword(input));
+  }
+
+  async enrollWithGoogle(input: {
+    identifier: string;
+    authSecret: string;
+    pin: string;
+    overwriteExistingLogin?: boolean;
+    overwriteExistingVault?: boolean;
+  }) {
+    return this.runAction('enroll', () => this.core.enrollWithGoogle(input));
   }
 
   async importKey(input: {
@@ -283,6 +536,13 @@ export class NostrPassLiteEmbassy {
     return this.runAction('login', () => this.core.loginWithPassword(input));
   }
 
+  async loginWithGoogle(input: {
+    identifier: string;
+    authSecret: string;
+  }): Promise<LiteAuthState> {
+    return this.runAction('login', () => this.core.loginWithGoogle(input));
+  }
+
   async unlock(input: { pin: string }): Promise<LiteAuthState> {
     return this.runAction('unlock', () => this.core.unlock(input));
   }
@@ -292,10 +552,17 @@ export class NostrPassLiteEmbassy {
   }
 
   async logout(): Promise<LiteAuthState> {
+    if (this.iframeMode) {
+      await this.requestRpc('LOGOUT').catch(() => {});
+      this.iframeAuthState = { initialized: true, isAuthenticated: false, isLocked: true };
+      this.emitStatus('auth_required', { action: 'logout' }, this.iframeAuthState);
+      return this.iframeAuthState;
+    }
     return this.runAction('logout', () => this.core.logout());
   }
 
   async getPublicKey(_options?: NostrOperationOptions): Promise<string> {
+    if (this.iframeMode) return this.requestRpc<string>('GET_PUBLIC_KEY');
     return this.runNostrOperation('getPublicKey', () => this.nostrApi.getPublicKey());
   }
 
@@ -303,49 +570,35 @@ export class NostrPassLiteEmbassy {
     event: UnsignedEvent,
     _options?: NostrOperationOptions
   ): Promise<SignedEvent> {
+    if (this.iframeMode) return this.requestRpc<SignedEvent>('SIGN_EVENT', { event });
     return this.runNostrOperation('signEvent', () =>
       this.nostrApi.signEvent(event)
     ) as Promise<SignedEvent>;
   }
 
-  async nip04Encrypt(
-    pubkey: string,
-    plaintext: string,
-    _options?: NostrOperationOptions
-  ): Promise<string> {
-    return this.runNostrOperation('nip04.encrypt', () =>
-      this.nostrApi.nip04.encrypt(pubkey, plaintext)
-    );
+  async signData(message: string, _options?: NostrOperationOptions): Promise<string> {
+    if (this.iframeMode) return this.requestRpc<string>('SIGN_DATA', { message });
+    return this.runNostrOperation('signData', () => this.nostrApi.signData(message));
   }
 
-  async nip04Decrypt(
-    pubkey: string,
-    ciphertext: string,
-    _options?: NostrOperationOptions
-  ): Promise<string> {
-    return this.runNostrOperation('nip04.decrypt', () =>
-      this.nostrApi.nip04.decrypt(pubkey, ciphertext)
-    );
+  async nip04Encrypt(pubkey: string, plaintext: string, _options?: NostrOperationOptions): Promise<string> {
+    if (this.iframeMode) return this.requestRpc<string>('NIP04_ENCRYPT', { pubkey, plaintext });
+    return this.runNostrOperation('nip04.encrypt', () => this.nostrApi.nip04.encrypt(pubkey, plaintext));
   }
 
-  async nip44Encrypt(
-    pubkey: string,
-    plaintext: string,
-    _options?: NostrOperationOptions
-  ): Promise<string> {
-    return this.runNostrOperation('nip44.encrypt', () =>
-      this.nostrApi.nip44.encrypt(pubkey, plaintext)
-    );
+  async nip04Decrypt(pubkey: string, ciphertext: string, _options?: NostrOperationOptions): Promise<string> {
+    if (this.iframeMode) return this.requestRpc<string>('NIP04_DECRYPT', { pubkey, ciphertext });
+    return this.runNostrOperation('nip04.decrypt', () => this.nostrApi.nip04.decrypt(pubkey, ciphertext));
   }
 
-  async nip44Decrypt(
-    pubkey: string,
-    ciphertext: string,
-    _options?: NostrOperationOptions
-  ): Promise<string> {
-    return this.runNostrOperation('nip44.decrypt', () =>
-      this.nostrApi.nip44.decrypt(pubkey, ciphertext)
-    );
+  async nip44Encrypt(pubkey: string, plaintext: string, _options?: NostrOperationOptions): Promise<string> {
+    if (this.iframeMode) return this.requestRpc<string>('NIP44_ENCRYPT', { pubkey, plaintext });
+    return this.runNostrOperation('nip44.encrypt', () => this.nostrApi.nip44.encrypt(pubkey, plaintext));
+  }
+
+  async nip44Decrypt(pubkey: string, ciphertext: string, _options?: NostrOperationOptions): Promise<string> {
+    if (this.iframeMode) return this.requestRpc<string>('NIP44_DECRYPT', { pubkey, ciphertext });
+    return this.runNostrOperation('nip44.decrypt', () => this.nostrApi.nip44.decrypt(pubkey, ciphertext));
   }
 
   installNostrProvider(options: { overrideExisting?: boolean } = {}): boolean {
@@ -354,7 +607,7 @@ export class NostrPassLiteEmbassy {
     }
 
     const overrideExisting = options.overrideExisting ?? false;
-    const windowWithNostr = window as Window & { nostr?: LiteNostrProvider };
+    const windowWithNostr = window as unknown as { nostr?: LiteNostrProvider };
 
     if (windowWithNostr.nostr && !overrideExisting) {
       this.debug('Provider already exists, install skipped');
@@ -378,7 +631,7 @@ export class NostrPassLiteEmbassy {
       return;
     }
 
-    const windowWithNostr = window as Window & { nostr?: LiteNostrProvider };
+    const windowWithNostr = window as unknown as { nostr?: LiteNostrProvider };
     if (this.previousProvider === undefined) {
       delete windowWithNostr.nostr;
     } else {
@@ -399,7 +652,7 @@ export class NostrPassLiteEmbassy {
     button.className = ['nostrpass-lite-btn', config.className ?? ''].join(' ').trim();
 
     const applyLabel = () => {
-      const auth = this.core.getAuthState();
+      const auth = this.getAuthState();
       if (!auth.isAuthenticated) {
         button.dataset.auth = 'signed-out';
         button.textContent = config.labelSignedOut ?? 'Use NostrPass';
@@ -424,9 +677,14 @@ export class NostrPassLiteEmbassy {
     }) as EventListener;
 
     button.addEventListener('click', () => {
-      const auth = this.core.getAuthState();
+      const auth = this.getAuthState();
       if (config.onClick) {
         void config.onClick(this, auth);
+      } else if (this.iframeMode && (!auth.isAuthenticated || auth.isLocked)) {
+        this.showIframeModal();
+        if (this.iframe?.contentWindow && this.activeVaultOrigin) {
+          void this.requestRpc('FOCUS_AUTH').catch(() => {});
+        }
       } else if (!auth.isAuthenticated) {
         this.emitStatus('auth_required', { source: 'button' }, auth);
       } else if (auth.isLocked) {
