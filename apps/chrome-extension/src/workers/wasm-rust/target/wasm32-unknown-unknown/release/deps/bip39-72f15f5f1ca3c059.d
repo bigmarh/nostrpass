@@ -1,0 +1,11 @@
+/Users/marh/apps/nostrpass.com/apps/vault/src/workers/wasm-rust/target/wasm32-unknown-unknown/release/deps/libbip39-72f15f5f1ca3c059.rmeta: /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/lib.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/internal_macros.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/mod.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/english.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/pbkdf2.rs
+
+/Users/marh/apps/nostrpass.com/apps/vault/src/workers/wasm-rust/target/wasm32-unknown-unknown/release/deps/libbip39-72f15f5f1ca3c059.rlib: /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/lib.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/internal_macros.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/mod.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/english.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/pbkdf2.rs
+
+/Users/marh/apps/nostrpass.com/apps/vault/src/workers/wasm-rust/target/wasm32-unknown-unknown/release/deps/bip39-72f15f5f1ca3c059.d: /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/lib.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/internal_macros.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/mod.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/english.rs /Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/pbkdf2.rs
+
+/Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/lib.rs:
+/Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/internal_macros.rs:
+/Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/mod.rs:
+/Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/language/english.rs:
+/Users/marh/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bip39-2.2.0/src/pbkdf2.rs:
