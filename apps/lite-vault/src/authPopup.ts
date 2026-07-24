@@ -40,12 +40,24 @@ function setStatus(text: string, showButton: boolean): void {
   if (button) button.style.display = showButton ? 'inline-block' : 'none';
 }
 
+// Watchdog: on iOS Safari, signInWithPopup without a valid gesture can hang
+// without ever throwing (no popup, no auth/popup-blocked). If an attempt
+// doesn't settle in time, reset the UI so the user can tap to retry.
+const ATTEMPT_WATCHDOG_MS = 20_000;
+let attemptInFlight = false;
+
 async function attempt(): Promise<void> {
+  if (attemptInFlight) return;
   if (!firebaseConfig.apiKey || !firebaseConfig.authDomain || !firebaseConfig.projectId) {
     setStatus('Google Sign-In is not configured for this vault.', false);
     send({ type: GOOGLE_AUTH_MESSAGE_TYPE, ok: false, error: 'Google Sign-In unavailable.' });
     return;
   }
+  attemptInFlight = true;
+  const watchdog = setTimeout(() => {
+    attemptInFlight = false;
+    setStatus('Sign-in is taking too long. Tap continue to retry.', true);
+  }, ATTEMPT_WATCHDOG_MS);
   try {
     setStatus('Opening Google sign-in…', false);
     const existing = getApps();
@@ -58,6 +70,7 @@ async function attempt(): Promise<void> {
     provider.addScope('email');
     provider.addScope('profile');
     const result = await signInWithPopup(auth, provider);
+    clearTimeout(watchdog);
     send({
       type: GOOGLE_AUTH_MESSAGE_TYPE,
       ok: true,
@@ -70,13 +83,14 @@ async function attempt(): Promise<void> {
     setStatus('Signed in — you can close this window.', false);
     window.close();
   } catch (error) {
+    clearTimeout(watchdog);
+    attemptInFlight = false;
     const code =
       typeof error === 'object' && error && 'code' in error
         ? String((error as { code?: unknown }).code ?? '')
         : '';
     if (code === 'auth/popup-blocked') {
-      // No user gesture yet — show the button so the tap itself opens the popup.
-      setStatus('Tap continue to sign in with Google.', true);
+      setStatus('Popup blocked — tap continue to sign in.', true);
       return;
     }
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
@@ -86,9 +100,13 @@ async function attempt(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     setStatus(`Sign-in failed: ${message}`, true);
     send({ type: GOOGLE_AUTH_MESSAGE_TYPE, ok: false, error: message });
+  } finally {
+    attemptInFlight = false;
   }
 }
 
 document.getElementById('continue')?.addEventListener('click', () => void attempt());
-// Try immediately — on browsers that require a gesture this falls back to the button.
-void attempt();
+// No auto-attempt: WebKit only allows the Google popup from a real user
+// gesture, and a gestureless signInWithPopup can hang forever on iOS.
+// The button is visible from the start — one tap opens Google directly.
+setStatus('Tap continue to sign in with Google.', true);
