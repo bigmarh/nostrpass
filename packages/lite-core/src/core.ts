@@ -264,30 +264,25 @@ export class LiteCore {
       storagePublicKey: loginPayload.storagePublicKey,
     });
 
-    // Cache-first vault fetch: return immediately if cached, refresh in background.
-    const cachedVault = await this.storage.get<{ content: string; createdAt: number; pubkey: string }>(
-      this.vaultCacheKey(loginPayload.publicKey)
-    );
+    // Relay-first vault fetch (cache only as offline fallback) — same
+    // rationale as fetchLoginRecord: a stale or phantom cached vault must not
+    // shadow the network's real record, or the PIN check flaps.
     const vaultFetchFilter = {
       kinds: [KIND],
       authors: [loginPayload.storagePublicKey],
       dTags: [loginPayload.vaultDTag],
       limit: 20,
     };
-    const vaultEvent = cachedVault
-      ? cachedVault
-      : await this.relayClient.getLatest(vaultFetchFilter);
-    if (cachedVault) {
-      // Background refresh
-      this.relayClient
-        .getLatest(vaultFetchFilter)
-        .then((fresh) => {
-          if (fresh)
-            this.storage
-              .set(this.vaultCacheKey(loginPayload.publicKey), fresh)
-              .catch(() => {});
-        })
+    let vaultEvent = await this.relayClient.getLatest(vaultFetchFilter).catch(() => null);
+    if (vaultEvent) {
+      await this.storage
+        .set(this.vaultCacheKey(loginPayload.publicKey), vaultEvent)
         .catch(() => {});
+    } else {
+      vaultEvent = await this.storage.get<{ content: string; createdAt: number; pubkey: string }>(
+        this.vaultCacheKey(loginPayload.publicKey)
+      );
+      if (vaultEvent) this.logStep('login:vaultRecordCacheFallback');
     }
 
     if (!vaultEvent) {
@@ -688,7 +683,12 @@ export class LiteCore {
       hexToBytes(storagePrivateKey)
     );
 
-    const vaultPublishes = await this.relayClient.publish(signedVaultEvent);
+    // Verified publish: count only relays where the event reads back after the
+    // write. Bare ACK counting once let an enrollment "succeed" on relays that
+    // silently drop kind-30078 data, leaving the new vault generation only in
+    // the local cache — and the account in a split-brain PIN state.
+    const vaultPublishes = await (this.relayClient.publishVerified?.(signedVaultEvent) ??
+      this.relayClient.publish(signedVaultEvent));
     if (!vaultPublishes.length && !this.allowOffline) {
       this.logStep('enroll:vaultPublishFailed');
       throw new Error('Failed to publish vault event to relays');
@@ -736,7 +736,8 @@ export class LiteCore {
     };
     const signedLoginEvent = finalizeEvent(loginEventTemplate, loginSigner);
 
-    const loginPublishes = await this.relayClient.publish(signedLoginEvent);
+    const loginPublishes = await (this.relayClient.publishVerified?.(signedLoginEvent) ??
+      this.relayClient.publish(signedLoginEvent));
     if (!loginPublishes.length && !this.allowOffline) {
       this.logStep('enroll:loginPublishFailed');
       throw new Error('Failed to publish login event to relays');
@@ -793,31 +794,30 @@ export class LiteCore {
   ): Promise<{ content: string; createdAt: number; pubkey: string } | null> {
     this.logStep('loginRecord:fetch:start', { loginDTag });
 
-    // Cache-first: return immediately if we have a local copy, refresh in background.
+    // Relay-first: the network is the source of truth for a multi-device
+    // account. Serving a cached record here once let a locally-cached vault
+    // generation whose relay publish had failed shadow the network's real
+    // record, producing nondeterministic "Invalid PIN" failures. The cache is
+    // only a fallback for when every relay is unreachable (offline login).
+    const fromRelay = await this.relayClient
+      .getLatest({ kinds: [KIND], dTags: [loginDTag], limit: 20 })
+      .catch(() => null);
+    if (fromRelay) {
+      this.logStep('loginRecord:fetch:relayHit', { hit: true });
+      await this.storage.set(this.loginCacheKey(loginDTag), fromRelay).catch(() => {});
+      return fromRelay;
+    }
+
     const cached = await this.storage.get<{ content: string; createdAt: number; pubkey: string }>(
       this.loginCacheKey(loginDTag)
     );
     if (cached) {
-      this.logStep('loginRecord:fetch:cacheHit');
-      // Background refresh — don't block login on this.
-      this.relayClient
-        .getLatest({ kinds: [KIND], dTags: [loginDTag], limit: 20 })
-        .then((fresh) => {
-          if (fresh) this.storage.set(this.loginCacheKey(loginDTag), fresh).catch(() => {});
-        })
-        .catch(() => {});
+      this.logStep('loginRecord:fetch:cacheFallback');
       return cached;
     }
 
-    // No cache — must fetch from relay (first login on this device).
-    const fromRelay = await this.relayClient.getLatest({
-      kinds: [KIND],
-      dTags: [loginDTag],
-      limit: 20,
-    });
-    this.logStep('loginRecord:fetch:relayHit', { hit: Boolean(fromRelay) });
-    if (fromRelay) await this.storage.set(this.loginCacheKey(loginDTag), fromRelay);
-    return fromRelay;
+    this.logStep('loginRecord:fetch:relayHit', { hit: false });
+    return null;
   }
 
   private async cacheLoginAndVault(
@@ -1010,7 +1010,8 @@ export class LiteCore {
     };
 
     const signed = finalizeEvent(eventTemplate, hexToBytes(this.session!.storagePrivateKey));
-    const published = await this.relayClient.publish(signed);
+    const published = await (this.relayClient.publishVerified?.(signed) ??
+      this.relayClient.publish(signed));
     if (!published.length && !this.allowOffline) {
       this.logStep('vault:persist:publishFailed');
       throw new Error('Failed to publish updated vault event to relays');

@@ -21,8 +21,11 @@ export class NostrRelayClient implements RelayClient {
     };
 
     try {
-      // Query each relay individually and race — return as soon as any relay responds.
-      // maxWait tells querySync to resolve after the first EOSE + up to maxWait ms.
+      // Query every relay (bounded by maxWait per relay) and pick the NEWEST
+      // event across all of them. Racing to the first responder is
+      // nondeterministic when relays hold different generations of a
+      // replaceable record — the fastest relay wins, not the newest record —
+      // which surfaces as auth flapping (e.g. "Invalid PIN" on stale vaults).
       const perRelay = this.relays.map((relay) =>
         pool
           .querySync([relay], filter, { maxWait: 1500 })
@@ -34,22 +37,10 @@ export class NostrRelayClient implements RelayClient {
           .catch(() => null)
       );
 
-      // Resolve on first non-null result; fall back to null if all relays fail.
-      const result = await new Promise<NostrEvent | null>((resolve) => {
-        let settled = 0;
-        let resolved = false;
-        for (const p of perRelay) {
-          p.then((event) => {
-            if (event && !resolved) {
-              resolved = true;
-              resolve(event);
-            }
-            if (++settled === perRelay.length && !resolved) {
-              resolve(null);
-            }
-          });
-        }
-      });
+      const results = await Promise.all(perRelay);
+      const result = results
+        .filter((e): e is NostrEvent => e !== null)
+        .sort((a, b) => b.created_at - a.created_at)[0];
 
       if (!result) return null;
       return {
@@ -88,6 +79,32 @@ export class NostrRelayClient implements RelayClient {
       return successes;
     } finally {
       pool.close(this.relays);
+    }
+  }
+
+  /**
+   * Publish, then read the event back from each relay that ACKed the write.
+   * Returns only relays where the event is verifiably stored. Public relays
+   * routinely ACK kinds they silently drop (kind 30078 app data especially),
+   * which let "durable" enrollments vanish from the network.
+   */
+  async publishVerified(event: NostrEvent): Promise<string[]> {
+    const acked = await this.publish(event);
+    if (acked.length === 0) return [];
+
+    const pool = new SimplePool();
+    try {
+      const verified = await Promise.all(
+        acked.map((relay) =>
+          pool
+            .querySync([relay], { ids: [event.id] }, { maxWait: 2000 })
+            .then((events) => (events.some((e) => e.id === event.id) ? relay : null))
+            .catch(() => null)
+        )
+      );
+      return verified.filter((r): r is string => r !== null);
+    } finally {
+      pool.close(acked);
     }
   }
 }

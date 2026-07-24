@@ -12,7 +12,17 @@ import { PinScreen } from './screens/PinScreen';
 import { PermissionScreen } from './screens/PermissionScreen';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const relays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'];
+// Note: of the public relays, only nos.lol reliably retains kind-30078 app
+// data — damus and nostr.band ACK writes but drop them. The bigsnap relays are
+// operator-controlled and store 30078 durably, so login/vault records survive
+// even if the public relays purge. Reads pick the newest record across all.
+const relays = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.nostr.band',
+  'wss://r1.bigsnap.ai',
+  'wss://r2.bigsnap.ai',
+];
 const MIN_RELAY_ACKS = 1;
 const RPC_CHANNEL = 'nostrpass-lite-rpc-v1';
 

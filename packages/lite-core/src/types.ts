@@ -139,6 +139,17 @@ export interface RelayClient {
     limit?: number;
   }): Promise<{ content: string; createdAt: number; pubkey: string } | null>;
   publish(event: UnsignedEvent & { pubkey: string; id: string; sig: string }): Promise<string[]>;
+  /**
+   * Publish and then read the event back from each accepting relay, returning
+   * only relays where the event is verifiably stored. Some public relays ACK
+   * writes for kinds they don't retain (e.g. 30078 app data), which lets a
+   * "durable" enrollment silently vanish — read-back verification catches
+   * that. Optional so mock/lightweight clients can omit it; callers fall back
+   * to publish().
+   */
+  publishVerified?(
+    event: UnsignedEvent & { pubkey: string; id: string; sig: string }
+  ): Promise<string[]>;
 }
 
 /**
