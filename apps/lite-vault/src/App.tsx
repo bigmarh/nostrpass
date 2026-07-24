@@ -136,6 +136,13 @@ async function signInWithGooglePopup(): Promise<LiteGoogleUser> {
 
 const GOOGLE_AUTH_MESSAGE_TYPE = 'nostrpass-lite-google-auth';
 const GOOGLE_AUTH_TIMEOUT_MS = 3 * 60_000;
+// Top-level Google auth page. Hosted on the Firebase project's default
+// hosting site so authDomain === page host and the redirect flow completes
+// entirely first-party (see lite-auth.html for the full rationale).
+// Overridable for dev via VITE_LITE_AUTH_URL.
+const GOOGLE_AUTH_PAGE_URL =
+  (import.meta.env.VITE_LITE_AUTH_URL as string | undefined) ??
+  'https://nostrpass.web.app/lite-auth';
 
 /**
  * Google sign-in via a top-level popup on this same origin (auth.html).
@@ -148,8 +155,9 @@ const GOOGLE_AUTH_TIMEOUT_MS = 3 * 60_000;
  */
 function signInWithGoogleTopLevel(): Promise<LiteGoogleUser> {
   return new Promise<LiteGoogleUser>((resolve, reject) => {
-    const authUrl = new URL('auth.html', window.location.href).toString();
-    const popup = window.open(authUrl, 'nostrpass-google-auth', 'width=480,height=640,popup=yes');
+    const authUrl = new URL(GOOGLE_AUTH_PAGE_URL, window.location.href);
+    const authOrigin = authUrl.origin;
+    const popup = window.open(authUrl.toString(), 'nostrpass-google-auth', 'width=480,height=640,popup=yes');
     if (!popup) {
       reject(new Error('Popup blocked. Please allow popups for this site.'));
       return;
@@ -182,7 +190,7 @@ function signInWithGoogleTopLevel(): Promise<LiteGoogleUser> {
     }, 500);
 
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
+      if (event.origin !== authOrigin) return;
       const data = event.data as {
         type?: string;
         ok?: boolean;

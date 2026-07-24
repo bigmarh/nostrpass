@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NostrPass — Google Sign-In</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        text-align: center;
+        padding: 32px 24px;
+        max-width: 320px;
+      }
+      .logo {
+        font-size: 20px;
+        font-weight: 700;
+        margin-bottom: 12px;
+      }
+      #status {
+        font-size: 14px;
+        color: #94a3b8;
+        margin-bottom: 20px;
+        min-height: 20px;
+      }
+      #continue {
+        display: none;
+        background: #f8fafc;
+        color: #0f172a;
+        border: none;
+        border-radius: 8px;
+        padding: 12px 20px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">NostrPass</div>
+      <div id="status">Starting Google sign-in…</div>
+      <button id="continue" type="button">Continue with Google</button>
+    </div>
+    <script type="module">
+      /**
+       * Top-level Google auth page for NostrPass Lite, using the REDIRECT flow.
+       *
+       * Why this page exists: the lite vault runs in a cross-origin iframe
+       * (cdn.nostrpass.com inside the host app). Firebase signInWithPopup is
+       * unreliable there — iOS Safari partitions iframe storage away from the
+       * auth domain, and the SDK's internal async work expires the tap gesture
+       * so the popup is silently blocked. This page is opened as a top-level
+       * window, served by Firebase Hosting on the SAME project as the auth
+       * handlers (/__/auth/* is auto-served on this host), so authDomain ===
+       * location.host and signInWithRedirect completes entirely first-party —
+       * no popups, no partitioned storage, works on iOS.
+       *
+       * The result goes back to the vault iframe via window.opener.postMessage
+       * (direct window references are not storage-partitioned).
+       */
+      import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+      import {
+        getAuth,
+        GoogleAuthProvider,
+        signInWithRedirect,
+        getRedirectResult,
+      } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+
+      const MESSAGE_TYPE = 'nostrpass-lite-google-auth';
+      const VAULT_ORIGIN = 'https://cdn.nostrpass.com';
+      const PENDING_KEY = 'nostrpass-lite-auth-pending';
+
+      const firebaseConfig = {
+        apiKey: 'AIzaSyAzRLcJL_ZFUqyOO8w_IkemJYrcsejuMHE',
+        // Same-origin auth handlers: Firebase Hosting serves /__/auth/* on
+        // every hosting domain of the project, so use this page's own host.
+        authDomain: window.location.host,
+        projectId: 'nostrpass',
+      };
+
+      const statusEl = document.getElementById('status');
+      const buttonEl = document.getElementById('continue');
+      function setStatus(text, showButton) {
+        statusEl.textContent = text;
+        buttonEl.style.display = showButton ? 'inline-block' : 'none';
+      }
+
+      function send(message) {
+        // Only ever hand the result to the vault's origin.
+        window.opener?.postMessage(message, VAULT_ORIGIN);
+      }
+
+      const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+
+      function startRedirect() {
+        sessionStorage.setItem(PENDING_KEY, '1');
+        const provider = new GoogleAuthProvider();
+        provider.addScope('email');
+        provider.addScope('profile');
+        setStatus('Redirecting to Google…', false);
+        signInWithRedirect(auth, provider).catch((error) => {
+          sessionStorage.removeItem(PENDING_KEY);
+          setStatus(`Sign-in failed: ${error?.message ?? error}`, true);
+        });
+      }
+
+      async function main() {
+        if (!window.opener) {
+          setStatus('This window must be opened from a NostrPass sign-in.', false);
+          return;
+        }
+
+        const returning = sessionStorage.getItem(PENDING_KEY) === '1';
+        try {
+          const result = await getRedirectResult(auth);
+          if (result?.user) {
+            sessionStorage.removeItem(PENDING_KEY);
+            send({
+              type: MESSAGE_TYPE,
+              ok: true,
+              user: {
+                uid: result.user.uid,
+                email: result.user.email,
+                displayName: result.user.displayName,
+              },
+            });
+            setStatus('Signed in — you can close this window.', false);
+            window.close();
+            return;
+          }
+        } catch (error) {
+          sessionStorage.removeItem(PENDING_KEY);
+          setStatus(`Sign-in failed: ${error?.message ?? error}`, true);
+          send({ type: MESSAGE_TYPE, ok: false, error: String(error?.message ?? error) });
+          return;
+        }
+
+        if (returning) {
+          // Came back from Google without a result — cancelled or failed.
+          sessionStorage.removeItem(PENDING_KEY);
+          setStatus('Sign-in was not completed. Tap continue to retry.', true);
+          return;
+        }
+
+        // First load: same-window redirect needs no user gesture — go now.
+        startRedirect();
+      }
+
+      buttonEl.addEventListener('click', startRedirect);
+      void main();
+    </script>
+  </body>
+</html>
