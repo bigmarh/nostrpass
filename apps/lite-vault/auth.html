@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NostrPass — Google Sign-In</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        text-align: center;
+        padding: 32px 24px;
+        max-width: 320px;
+      }
+      .logo {
+        font-size: 20px;
+        font-weight: 700;
+        margin-bottom: 12px;
+      }
+      #status {
+        font-size: 14px;
+        color: #94a3b8;
+        margin-bottom: 20px;
+        min-height: 20px;
+      }
+      #continue {
+        display: none;
+        background: #f8fafc;
+        color: #0f172a;
+        border: none;
+        border-radius: 8px;
+        padding: 12px 20px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">NostrPass</div>
+      <div id="status">Preparing Google sign-in…</div>
+      <button id="continue" type="button">Continue with Google</button>
+    </div>
+    <script type="module" src="/src/authPopup.ts"></script>
+  </body>
+</html>

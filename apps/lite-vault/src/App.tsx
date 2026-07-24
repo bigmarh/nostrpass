@@ -134,6 +134,84 @@ async function signInWithGooglePopup(): Promise<LiteGoogleUser> {
   return { uid: result.user.uid, email: result.user.email, displayName: result.user.displayName };
 }
 
+const GOOGLE_AUTH_MESSAGE_TYPE = 'nostrpass-lite-google-auth';
+const GOOGLE_AUTH_TIMEOUT_MS = 3 * 60_000;
+
+/**
+ * Google sign-in via a top-level popup on this same origin (auth.html).
+ * Used when the vault runs inside a cross-origin iframe: Firebase's popup
+ * handshake needs first-party storage with the auth domain, which WebKit
+ * (iOS Safari) denies to third-party iframes — signInWithPopup never resolves
+ * and the UI spins forever. The top-level popup has first-party storage and
+ * hands the result back through window.opener.postMessage, which is not
+ * subject to storage partitioning.
+ */
+function signInWithGoogleTopLevel(): Promise<LiteGoogleUser> {
+  return new Promise<LiteGoogleUser>((resolve, reject) => {
+    const authUrl = new URL('auth.html', window.location.href).toString();
+    const popup = window.open(authUrl, 'nostrpass-google-auth', 'width=480,height=640,popup=yes');
+    if (!popup) {
+      reject(new Error('Popup blocked. Please allow popups for this site.'));
+      return;
+    }
+
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      clearInterval(closePollId);
+      window.removeEventListener('message', onMessage);
+      fn();
+    };
+
+    const timeoutId = setTimeout(
+      () => finish(() => reject(new Error('Google sign-in timed out.'))),
+      GOOGLE_AUTH_TIMEOUT_MS
+    );
+
+    // If the user closes the popup, reject — but give a short grace period so
+    // a success message posted just before close still wins the race.
+    const closePollId = setInterval(() => {
+      if (popup.closed) {
+        setTimeout(
+          () => finish(() => reject(new Error('Google sign-in was cancelled.'))),
+          400
+        );
+      }
+    }, 500);
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as {
+        type?: string;
+        ok?: boolean;
+        user?: LiteGoogleUser;
+        error?: string;
+      };
+      if (data?.type !== GOOGLE_AUTH_MESSAGE_TYPE) return;
+      try {
+        popup.close();
+      } catch {
+        /* already closed */
+      }
+      if (data.ok && data.user) {
+        const user = data.user;
+        finish(() => resolve(user));
+      } else {
+        finish(() => reject(new Error(data.error || 'Google sign-in failed.')));
+      }
+    };
+    window.addEventListener('message', onMessage);
+  });
+}
+
+/** Iframe-aware Google sign-in: direct popup when top-level, auth.html popup when embedded. */
+async function googleSignIn(): Promise<LiteGoogleUser> {
+  const embedded = window.self !== window.top;
+  return embedded ? signInWithGoogleTopLevel() : signInWithGooglePopup();
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function formatError(error: unknown): string {
   if (error instanceof Error) {
@@ -365,7 +443,7 @@ export function App() {
     setFormError('');
     setIsBusy(true);
     try {
-      const user = await signInWithGooglePopup();
+      const user = await googleSignIn();
       setSelectedGoogleUser(user);
       const accountLabel = user.email ?? user.displayName ?? `${user.uid.slice(0, 10)}...`;
       setGoogleState(`Google account: ${accountLabel}`);

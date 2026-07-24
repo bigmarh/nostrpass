@@ -75,6 +75,12 @@ gsutil -h "Cache-Control:no-cache, must-revalidate" \
        -h "Content-Type:text/html" \
     cp "${DIST_DIR}/index.html" "${BUCKET_URL}/index.html"
 
+# Upload auth.html — top-level Google auth popup page, no cache
+echo -e "${YELLOW}📤 Uploading auth.html (no-cache)...${NC}"
+gsutil -h "Cache-Control:no-cache, must-revalidate" \
+       -h "Content-Type:text/html" \
+    cp "${DIST_DIR}/auth.html" "${BUCKET_URL}/auth.html"
+
 echo ""
 echo -e "${GREEN}✅ Lite Vault Deployment Complete!${NC}"
 echo ""
